@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from .auth import AuthenticatedUser
@@ -135,6 +136,23 @@ async def public_config(user: AuthenticatedUser):
             "semanticSearch": bool(settings.embedding_key or settings.gemini_key),
         },
     }
+
+
+@app.get("/v1/firebase-config")
+async def firebase_config():
+    """
+    Serve Firebase client configuration to frontend.
+    This prevents exposing Firebase API keys in frontend code.
+    """
+    return JSONResponse(content={
+        "apiKey": settings.firebase_api_key,
+        "authDomain": settings.firebase_auth_domain or f"{settings.firebase_project_id}.firebaseapp.com",
+        "databaseURL": settings.database_url,
+        "projectId": settings.firebase_project_id,
+        "storageBucket": settings.firebase_storage_bucket or f"{settings.firebase_project_id}.firebasestorage.app",
+        "messagingSenderId": settings.firebase_messaging_sender_id,
+        "appId": settings.firebase_app_id
+    })
 
 
 @app.post("/v1/ai/generate", dependencies=[Depends(rate_limit)])

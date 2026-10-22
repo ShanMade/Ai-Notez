@@ -1,14 +1,51 @@
 
-    // Firebase web config is public client configuration. Access is protected by Firebase Auth + Security Rules.
-    const firebaseConfig = {
-      apiKey: "AIzaSyDKPWj_3wOxhffuzMx5DQqln2d0WmH038A",
-      authDomain: "ai-notez.firebaseapp.com",
-      databaseURL: "https://ai-notez-default-rtdb.firebaseio.com",
-      projectId: "ai-notez",
-      storageBucket: "ai-notez.firebasestorage.app",
-      messagingSenderId: "275128405663",
-      appId: "1:275128405663:web:ee5864b447e839c2b35caa"
+    // Firebase web config - fetched from backend for security
+    // This prevents API key exposure in frontend code
+    let firebaseConfig = null;
+    
+    // Default fallback config (should be overridden by backend response)
+    const DEFAULT_FIREBASE_CONFIG = {
+      apiKey: "YOUR_FIREBASE_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.firebasestorage.app",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
     };
+    
+    // Fetch Firebase config from backend
+    async function fetchFirebaseConfig() {
+      // Check if we already have the config
+      if (firebaseConfig) return firebaseConfig;
+      
+      // Try to fetch from backend API
+      try {
+        // Get backend base URL from meta tag or use default
+        const backendUrl = document.querySelector('meta[name="notez-ai-api-base-url"]')?.content || '';
+        if (backendUrl) {
+          const response = await fetch(`${backendUrl}/v1/firebase-config`, {
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (response.ok) {
+            firebaseConfig = await response.json();
+            console.log('Firebase config loaded from backend');
+            return firebaseConfig;
+          }
+        }
+      } catch (error) {
+        console.warn('Could not fetch Firebase config from backend:', error);
+      }
+      
+      // Fallback to default (will need manual configuration)
+      console.warn('Using default Firebase config. Please configure backend to serve Firebase config.');
+      firebaseConfig = DEFAULT_FIREBASE_CONFIG;
+      return firebaseConfig;
+    }
 
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -511,9 +548,14 @@
         } catch (error) { console.warn('Theme saved locally; cloud preference could not sync:', error); }
       }
     }
-    function ensureFirebase() {
+    async function ensureFirebase() {
       if (dbSdk) return Promise.resolve(dbSdk);
       if (!firebasePromise) {
+        // Ensure firebaseConfig is loaded
+        if (!firebaseConfig) {
+          await fetchFirebaseConfig();
+        }
+        
         firebasePromise = Promise.all([
           import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
           import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js'),

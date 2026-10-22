@@ -20,6 +20,11 @@ def _integer(name: str, default: int, minimum: int, maximum: int) -> int:
 class Settings:
     database_url: str = os.getenv("FIREBASE_DATABASE_URL", "")
     firebase_project_id: str = os.getenv("FIREBASE_PROJECT_ID", "ai-notez")
+    firebase_api_key: str = os.getenv("FIREBASE_API_KEY", "")
+    firebase_auth_domain: str = os.getenv("FIREBASE_AUTH_DOMAIN", "")
+    firebase_storage_bucket: str = os.getenv("FIREBASE_STORAGE_BUCKET", "")
+    firebase_messaging_sender_id: str = os.getenv("FIREBASE_MESSAGING_SENDER_ID", "")
+    firebase_app_id: str = os.getenv("FIREBASE_APP_ID", "")
     data_dir: Path = Path(
         os.getenv("NOTEZ_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
     ).expanduser()
