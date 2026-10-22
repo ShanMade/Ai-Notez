@@ -19,8 +19,10 @@ Whether you're managing lecture notes, PDF documents, transcripts, or research m
 - 📁 Manage notes in folders and collections
 - 🔍 Search and browse your knowledge base instantly
 - 📚 Read and annotate PDFs directly in the app
-- 🎙️ Record lectures and transcribe audio
+- 🎙️ Record lectures with **real-time transcription** (Gemini 2.5 Flash)
 - 🤖 Leverage AI for summaries, study guidance, and smart insights
+- 👤 **Voice profiles** for speaker identification and accuracy
+- 📝 **Live notes generation** alongside transcription
 - 🔄 Sync seamlessly across devices with Firebase
 - 📱 Work offline with service worker support
 
@@ -43,7 +45,9 @@ This fragmentation **breaks focus** and makes **effective review difficult**. No
 | 📱 No offline access | ✅ Full offline support with cloud sync |
 | 🤖 Limited AI assistance | ✅ Built-in AI for summaries, insights, and study guidance |
 | 📚 PDFs hard to manage | ✅ Native PDF reader with annotation support |
-| 🎙️ Audio notes disconnected | ✅ Integrated recording and transcription |
+| 🎙️ Audio notes disconnected | ✅ **Real-time transcription** with speaker identification |
+| 👤 No voice recognition | ✅ **Voice profiles** for accurate speaker labeling |
+| 📝 Manual note-taking | ✅ **Live AI notes** generated automatically |
 
 ---
 
@@ -82,7 +86,11 @@ This fragmentation **breaks focus** and makes **effective review difficult**. No
 - **Smart Summaries**: Get AI-generated summaries of your notes
 - **Study Guidance**: AI-powered study recommendations
 - **Semantic Search**: Find notes based on meaning, not just keywords
-- **Transcription**: Convert audio recordings to text
+- **Real-Time Transcription**: Live speech-to-text with <2s latency using **Gemini 2.5 Flash**
+- **Voice Profiles**: Speaker identification with custom profiles
+- **Live AI Notes**: Automatic note generation alongside transcription
+- **Owner Voice Tagging**: Automatic labeling of your voice as `[Owner]`
+- **Context-Aware Transcription**: Improved accuracy with subject context
 - **Note Insights**: AI analysis of your study patterns
 
 ### ☁️ **Cloud & Sync**
@@ -97,6 +105,17 @@ This fragmentation **breaks focus** and makes **effective review difficult**. No
 - **PIN Lock**: Protect your notes with a PIN
 - **PWA Support**: Install as a desktop/mobile app
 - **Keyboard Shortcuts**: Speed up your workflow
+
+### 🎤 **Voice & Transcription Features**
+- **Real-Time Recording**: Live audio capture with immediate transcription
+- **Voice Profiles**: Create and manage speaker profiles for accurate identification
+- **Owner Voice Setup**: Configure your voice for automatic `[Owner]` tagging
+- **Speaker Diarization**: Automatic Voice 1, Voice 2 labeling
+- **Live Notes Generation**: AI creates structured notes alongside transcription
+- **Context Integration**: Subject-aware transcription for improved accuracy
+- **Voice Calibration**: Record samples to improve recognition accuracy
+- **Recording Controls**: Start, pause, resume, stop with one-click
+- **Transcript History**: Full transcript saved as markdown note
 
 ---
 
