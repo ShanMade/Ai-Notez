@@ -1,6 +1,6 @@
 # <img src="icon-512.png" alt="Notez Logo" width="100" height="100" /> Notez
 
-> **Your calm, focused study space for notes, PDFs, and deep learning**
+
 
 [![Firebase Hosting](https://img.shields.io/badge/Firebase-Hosting-ffca28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/products/hosting)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
