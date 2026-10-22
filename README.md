@@ -115,7 +115,9 @@ firebase deploy
 
 ## AI provider configuration and security
 
-The browser supports Gemini and Groq BYOK. The optional local FastAPI service adds server-managed provider credentials and semantic retrieval without changing the existing Realtime Database source of truth.
+The hosted app uses the FastAPI backend at `https://ai-notez.fastapicloud.dev` for AI requests first; users do not need to enter provider API keys in the app. Configure `AI_GEMINI_API_KEY` or `AI_GROQ_API_KEY` as a secret in FastAPI Cloud's backend environment variables, and set `NOTEZ_CORS_ORIGINS` to the exact hosted frontend origin (for example, `https://ai-notez.web.app`). The browser sends authenticated requests to the backend, which uses its server-side provider credentials. Do not put provider secrets in the frontend or repository.
+
+Direct Gemini/Groq BYOK remains available in local setups where the backend URL is blank.
 
 ## Optional local AI backend and semantic search
 
@@ -126,7 +128,7 @@ The backend is a separate FastAPI service in `backend/`. It keeps the current ap
 - The backend verifies Firebase ID tokens and reads only the authenticated user's note paths.
 - SQLite stores local index metadata and chunk embeddings; USearch maintains a persistent HNSW vector index per authenticated user. These are derived local files under `backend/data/`, not a replacement for Firebase or a shared database.
 - Note saves enqueue index updates; NotezAi settings offers a rebuild for existing notes. Search is scoped to the verified Firebase UID and rechecks current Realtime Database content before returning a result.
-- When the `notez-ai-api-base-url` meta value is blank, existing direct BYOK requests continue. When set to the local API URL, BYOK credentials are sent with the authenticated request and are not persisted by the backend. App-managed provider keys are read only from backend environment variables.
+- The hosted `notez-ai-api-base-url` meta value points to `https://ai-notez.fastapicloud.dev`. With the backend URL set, authenticated AI requests use backend-managed credentials; the app does not send or prompt for a user's provider key. In local setups where that meta value is blank, direct BYOK requests continue.
 
 ### Local development on Windows
 

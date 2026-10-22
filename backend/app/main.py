@@ -156,7 +156,7 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
     ordered = [settings.default_provider, *[item for item in providers if item != settings.default_provider]]
     ordered = [item for item in ordered if item in providers and not provider_cooling_down(item)]
     if not providers:
-        raise HTTPException(status_code=503, detail="Application-managed AI is not configured. Add your own provider key in NotezAi settings.")
+        raise HTTPException(status_code=503, detail="Application-managed AI is not configured on this backend. Set AI_GEMINI_API_KEY or AI_GROQ_API_KEY in the backend environment.")
     if not ordered:
         raise HTTPException(status_code=503, detail="Configured AI providers are cooling down after rate limits. Try again shortly.")
     last_error: HTTPException | None = None
