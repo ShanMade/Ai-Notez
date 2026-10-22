@@ -21,6 +21,70 @@
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles/app.css">
+  <!-- Voice Profiles CSS -->
+  <style>
+    /* Voice Recording Styles */
+    .rec-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid rgba(128,148,170,.2); background: rgba(128,148,170,.05); }
+    .rec-status { display: flex; align-items: center; gap: 12px; font: 600 13px system-ui,sans-serif; }
+    .rec-indicator { color: #ff4444; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .rec-time { color: inherit; font-variant-numeric: tabular-nums; }
+    .rec-mode { color: var(--nz-accent); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .rec-actions { display: flex; gap: 8px; }
+    .rec-btn { background: transparent; border: 1px solid rgba(128,148,170,.35); border-radius: 8px; padding: 8px 12px; cursor: pointer; color: inherit; display: flex; align-items: center; gap: 4px; transition: all .15s ease; }
+    .rec-btn:hover { background: rgba(128,148,170,.15); }
+    .rec-btn svg { width: 16px; height: 16px; }
+    .rec-content { padding: 16px; display: grid; gap: 16px; max-height: 60vh; overflow: auto; }
+    .rec-section { border: 1px solid rgba(128,148,170,.16); border-radius: 12px; padding: 12px; background: rgba(128,148,170,.03); }
+    .rec-section h4 { font: 700 11.5px system-ui,sans-serif; letter-spacing: .08em; text-transform: uppercase; opacity: .6; margin: 0 0 8px; }
+    .rec-transcript { font: 13px/1.6 ui-monospace,monospace; white-space: pre-wrap; margin: 0; background: transparent; color: inherit; }
+    .rec-notes { font: 13px/1.6 system-ui,sans-serif; }
+    .rec-notes p { margin: 8px 0; }
+    .rec-notes ul, .rec-notes ol { margin: 8px 0; padding-left: 20px; }
+    
+    /* Voice Settings Styles */
+    .voice-settings { display: grid; gap: 20px; }
+    .settings-section { border: 1px solid rgba(128,148,170,.16); border-radius: 12px; padding: 16px; background: rgba(128,148,170,.03); }
+    .settings-section h4 { font: 700 12px system-ui,sans-serif; letter-spacing: .08em; text-transform: uppercase; opacity: .6; margin: 0 0 12px; }
+    .settings-description { font: 13px system-ui,sans-serif; opacity: .7; margin: 0 0 12px; }
+    .voice-profile-card, .profile-card { border: 1px solid rgba(128,148,170,.2); border-radius: 10px; padding: 12px; margin: 8px 0; background: rgba(128,148,170,.05); }
+    .profile-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .profile-icon { font-size: 18px; }
+    .profile-name { font: 600 14px system-ui,sans-serif; }
+    .delete-profile { margin-left: auto; background: transparent; border: 0; color: #ff4444; cursor: pointer; font-size: 18px; line-height: 1; opacity: .6; }
+    .delete-profile:hover { opacity: 1; }
+    .profile-fields { display: grid; gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font: 600 11.5px system-ui,sans-serif; letter-spacing: .04em; }
+    .field input, .field textarea, .field select { font: 13px system-ui,sans-serif; padding: 8px 10px; border: 1px solid rgba(128,148,170,.3); border-radius: 8px; background: rgba(128,148,170,.05); color: inherit; }
+    .field input:focus, .field textarea:focus, .field select:focus { outline: 2px solid var(--nz-accent); outline-offset: 1px; }
+    .field textarea { min-height: 80px; resize: vertical; }
+    .field small { font: 11px system-ui,sans-serif; opacity: .6; }
+    .profile-info { margin: 12px 0; }
+    .info-row { display: flex; gap: 8px; margin: 4px 0; font: 13px system-ui,sans-serif; }
+    .info-row .label { opacity: .6; min-width: 80px; }
+    .profile-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .btn-primary { background: var(--nz-accent); color: #fff; border: 0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font: 600 12.5px system-ui,sans-serif; }
+    .btn-secondary { background: transparent; border: 1px solid rgba(128,148,170,.35); color: inherit; padding: 8px 16px; border-radius: 8px; cursor: pointer; font: 600 12.5px system-ui,sans-serif; }
+    .btn-small { background: transparent; border: 1px solid rgba(128,148,170,.3); color: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; font: 11.5px system-ui,sans-serif; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .checkbox { display: flex; align-items: center; gap: 8px; }
+    .checkbox input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--nz-accent); }
+    .empty-state { text-align: center; padding: 20px; opacity: .6; }
+    .profiles-list { display: grid; gap: 8px; }
+    
+    /* Recording button in toolbar */
+    .top-action-btn { background: transparent; border: 1px solid rgba(128,148,170,.25); border-radius: 8px; padding: 6px 10px; cursor: pointer; color: inherit; display: flex; align-items: center; gap: 6px; transition: all .15s ease; }
+    .top-action-btn:hover { background: rgba(128,148,170,.1); border-color: rgba(128,148,170,.4); }
+    .top-action-btn svg { width: 18px; height: 18px; opacity: .8; }
+    
+    /* Responsive */
+    @media (max-width: 640px) {
+      .rec-header { flex-direction: column; gap: 8px; }
+      .rec-actions { width: 100%; justify-content: center; }
+      .settings-section { padding: 12px; }
+    }
+  </style>
 </head>
 <body>
   <div id="nz-lock" role="dialog" aria-modal="true" aria-label="Notez is locked"><div class="nz-splash-gif nz-logo-art" role="img" aria-label="Notez logo"></div><h2>Notez is locked</h2><input id="nz-lock-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Enter PIN" aria-label="PIN"><button type="button" class="nz-btn primary" id="nz-lock-go">Unlock</button><div id="nz-lock-msg" role="status"></div><button type="button" id="nz-lock-forgot">Forgot PIN? Sign out and remove lock</button></div>

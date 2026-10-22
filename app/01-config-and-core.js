@@ -2,6 +2,12 @@
     // Firebase web config - fetched from backend for security
     // This prevents API key exposure in frontend code
     let firebaseConfig = null;
+
+    // Load voice profiles script
+    const voiceProfilesScript = document.createElement('script');
+    voiceProfilesScript.src = 'app/07-voice-profiles.js';
+    voiceProfilesScript.async = false;
+    document.head.appendChild(voiceProfilesScript);
     
     // Default fallback config (should be overridden by backend response)
     const DEFAULT_FIREBASE_CONFIG = {
