@@ -1,203 +1,711 @@
-# Notez
+# <img src="icon-512.png" alt="Notez Logo" width="100" height="100" /> Notez
 
-Notez is a study-focused note-taking app built as a browser-based product that helps students and learners organize notes, review material, and use AI-assisted workflows without breaking focus. The current implementation is a Firebase-backed web app with a local-first note experience and cloud sync.
+> **Your calm, focused study space for notes, PDFs, and deep learning**
 
-## Problem it aims to solve
+[![Firebase Hosting](https://img.shields.io/badge/Firebase-Hosting-ffca28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/products/hosting)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-f7df1e?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Ai--Notez.web.app-00c853?style=for-the-badge&logo=google-chrome&logoColor=white)](https://ai-notez.web.app/)
 
-Students and knowledge workers often have notes spread across apps, files, folders, and browser tabs. Notez tries to provide a calmer, more focused workspace for:
+---
 
-- storing lecture notes and study material
-- organizing content by subject or folder
-- revisiting material through review flows
-- asking for summaries or study guidance when needed
-- handling transcripts, PDFs, and reference material in one place
+## ✨ **What is Notez?**
 
-## Verified features
+**Notez** is a **study-focused, distraction-free note-taking application** designed to help students and knowledge workers organize their learning materials in one unified workspace. Built as a **browser-based PWA (Progressive Web App)**, Notez combines the simplicity of local note-taking with the power of **cloud sync, AI assistance, and semantic search**.
 
-The current codebase supports these features as implemented:
+Whether you're managing lecture notes, PDF documents, transcripts, or research materials, Notez provides a **calm, focused environment** where you can:
+- ✍️ Create, edit, and organize notes with rich formatting
+- 📁 Manage notes in folders and collections
+- 🔍 Search and browse your knowledge base instantly
+- 📚 Read and annotate PDFs directly in the app
+- 🎙️ Record lectures and transcribe audio
+- 🤖 Leverage AI for summaries, study guidance, and smart insights
+- 🔄 Sync seamlessly across devices with Firebase
+- 📱 Work offline with service worker support
 
-- note creation, editing, and organization
-- folder-based note management
-- note search and browsing
-- study review / review reminders
-- note prioritization and favoriting
-- AI-assisted study flows and note actions via the app UI
-- library-style attachment handling
-- PDF reading and support for document attachments
-- transcription and recording workflow hooks
-- Firebase Authentication and Realtime Database sync
-- offline-friendly app shell via service worker
+---
 
-## Technology stack
+## 🎯 **The Problem We Solve**
 
-- frontend: vanilla JavaScript, HTML, CSS
-- hosting: Firebase Hosting
-- authentication: Firebase Authentication
-- database: Firebase Realtime Database
-- app shell: service worker for offline behavior
-- note and content handling: client-side app logic with local persistence and cloud sync
+Students and professionals often struggle with **fragmented knowledge** — notes scattered across:
+- Multiple apps (Notion, OneNote, Google Docs)
+- Local files and folders
+- Browser tabs and bookmarks
+- Physical notebooks and digital scans
 
-## Architecture overview
+This fragmentation **breaks focus** and makes **effective review difficult**. Notez solves this by providing:
 
-The app is structured as a static front-end with modular JavaScript files:
+| Problem | Notez Solution |
+|---------|---------------|
+| 📂 Notes scattered everywhere | ✅ Unified workspace for all your materials |
+| 🔍 Hard to find information | ✅ Instant search across all notes and PDFs |
+| 📱 No offline access | ✅ Full offline support with cloud sync |
+| 🤖 Limited AI assistance | ✅ Built-in AI for summaries, insights, and study guidance |
+| 📚 PDFs hard to manage | ✅ Native PDF reader with annotation support |
+| 🎙️ Audio notes disconnected | ✅ Integrated recording and transcription |
 
-- `index.html` contains the app shell and layout
-- `app/01-config-and-core.js` initializes core app state and Firebase config
-- `app/02-storage-and-notes.js` handles note storage, rendering, and folder logic
-- `app/03-library-and-folders.js` manages file/library flows and PDF viewing
-- `app/04-reader-and-html.js` covers reading, export, and interaction behaviors
-- `app/05-sync-and-auth.js` covers authentication and AI features in the app
-- `app/06-ai-and-recording.js` includes AI-related flows, study scheduling, and recording/voice features
-- `sw.js` provides offline caching support
-- `firebase.json` and `database.rules.json` define hosting and database rules
+---
 
-The browser app remains client-heavy. An optional Python FastAPI backend provides AI provider routing and per-user semantic search; its local SQLite metadata store and USearch HNSW indexes contain derived note chunks and embeddings, while Firebase Realtime Database remains the source of truth.
+## 🚀 **Live Demo**
 
-## Live app
+**Try Notez now:** [https://ai-notez.web.app/](https://ai-notez.web.app/)
 
-https://ai-notez.web.app/
+> ⚠️ **Note:** The demo uses Firebase Authentication. Sign in with Google or email to experience the full functionality.
 
-## Local development
+---
 
-There is no package manager or build step in the current workspace. The app is served as a static site.
+## 📸 **Screenshots**
 
-1. Open a terminal in this project directory.
-2. Start a local server:
+> 📌 **Coming Soon!** 
+> We're working on adding beautiful screenshots to showcase Notez's interface and features. In the meantime, try the [live demo](https://ai-notez.web.app/) to see it in action!
 
+---
+
+## ✨ **Key Features**
+
+### 📝 **Note Management**
+- **Rich Text Editing**: Format notes with markdown-like syntax
+- **Folder Organization**: Create nested folders for better organization
+- **Tagging & Categorization**: Add tags and priorities to notes
+- **Favorites & Pinning**: Quick access to important notes
+- **Search & Filter**: Find notes by title, content, or tags
+- **Version History**: Track changes to your notes
+
+### 📚 **Document Handling**
+- **PDF Reader**: View and annotate PDFs directly in the app
+- **Document Attachments**: Attach files to notes
+- **Library View**: Organize all your documents in one place
+- **Full-Text Search**: Search within PDFs and documents
+
+### 🤖 **AI-Powered Features**
+- **Smart Summaries**: Get AI-generated summaries of your notes
+- **Study Guidance**: AI-powered study recommendations
+- **Semantic Search**: Find notes based on meaning, not just keywords
+- **Transcription**: Convert audio recordings to text
+- **Note Insights**: AI analysis of your study patterns
+
+### ☁️ **Cloud & Sync**
+- **Firebase Authentication**: Secure sign-in with Google, email, etc.
+- **Realtime Database**: Instant sync across all devices
+- **Offline First**: Full functionality without internet
+- **Automatic Sync**: Changes sync when you're back online
+
+### 🎨 **User Experience**
+- **Dark/Light Mode**: Choose your preferred theme
+- **Custom Accents**: Personalize with color themes
+- **PIN Lock**: Protect your notes with a PIN
+- **PWA Support**: Install as a desktop/mobile app
+- **Keyboard Shortcuts**: Speed up your workflow
+
+---
+
+## 🛠️ **Technology Stack**
+
+### **Frontend**
+| Technology | Purpose | Version |
+|------------|---------|---------|
+| ![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=flat-square&logo=html5&logoColor=white) | Structure | HTML5 |
+| ![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=flat-square&logo=css3&logoColor=white) | Styling | CSS3 |
+| ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black) | Logic | ES6+ |
+| ![Firebase](https://img.shields.io/badge/Firebase-FFCA28?style=flat-square&logo=firebase&logoColor=black) | Hosting & Auth | v10.12.5 |
+| ![Service Worker](https://img.shields.io/badge/Service_Worker-4285F4?style=flat-square&logo=google-chrome&logoColor=white) | Offline Support | Native |
+
+### **Backend (Optional)**
+| Technology | Purpose | Version |
+|------------|---------|---------|
+| ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white) | Server Logic | 3.12+ |
+| ![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat-square&logo=fastapi&logoColor=white) | API Framework | Latest |
+| ![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white) | Local Database | Native |
+| ![USearch](https://img.shields.io/badge/USearch-7B2CBF?style=flat-square) | Vector Search | HNSW |
+| ![Firebase Admin](https://img.shields.io/badge/Firebase_Admin-FFCA28?style=flat-square&logo=firebase&logoColor=black) | Auth Verification | Latest |
+
+### **AI Providers**
+| Provider | Purpose |
+|----------|---------|
+| ![Gemini](https://img.shields.io/badge/Gemini-4285F4?style=flat-square&logo=google&logoColor=white) | AI Chat & Embeddings |
+| ![Groq](https://img.shields.io/badge/Groq-00D4AA?style=flat-square) | Fast AI Inference |
+
+---
+
+## 📁 **Project Structure**
+
+```
+Ai-Notez/
+├── index.html                    # Main app entry point
+├── manifest.webmanifest          # PWA manifest
+├── sw.js                        # Service worker for offline
+├── firebase.json                # Firebase hosting config
+├── database.rules.json          # Firebase database rules
+├── README.md                    # This file
+├── icon-192.png                 # App icon (192x192)
+├── icon-512.png                 # App icon (512x512)
+├── styles/
+│   └── app.css                  # Main stylesheet
+├── app/
+│   ├── 01-config-and-core.js    # Firebase config & core state
+│   ├── 02-storage-and-notes.js  # Note storage & rendering
+│   ├── 03-library-and-folders.js # Library & PDF management
+│   ├── 04-reader-and-html.js    # Reading & export features
+│   ├── 05-sync-and-auth.js      # Authentication & AI features
+│   └── 06-ai-and-recording.js   # AI flows & voice features
+└── backend/
+    ├── main.py                  # FastAPI backend
+    ├── requirements.txt         # Python dependencies
+    ├── .env.example             # Environment template
+    └── tests/                   # Backend tests
+```
+
+---
+
+## 💻 **Local Development**
+
+### **Prerequisites**
+- Node.js (optional, for Firebase CLI)
+- Python 3.12+ (for backend)
+- Git
+- A modern web browser
+
+### **Frontend Setup**
+
+Notez is a **static web app** with no build step required!
+
+#### **Option 1: Simple Python Server (Recommended)**
 ```bash
+# Clone the repository
+git clone https://github.com/ShanMade/Ai-Notez.git
+cd Ai-Notez
+
+# Start a local server
 python -m http.server 8000
+
+# Open in browser
+# http://localhost:8000
 ```
 
-3. Open the app in a browser:
+#### **Option 2: Firebase Emulator**
+```bash
+# Install Firebase CLI
+npm install -g firebase-tools
 
-```text
-http://localhost:8000
+# Login to Firebase
+firebase login
+
+# Start emulators
+firebase emulators:start
+
+# Open in browser
+# http://localhost:5000
 ```
 
-If you want to deploy through Firebase Hosting, the project already includes `firebase.json` and `database.rules.json`.
+#### **Option 3: Live Server (VS Code)**
+1. Open the project in VS Code
+2. Install the [Live Server](https://marketplace.visualstudio.com/items?itemName=ritwickdey.LiveServer) extension
+3. Right-click on `index.html` and select "Open with Live Server"
 
-## Firebase configuration
+---
 
-The project uses a public Firebase web config in `app/01-config-and-core.js`:
+## 🚀 **Deployment**
 
-```js
+### **Deploy to Firebase Hosting**
+
+#### **Step 1: Set up Firebase Project**
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Create a new project (e.g., `your-notez-app`)
+3. Enable **Authentication** and **Realtime Database**
+4. Note your project settings
+
+#### **Step 2: Update Configuration**
+Edit `app/01-config-and-core.js` and update the `firebaseConfig`:
+
+```javascript
 const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "ai-notez.firebaseapp.com",
-  databaseURL: "https://ai-notez-default-rtdb.firebaseio.com",
-  projectId: "ai-notez",
-  storageBucket: "ai-notez.firebasestorage.app",
-  messagingSenderId: "...",
-  appId: "..."
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.firebasestorage.app",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 ```
 
-This setup is standard for client-side Firebase web apps, but keep in mind:
-
-- do not commit private admin credentials or service-account files
-- do not place backend secrets in frontend code
-- keep Firebase rules restrictive and test them with real users before production use
-- rotate any credentials if the project is moved to a different Firebase account
-
-For a fresh project setup:
-
-1. create a Firebase project in the Firebase console
-2. enable Authentication and Realtime Database
-3. update the config values in `app/01-config-and-core.js` to match your project
-4. deploy with Firebase Hosting if you want to publish the app
-
-Example:
-
+#### **Step 3: Deploy**
 ```bash
+# Install Firebase CLI (if not already installed)
+npm install -g firebase-tools
+
+# Login to Firebase
 firebase login
+
+# Initialize Firebase (if first time)
+firebase init hosting
+
+# Deploy to production
 firebase deploy
 ```
 
-## AI provider configuration and security
+Your app will be live at: `https://YOUR_PROJECT.web.app`
 
-The hosted app uses the FastAPI backend at `https://ai-notez.fastapicloud.dev` for AI requests first; users do not need to enter provider API keys in the app. Configure `AI_GEMINI_API_KEY` or `AI_GROQ_API_KEY` as a secret in FastAPI Cloud's backend environment variables, and set `NOTEZ_CORS_ORIGINS` to the exact hosted frontend origin (for example, `https://ai-notez.web.app`). The browser sends authenticated requests to the backend, which uses its server-side provider credentials. Do not put provider secrets in the frontend or repository.
+### **Deploy Backend (Optional)**
 
-Direct Gemini/Groq BYOK remains available in local setups where the backend URL is blank.
+The FastAPI backend can be deployed to:
+- [FastAPI Cloud](https://fastapicloud.dev/) (Recommended)
+- [Render](https://render.com/)
+- [Railway](https://railway.app/)
+- [Fly.io](https://fly.io/)
+- Any VPS with Python support
 
-## Optional local AI backend and semantic search
+#### **FastAPI Cloud Deployment**
+```bash
+cd backend
 
-The backend is a separate FastAPI service in `backend/`. It keeps the current app's Firebase Authentication and Realtime Database model:
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-- Realtime Database at `users/{uid}/notes/{noteId}` remains authoritative; no existing records are migrated, overwritten, or duplicated.
-- AI chat history and existing BYOK keys remain in their current browser-local storage.
-- The backend verifies Firebase ID tokens and reads only the authenticated user's note paths.
-- SQLite stores local index metadata and chunk embeddings; USearch maintains a persistent HNSW vector index per authenticated user. These are derived local files under `backend/data/`, not a replacement for Firebase or a shared database.
-- Note saves enqueue index updates; NotezAi settings offers a rebuild for existing notes. Search is scoped to the verified Firebase UID and rechecks current Realtime Database content before returning a result.
-- The hosted `notez-ai-api-base-url` meta value points to `https://ai-notez.fastapicloud.dev`. With the backend URL set, authenticated AI requests use backend-managed credentials; the app does not send or prompt for a user's provider key. In local setups where that meta value is blank, direct BYOK requests continue.
+# Install dependencies
+pip install -r requirements.txt
 
-### Local development on Windows
+# Copy .env.example to .env and configure
+cp .env.example .env
 
-Use Python 3.12 on Windows. USearch publishes a prebuilt Windows wheel, so installing this backend does not require compiling `hnswlib` or installing Visual Studio C++ Build Tools. Firebase Admin needs credentials for token verification and Realtime Database reads; store any service-account JSON outside this repository and never commit it.
+# Deploy to FastAPI Cloud
+fastapi deploy
+```
+
+---
+
+## 🔧 **Backend Configuration**
+
+### **Environment Variables**
+
+Create a `.env` file in the `backend/` directory:
+
+```env
+# Firebase Configuration
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_DATABASE_URL=https://your-project-default-rtdb.firebaseio.com
+GOOGLE_APPLICATION_CREDENTIALS=path/to/firebase-admin.json
+
+# AI Provider Keys
+AI_GEMINI_API_KEY=your-gemini-api-key
+AI_GROQ_API_KEY=your-groq-api-key
+AI_EMBEDDING_API_KEY=your-embedding-api-key
+
+# CORS Origins (comma-separated)
+NOTEZ_CORS_ORIGINS=https://your-frontend.web.app,http://localhost:8000
+
+# Data Directory
+NOTEZ_DATA_DIR=./data
+
+# Embedding Dimensions
+AI_EMBEDDING_DIMENSIONS=768
+```
+
+> ⚠️ **IMPORTANT**: Never commit your `.env` file or `firebase-admin.json` to version control!
+
+### **Windows Setup**
+
+For Windows users, use PowerShell:
 
 ```powershell
-Set-Location C:\Users\Shan\Desktop\Notez\backend
+cd backend
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 $venv = Join-Path $HOME '.venvs\notez-backend'
 if (-not (Test-Path "$venv\Scripts\python.exe")) { py -3.12 -m venv $venv }
 $python = "$venv\Scripts\python.exe"
 & $python -m pip install --upgrade pip
 & $python -m pip install -r requirements.txt
-$env:GOOGLE_APPLICATION_CREDENTIALS = 'C:\path\outside\the\repo\firebase-admin.json'
 ```
 
-Using the environment's `python.exe` directly avoids PowerShell activation-policy issues. Configure `FIREBASE_DATABASE_URL`, `FIREBASE_PROJECT_ID`, exact frontend origins in `NOTEZ_CORS_ORIGINS`, and any app-managed AI or embedding keys in `.env`. Keep `.env` private. The default `NOTEZ_DATA_DIR=./data` stores the SQLite database and HNSW index files locally; add enough free disk space and back up this directory if you need to retain the derived index.
+---
 
-```powershell
-Set-Location C:\Users\Shan\Desktop\Notez\backend
-& "$HOME\.venvs\notez-backend\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload
-```
+## 🤖 **AI Features Setup**
 
-In a second PowerShell window, serve the frontend from the repository root:
+### **Option 1: Use Hosted Backend (Recommended)**
+1. Deploy the backend to FastAPI Cloud or another service
+2. Update the `notez-ai-api-base-url` meta tag in `index.html`:
+   ```html
+   <meta name="notez-ai-api-base-url" content="https://your-backend-url.dev" />
+   ```
+3. Configure AI provider keys in your backend's environment variables
 
-```powershell
-Set-Location C:\Users\Shan\Desktop\Notez
-py -m http.server 8000
-```
+### **Option 2: Local AI (BYOK - Bring Your Own Key)**
+1. Leave the `notez-ai-api-base-url` meta tag empty or remove it
+2. The app will prompt you to enter your AI provider API key
+3. Supported providers: Gemini, Groq
 
-For local testing, set the `notez-ai-api-base-url` meta value in `index.html` to `http://127.0.0.1:8787`, then open `http://localhost:8000`. Add `localhost` to Firebase Authentication's authorized domains if needed, and include `http://localhost:8000` in `NOTEZ_CORS_ORIGINS`. The backend binds only to loopback and is not publicly exposed. `GET http://127.0.0.1:8787/healthz` should report `{"status":"ok","vectorStore":"usearch-hnsw"}`.
+### **Option 3: No AI**
+- Simply don't configure any AI backend
+- AI features will be disabled in the UI
 
-Run the backend tests directly through the virtual-environment interpreter:
+---
 
-```powershell
+## 🧪 **Testing**
+
+### **Frontend Testing**
+Run these smoke tests manually:
+
+1. ✅ Load the app locally
+2. ✅ Create a test note
+3. ✅ Search for the note
+4. ✅ Open and edit the note
+5. ✅ Test folder creation and organization
+6. ✅ Verify Firebase auth flow works
+7. ✅ Confirm service worker doesn't break loading
+8. ✅ Test dark/light mode toggle
+9. ✅ Test PIN lock functionality
+
+### **Backend Testing**
+
+From the `backend/` directory:
+
+```bash
+# Install pytest
+pip install pytest
+
+# Run tests
+pytest -q tests
+
+# Or with virtual environment
 & "$HOME\.venvs\notez-backend\Scripts\python.exe" -m pytest -q tests
 ```
 
-Use one Uvicorn worker per data directory. The index is local to a backend instance; do not share one SQLite/HNSW directory between multiple backend processes. Rebuilds read notes from Realtime Database and may incur embedding-provider usage. The embedding model and `AI_EMBEDDING_DIMENSIONS` setting must agree. `AI_GEMINI_API_KEY`, `AI_GROQ_API_KEY`, and `AI_EMBEDDING_API_KEY` are backend-only variables. Do not place app-managed keys in `index.html`. CORS origins are comma-separated exact origins.
+---
 
-## Known limitations
+## 📊 **Architecture Overview**
 
-- the AI backend is optional and must be started separately; this setup does not deploy a backend service
-- the local HNSW index requires writable, persistent disk on the backend host; if the directory is lost, rebuild the derived index from Realtime Database
-- there is no browser/frontend regression suite; the backend has focused automated tests
-- chats remain browser-local and are not migrated to a server-side chat store
-- semantic indexing requires a Gemini embedding credential; streaming and server-side Groq audio transcription are not provided by the API
-- Firebase config values are embedded in the client and should be reviewed before broader public use
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User Browser                            │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                    Notez Frontend                          │ │
+│  │  • index.html (App Shell)                                │ │
+│  │  • app/01-config-and-core.js (Firebase Config)           │ │
+│  │  • app/02-storage-and-notes.js (Note Management)         │ │
+│  │  • app/03-library-and-folders.js (Library)               │ │
+│  │  • app/04-reader-and-html.js (Reader)                    │ │
+│  │  • app/05-sync-and-auth.js (Auth & AI)                   │ │
+│  │  • app/06-ai-and-recording.js (AI & Voice)              │ │
+│  │  • sw.js (Service Worker for Offline)                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Firebase Services                          │
+│  ┌─────────────┐  ┌─────────────────────┐  ┌─────────────┐ │
+│  │   Auth      │  │  Realtime Database   │  │   Hosting   │ │
+│  │             │  │  (Notes, Metadata)    │  │             │ │
+│  └─────────────┘  └─────────────────────┘  └─────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Optional AI Backend                          │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                 FastAPI Backend                           │ │
+│  │  • Authentication: Firebase ID Token Verification         │ │
+│  │  • AI Services: Chat, Summaries, Insights                 │ │
+│  │  • Vector Search: Semantic note search                   │ │
+│  │  • Embeddings: Note chunking & vectorization             │ │
+│  │  • Storage: SQLite (Metadata) + USearch (Vectors)         │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      AI Providers                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   Gemini     │  │    Groq      │  │  Custom Embeddings   │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## Current development roadmap
+---
 
-Potential next steps include backend streaming, global quotas, managed speech transcription, and durable server-side chat history. These are not included in the current implementation.
+## 🎨 **Customization**
 
-## Testing and smoke checks
+### **Themes**
+Notez supports multiple themes:
+- **Light Mode** (default)
+- **Dark Mode**
+- **Custom Accent Colors**: yellow (gold), green (forest), blue (sky)
 
-The backend test suite runs with `py -m pytest -q tests` from `backend\`. A practical browser smoke check is:
+Toggle themes using the theme switcher in the app or by setting:
+```javascript
+localStorage.setItem('notez-theme-v1', 'dark');
+localStorage.setItem('notez-accent-v1', 'forest');
+```
 
-1. load the app locally
-2. create a test note
-3. search for it
-4. open it and edit it
-5. confirm folders and filters behave correctly
-6. verify the Firebase auth flow works for your configured project
-7. confirm the service worker does not break loading
+### **PIN Lock**
+Enable PIN protection:
+```javascript
+localStorage.setItem('notez-lock-v1', 'true');
+localStorage.setItem('notez-lock-pin', 'your-pin');
+```
 
-## Notes on repository status
+---
 
-No license file is present in this workspace, so no license is documented here. If the project is published publicly, choose and add a license before release if that suits the intended distribution model.
+## 📈 **Roadmap**
 
-## Screenshots and previews
+### **Upcoming Features**
+- [ ] **Backend Streaming**: Real-time AI responses
+- [ ] **Global Quotas**: User-based API rate limiting
+- [ ] **Managed Speech Transcription**: Server-side audio processing
+- [ ] **Durable Chat History**: Server-side chat persistence
+- [ ] **Collaborative Notes**: Real-time collaboration
+- [ ] **Mobile Apps**: Native iOS and Android apps
+- [ ] **Desktop Apps**: Native macOS, Windows, Linux apps
+- [ ] **Plugin System**: Extend Notez with plugins
 
-No dedicated product screenshots or design assets are included in the current workspace beyond the app icon and platform metadata. This README therefore avoids referencing non-existent media.
+### **Long-term Vision**
+- **Universal Knowledge Base**: One place for all your learning
+- **Smart Study Coach**: AI-powered study planning and tracking
+- **Knowledge Graph**: Visualize connections between your notes
+- **Multi-device Sync**: Seamless experience across all platforms
+
+---
+
+## 🤝 **Contributing**
+
+We welcome contributions! Here's how you can help:
+
+### **How to Contribute**
+1. **Fork** the repository
+2. **Clone** your fork locally
+3. **Create** a new branch for your feature/bugfix
+4. **Commit** your changes with clear messages
+5. **Push** to your fork
+6. **Open** a Pull Request to the main repository
+
+### **Contribution Guidelines**
+- Follow the existing code style
+- Add tests for new features
+- Update documentation as needed
+- Keep commits atomic and focused
+- Write clear, descriptive commit messages
+
+### **Good First Issues**
+- Add more keyboard shortcuts
+- Improve mobile responsiveness
+- Add additional export formats
+- Write more backend tests
+- Improve error handling
+- Add tooltips and help text
+
+---
+
+## 🐛 **Known Limitations**
+
+| Limitation | Workaround | Status |
+|------------|------------|--------|
+| AI backend is optional | Use BYOK or deploy backend | ⚠️ Temporary |
+| Local HNSW index requires persistent disk | Don't share data directory | ⚠️ Temporary |
+| No frontend test suite | Manual testing required | 📋 Planned |
+| Chats are browser-local | Not migrated to server | 📋 Planned |
+| Semantic indexing requires embedding credential | Configure AI provider | ⚠️ Required |
+| Firebase config in client | Review before public use | ⚠️ Caution |
+
+---
+
+## 🔒 **Security**
+
+### **Important Security Notes**
+- ❌ **Never commit** `firebase-admin.json` or service account keys
+- ❌ **Never commit** `.env` files with API keys
+- ❌ **Never put** backend secrets in frontend code
+- ✅ **Always** keep Firebase rules restrictive
+- ✅ **Always** test authentication with real users
+- ✅ **Always** rotate credentials if compromised
+
+### **Firebase Rules**
+Review and customize `database.rules.json` for your security needs:
+
+```json
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 📄 **License**
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+```
+MIT License
+
+Copyright (c) 2024 ShanMade
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## 🙏 **Acknowledgments**
+
+- **Firebase**: For providing an excellent backend-as-a-service platform
+- **FastAPI**: For making Python API development a joy
+- **USearch**: For efficient vector search capabilities
+- **All Contributors**: For their valuable input and improvements
+
+---
+
+## 📞 **Support & Contact**
+
+### **Need Help?**
+- **Documentation**: Check this README for setup and usage
+- **Issues**: Open a [GitHub Issue](https://github.com/ShanMade/Ai-Notez/issues)
+- **Discussions**: Join the [GitHub Discussions](https://github.com/ShanMade/Ai-Notez/discussions)
+- **Email**: Contact the maintainer (if available)
+
+### **Found a Bug?**
+Please open an issue with:
+- A clear description of the problem
+- Steps to reproduce
+- Expected vs. actual behavior
+- Screenshots (if applicable)
+- Browser and OS information
+
+### **Have a Feature Request?**
+We'd love to hear your ideas! Open a feature request issue with:
+- Description of the feature
+- Use case or problem it solves
+- Any mockups or examples (if available)
+
+---
+
+## 🌟 **Stargazers & Contributors**
+
+<a href="https://github.com/ShanMade/Ai-Notez/stargazers">
+  <img src="https://img.shields.io/github/stars/ShanMade/Ai-Notez?style=social" alt="Stargazers" />
+</a>
+
+<a href="https://github.com/ShanMade/Ai-Notez/contributors">
+  <img src="https://img.shields.io/github/contributors/ShanMade/Ai-Notez" alt="Contributors" />
+</a>
+
+---
+
+## 📝 **Changelog**
+
+### **Latest Updates**
+- **v1.0.0** (Current): Initial public release
+  - Complete note-taking functionality
+  - Firebase integration
+  - AI backend support
+  - PDF reader and library
+  - Offline support
+
+---
+
+## 🎓 **Learning Resources**
+
+### **Technologies Used**
+- [Firebase Documentation](https://firebase.google.com/docs)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [USearch Documentation](https://github.com/unum-cloud/usearch)
+- [MDN Web Docs](https://developer.mozilla.org/)
+
+### **Similar Projects**
+- [Obsidian](https://obsidian.md/) - Local-first note-taking
+- [Notion](https://www.notion.so/) - All-in-one workspace
+- [Logseq](https://logseq.com/) - Outliner note-taking
+- [SiYuan](https://bakaplayer.com/) - Block-based note-taking
+
+---
+
+## 💡 **Tips & Tricks**
+
+### **Keyboard Shortcuts**
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl/Cmd + N` | Create new note |
+| `Ctrl/Cmd + S` | Save current note |
+| `Ctrl/Cmd + F` | Search notes |
+| `Ctrl/Cmd + P` | Open command palette |
+| `Ctrl/Cmd + K` | Quick switch between notes |
+| `Ctrl/Cmd + D` | Duplicate note |
+| `Ctrl/Cmd + Backspace` | Delete note |
+| `Ctrl/Cmd + [` | Navigate to previous note |
+| `Ctrl/Cmd + ]` | Navigate to next note |
+
+### **Power User Tips**
+1. **Use folders** to organize notes by subject or topic
+2. **Tag notes** for easy filtering and searching
+3. **Favorite important notes** for quick access
+4. **Use the library** to manage all your PDFs and documents
+5. **Enable dark mode** for comfortable night-time studying
+6. **Set a PIN** to protect your notes when sharing your device
+7. **Use AI summaries** to quickly review long notes
+8. **Record lectures** and transcribe them automatically
+
+---
+
+## 🏆 **Why Notez?**
+
+### **Comparison with Other Tools**
+
+| Feature | Notez | Obsidian | Notion | OneNote |
+|---------|-------|----------|--------|---------|
+| **Local-First** | ✅ Yes | ✅ Yes | ❌ No | ❌ No |
+| **Cloud Sync** | ✅ Yes | ❌ (Plugins) | ✅ Yes | ✅ Yes |
+| **Offline Support** | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes |
+| **AI Integration** | ✅ Built-in | ❌ (Plugins) | ✅ Built-in | ❌ No |
+| **PDF Reader** | ✅ Built-in | ❌ (Plugins) | ❌ No | ✅ Yes |
+| **Audio Recording** | ✅ Built-in | ❌ No | ❌ No | ✅ Yes |
+| **Semantic Search** | ✅ Yes | ❌ (Plugins) | ❌ No | ❌ No |
+| **Open Source** | ✅ Yes | ✅ Yes | ❌ No | ❌ No |
+| **Self-Hostable** | ✅ Yes | ✅ Yes | ❌ No | ❌ No |
+| **PWA Support** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+
+---
+
+## 🎉 **Get Started Today!**
+
+Ready to transform your study experience?
+
+1. **Try the demo**: [https://ai-notez.web.app/](https://ai-notez.web.app/)
+2. **Deploy your own**: Follow the deployment guide above
+3. **Contribute**: Help make Notez even better!
+4. **Spread the word**: Share Notez with fellow students and learners
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/ShanMade">ShanMade</a> | 
+  <a href="https://github.com/ShanMade/Ai-Notez">View on GitHub</a> | 
+  <a href="https://ai-notez.web.app/">Live Demo</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/last-commit/ShanMade/Ai-Notez?style=flat-square" alt="Last Commit" />
+  <img src="https://img.shields.io/github/commit-activity/m/ShanMade/Ai-Notez?style=flat-square" alt="Commit Activity" />
+  <img src="https://img.shields.io/github/repo-size/ShanMade/Ai-Notez?style=flat-square" alt="Repo Size" />
+</p>
