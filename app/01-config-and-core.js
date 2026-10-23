@@ -1006,6 +1006,9 @@
         if (currentSession?.mode !== 'cloud' || currentSession.user.uid !== uidValue || !navigator.onLine) return;
         try { await window.notezAiIndexNote(noteId); }
         catch (error) {
+          // A provider quota (429) is not a failed save: the note is stored and
+          // the next edit or AI request retries the index update.
+          if (error?.status === 429) return;
           console.warn('Note saved, but its semantic index update failed:', noteId, error);
           toast('Note saved to Firebase, but its semantic index could not be updated. Use NotezAi settings to rebuild it.', 'error', 6500);
         }

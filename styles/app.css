@@ -3382,3 +3382,51 @@ html[data-theme] .action-menu button:hover { background: var(--ui-surface-2); }
 /* A little more room to breathe in the scrolling canvas. */
 html[data-theme] .home-dashboard,
 html[data-theme] .note-library-page { padding: clamp(24px, 3.6vw, 50px) clamp(20px, 4vw, 58px) 60px; color: var(--ui-ink); }
+
+/* ==========================================================================
+   Squeezed workspace
+   The dock can be dragged wide, so the page next to it sometimes has less room
+   than the viewport suggests. These rules follow the width the page actually
+   has (set from JS as html.nz-space-*), not the window width: the top bar gives
+   up its subtitle and shortcut hint, then the page title, instead of letting
+   its buttons overflow off-screen.
+   ========================================================================== */
+html[data-theme].nz-space-tight .top-context { min-width: 0; }
+html[data-theme].nz-space-tight .top-context .subcrumb,
+html[data-theme].nz-space-tight .subcrumb { display: none; }
+html[data-theme].nz-space-tight .search-shortcut { display: none; }
+html[data-theme].nz-space-tight .global-search {
+  width: auto; flex: 1 1 160px; min-width: 0; margin: 0;
+}
+html[data-theme].nz-space-tight .global-search input { min-width: 0; }
+html[data-theme].nz-space-tight .top-actions { flex: 0 0 auto; gap: 6px; }
+html[data-theme].nz-space-tight .top-upload { width: 36px; padding: 0; justify-content: center; }
+html[data-theme].nz-space-tight .top-upload span { display: none; }
+html[data-theme].nz-space-tight .topbar { gap: 10px; padding: 0 18px; }
+
+html[data-theme].nz-space-cramped .topbar { padding: 0 12px; gap: 8px; }
+html[data-theme].nz-space-cramped .top-context { display: none; }
+html[data-theme].nz-space-cramped .global-search { flex: 1 1 120px; }
+html[data-theme].nz-space-cramped .top-new {
+  width: 36px; padding: 0; font-size: 0; display: grid; place-items: center;
+}
+html[data-theme].nz-space-cramped .top-new::after { content: "+"; font-size: 20px; line-height: 1; font-weight: 400; }
+html[data-theme].nz-space-cramped .top-avatar { display: none; }
+html[data-theme].nz-space-cramped .reader-paper { padding-left: 18px; padding-right: 18px; }
+html[data-theme].nz-space-cramped .reader-title { font-size: clamp(24px, 6vw, 30px); }
+html[data-theme].nz-space-cramped .markdown-body { font-size: 15px; }
+
+/* A docked panel on a working page reads as part of the shell: one soft edge,
+   never a hard cut through the article next to it. */
+html.nzai-open #nz-ai { box-shadow: -22px 0 48px -28px rgba(14, 28, 22, .45); }
+html[data-theme="dark"].nzai-open #nz-ai { box-shadow: -22px 0 52px -26px rgba(0, 0, 0, .75); }
+
+/* The dock floor is 340px, where a full title block plus eight round buttons
+   no longer fit. The header keeps its actions and drops the wordmark. */
+@container (max-width: 400px) {
+  #nz-ai .dock-title { display: none; }
+  #nz-ai .dock-chrome { gap: 6px; }
+  #nz-ai .fl-bar { gap: 0; }
+  #nz-ai .fl-btn { width: 31px; height: 31px; }
+  #nz-ai .ai-qchip { font-size: 11.5px; }
+}
