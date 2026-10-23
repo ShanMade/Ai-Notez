@@ -1160,12 +1160,38 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
+      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+notes\s+(?:do\s+i\s+have|are\s+in\s+(?:my|the)\s+library)\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
       const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
-      
-      // Try to use knowledge index for retrieval if available
-      if (aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
+
+      // Inventory questions bypass semantic search. Managed AI receives the authoritative
+      // Firebase inventory from the backend; BYOK mode uses the current workspace cache.
+      if (wantsInventory && !aiUsesManaged()) {
+        const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+        const inventory = [...notes].sort((a, b) => compact(a.title).localeCompare(compact(b.title))).slice(0, 50);
+        const total = notes.length;
+        context = [
+          'LIBRARY INVENTORY from the current NoteZ workspace cache.',
+          'Exact local note count: ' + total + '.',
+          'Entries shown: ' + inventory.length + ' of ' + total + '.',
+          ...inventory.map((item, index) => {
+            const title = compact(item.title || 'Untitled note').slice(0, 180);
+            const meta = [];
+            if (item.folderPath) meta.push('folder=' + compact(item.folderPath).slice(0, 120));
+            if (item.subject) meta.push('subject=' + compact(item.subject).slice(0, 100));
+            if (Array.isArray(item.tags) && item.tags.length) meta.push('tags=' + item.tags.slice(0, 8).map(tag => compact(tag).slice(0, 50)).join(', '));
+            if (item.updatedAt || item.createdAt) meta.push('date=' + String(item.updatedAt || item.createdAt).slice(0, 40));
+            return '[' + (index + 1) + '] ' + title + (meta.length ? ' — ' + meta.join('; ') : '');
+          }),
+          total > inventory.length ? (total - inventory.length) + ' additional notes are omitted from this compact inventory.' : '',
+          'Use these metadata records for library questions. Do not infer note contents from titles or invent omitted records.'
+        ].filter(Boolean).join('\n');
+        sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180) })).filter(item => item.id);
+      }
+
+      // Topic questions can use semantic retrieval; inventory questions must not.
+      if (!wantsInventory && aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
         try {
           const retrievalResult = await window.retrieveRelevantContext(question, { 
             limit: 5,
@@ -1195,7 +1221,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       
       // Fall back to local retrieval if knowledge index didn't return results
-      if ((!found.length || !note) && !wantsLibrary) {
+      if ((!found.length || !note) && !wantsLibrary && !wantsInventory) {
         if (note) {
           const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
           context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
@@ -1221,12 +1247,14 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title }));
         context = 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n');
       }
-      const hasNotes = note || found.length > 0;
-      const rules = note
-        ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
-        : hasNotes
-          ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
-          : 'Answer the user\'s question directly using your general knowledge and the context provided in the user\'s message.';
+      const hasNotes = note || found.length > 0 || wantsInventory;
+      const rules = wantsInventory
+        ? 'Answer library inventory questions from the provided LIBRARY INVENTORY metadata. Use its exact count, list only the titles shown, and do not infer note contents from titles. If the backend provides a fresher authoritative inventory, prefer it.'
+        : note
+          ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
+          : hasNotes
+            ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
+            : 'Answer the user\\'s question directly using your general knowledge and the context provided in the user\\'s message.';
       let prompt = `${nzaiTranscript(chatBefore)}${context}\n\n${rules}\n\nUSER: ${question}`;
       if (note && nzai.quiz === note.id && !task) {
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
