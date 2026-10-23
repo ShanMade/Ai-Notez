@@ -683,7 +683,21 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         if (!aiBackendConfigured() && !aiKey('gemini')) throw Object.assign(new Error('Reading scanned pages needs a Gemini key in NotezAi settings.'), { code: 'no-vision' });
         return aiCall('gemini', prompt, options);
       }
-      if (aiBackendConfigured()) return aiCall(aiActive(), prompt, options);
+      if (aiBackendConfigured()) {
+        const active = aiActive();
+        const order = [active, ...(aiStore.get('notez-ai-autoswitch', '1') === '1' ? Object.keys(AI_PROVIDERS).filter(id => id !== active && aiKey(id)) : [])];
+        let lastError;
+        for (const provider of order) {
+          try { return await aiCall(provider, prompt, options); }
+          catch (error) {
+            lastError = error;
+            const isRateLimited = error.status === 429;
+            const isTransient = error.status >= 500 || error instanceof TypeError || error.name === 'AbortError';
+            if (!isRateLimited && !isTransient) throw error;
+          }
+        }
+        throw lastError;
+      }
       const active = aiActive();
       const order = [active, ...(aiStore.get('notez-ai-autoswitch', '1') === '1' ? Object.keys(AI_PROVIDERS).filter(id => id !== active && aiKey(id)) : [])];
       let lastError;
