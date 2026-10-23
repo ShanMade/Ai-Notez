@@ -72,9 +72,21 @@ const RECORD_CONFIG = {
   segmentMs: 15000,       // Shorter segments for lower latency
   maxDurationMs: 60 * 60 * 1000,  // 1 hour max
   sampleRate: 48000,      // High quality
-  mimeType: 'audio/webm;codecs=opus',
   bitsPerSecond: 48000
 };
+
+// Detect supported MIME type
+function getSupportedMimeType() {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+  if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        return type;
+      }
+    }
+  }
+  return 'audio/webm';
+}
 
 // Speaker diarization state
 const SPEAKER_STATE = {
@@ -82,6 +94,8 @@ const SPEAKER_STATE = {
   currentSpeakers: new Map(),
   ownerVoiceId: null,
   isRecording: false,
+  isPaused: false,
+  isStopping: false,
   mediaRecorder: null,
   audioChunks: [],
   processingQueue: Promise.resolve(),
@@ -89,7 +103,10 @@ const SPEAKER_STATE = {
   liveTranscript: '',
   liveNotes: '',
   startTime: 0,
-  elapsedMs: 0
+  elapsedMs: 0,
+  stream: null,
+  segmentInterval: null,
+  mimeType: null
 };
 
 // Initialize voice profiles from storage
@@ -275,6 +292,12 @@ async function processAudioSegment(blob, segmentIndex, knownVoices = []) {
 
 // Start enhanced recording
 async function startEnhancedRecording(mode = 'class') {
+  // Prevent starting if already recording or stopping
+  if (SPEAKER_STATE.isRecording || SPEAKER_STATE.isStopping) {
+    toast('Recording is already in progress.', 'error');
+    return;
+  }
+  
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     toast('This browser cannot record audio. Use Chrome or Edge on HTTPS.', 'error', 6000);
     return;
@@ -285,14 +308,20 @@ async function startEnhancedRecording(mode = 'class') {
     return;
   }
   
+  // Clean up any previous state
+  cleanupRecording();
+  
   // Reset state
   SPEAKER_STATE.isRecording = true;
+  SPEAKER_STATE.isPaused = false;
+  SPEAKER_STATE.isStopping = false;
   SPEAKER_STATE.audioChunks = [];
   SPEAKER_STATE.transcriptSegments = [];
   SPEAKER_STATE.liveTranscript = '';
   SPEAKER_STATE.liveNotes = '';
   SPEAKER_STATE.startTime = Date.now();
   SPEAKER_STATE.mode = mode;
+  SPEAKER_STATE.elapsedMs = 0;
   
   // Get user media
   try {
@@ -306,51 +335,83 @@ async function startEnhancedRecording(mode = 'class') {
       }
     });
     
+    // Detect and use supported MIME type
+    const mimeType = getSupportedMimeType();
+    SPEAKER_STATE.mimeType = mimeType;
+    
     // Create media recorder
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: RECORD_CONFIG.mimeType,
-      audioBitsPerSecond: RECORD_CONFIG.bitsPerSecond
-    });
+    let mediaRecorder;
+    try {
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: mimeType,
+        audioBitsPerSecond: RECORD_CONFIG.bitsPerSecond
+      });
+    } catch (error) {
+      console.error('Failed to create MediaRecorder with preferred MIME type, falling back:', error);
+      // Fallback to default
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm',
+        audioBitsPerSecond: RECORD_CONFIG.bitsPerSecond
+      });
+      SPEAKER_STATE.mimeType = 'audio/webm';
+    }
     
     SPEAKER_STATE.mediaRecorder = mediaRecorder;
     
-    // Data available handler
-    const audioChunks = [];
+    // Data available handler - collect chunks in SPEAKER_STATE
     mediaRecorder.ondataavailable = (event) => {
       if (event.data?.size > 0) {
-        audioChunks.push(event.data);
+        SPEAKER_STATE.audioChunks.push(event.data);
       }
+    };
+    
+    // Error handler for media recorder
+    mediaRecorder.onerror = (event) => {
+      console.error('MediaRecorder error:', event.error);
+      toast('Recording error occurred. Please check microphone permissions.', 'error', 6000);
+      stopRecording();
     };
     
     // Stop handler - process segment
     mediaRecorder.onstop = async () => {
-      if (audioChunks.length > 0) {
-        const blob = new Blob(audioChunks, { type: RECORD_CONFIG.mimeType });
+      // Only process if we have chunks and we're still in recording mode
+      if (!SPEAKER_STATE.isRecording && !SPEAKER_STATE.isStopping) {
+        return;
+      }
+      
+      if (SPEAKER_STATE.audioChunks.length > 0) {
+        const blob = new Blob(SPEAKER_STATE.audioChunks, { type: mimeType });
         const segmentIndex = SPEAKER_STATE.transcriptSegments.length;
         
         // Process in background
         SPEAKER_STATE.processingQueue = SPEAKER_STATE.processingQueue.then(async () => {
-          const knownVoices = getVoiceProfiles();
-          const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
-          
-          // Extract and match speakers
-          const { detectedVoices, voiceMap } = detectSpeakerFromText(transcript);
-          const voiceMatches = matchVoicesToProfiles(detectedVoices, voiceMap);
-          
-          // Apply voice labels
-          const enhancedTranscript = applyVoiceLabels(transcript, voiceMatches);
-          
-          SPEAKER_STATE.transcriptSegments[segmentIndex] = enhancedTranscript;
-          SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
-          
-          // Generate live notes
-          await generateLiveNotes();
-          
-          // Update UI
-          updateRecordingUI();
+          try {
+            const knownVoices = getVoiceProfiles();
+            const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
+            
+            // Extract and match speakers
+            const { detectedVoices, voiceMap } = detectSpeakerFromText(transcript);
+            const voiceMatches = matchVoicesToProfiles(detectedVoices, voiceMap);
+            
+            // Apply voice labels
+            const enhancedTranscript = applyVoiceLabels(transcript, voiceMatches);
+            
+            SPEAKER_STATE.transcriptSegments[segmentIndex] = enhancedTranscript;
+            SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
+            
+            // Generate live notes
+            await generateLiveNotes();
+            
+            // Update UI
+            updateRecordingUI();
+          } catch (error) {
+            console.error('Segment processing error:', error);
+            SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Error transcribing segment ${segmentIndex + 1}: ${error.message || 'Unknown error'}]`;
+            updateRecordingUI();
+          }
         });
         
-        audioChunks.length = 0; // Clear for next segment
+        SPEAKER_STATE.audioChunks = []; // Clear for next segment
       }
     };
     
@@ -359,7 +420,7 @@ async function startEnhancedRecording(mode = 'class') {
     
     // Start segment timer
     const segmentInterval = setInterval(() => {
-      if (SPEAKER_STATE.isRecording) {
+      if (SPEAKER_STATE.isRecording && !SPEAKER_STATE.isPaused && !SPEAKER_STATE.isStopping) {
         mediaRecorder.stop();
         mediaRecorder.start();
       }
@@ -375,8 +436,15 @@ async function startEnhancedRecording(mode = 'class') {
     
   } catch (error) {
     console.error('Recording error:', error);
-    toast('Could not start recording. Check microphone permissions.', 'error');
     cleanupRecording();
+    
+    if (error.name === 'NotAllowedError' || error.message?.includes('permission')) {
+      toast('Microphone access was blocked. Please allow microphone access in your browser settings.', 'error', 6000);
+    } else if (error.name === 'NotFoundError' || error.message?.includes('not found')) {
+      toast('No microphone found. Please connect a microphone.', 'error', 6000);
+    } else {
+      toast('Could not start recording. Please check your microphone and try again.', 'error', 6000);
+    }
   }
 }
 
@@ -486,55 +554,87 @@ function updateRecordingUI() {
 
 // Stop recording
 function stopRecording() {
-  if (!SPEAKER_STATE.isRecording) return;
+  // Prevent duplicate stop calls
+  if (!SPEAKER_STATE.isRecording || SPEAKER_STATE.isStopping) return;
   
+  SPEAKER_STATE.isStopping = true;
   SPEAKER_STATE.isRecording = false;
   
-  // Stop media recorder
-  if (SPEAKER_STATE.mediaRecorder) {
-    SPEAKER_STATE.mediaRecorder.stop();
-    SPEAKER_STATE.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-  }
-  
-  // Clear intervals
+  // Clear segment interval first to prevent new segments
   if (SPEAKER_STATE.segmentInterval) {
     clearInterval(SPEAKER_STATE.segmentInterval);
     SPEAKER_STATE.segmentInterval = null;
   }
   
-  // Process any remaining audio
-  if (SPEAKER_STATE.mediaRecorder && SPEAKER_STATE.audioChunks.length > 0) {
-    const blob = new Blob(SPEAKER_STATE.audioChunks, { type: RECORD_CONFIG.mimeType });
-    const segmentIndex = SPEAKER_STATE.transcriptSegments.length;
-    
-    SPEAKER_STATE.processingQueue = SPEAKER_STATE.processingQueue.then(async () => {
-      const knownVoices = getVoiceProfiles();
-      const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
-      SPEAKER_STATE.transcriptSegments[segmentIndex] = transcript;
-      SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
-      await generateLiveNotes();
-      updateRecordingUI();
-    });
+  // Stop media recorder - this will trigger onstop handler for final segment
+  if (SPEAKER_STATE.mediaRecorder) {
+    try {
+      SPEAKER_STATE.mediaRecorder.stop();
+    } catch (error) {
+      console.error('Error stopping media recorder:', error);
+    }
   }
   
-  // Save final transcript as note
-  saveRecordingAsNote();
-  
-  cleanupRecording();
-  updateRecordingUI();
-  toast('Recording stopped. Transcript saved as note.');
+  // Wait for any pending processing to complete, then save
+  SPEAKER_STATE.processingQueue = SPEAKER_STATE.processingQueue.then(async () => {
+    try {
+      // Process any remaining audio chunks that weren't processed
+      if (SPEAKER_STATE.audioChunks.length > 0) {
+        const mimeType = SPEAKER_STATE.mimeType || getSupportedMimeType();
+        const blob = new Blob(SPEAKER_STATE.audioChunks, { type: mimeType });
+        const segmentIndex = SPEAKER_STATE.transcriptSegments.length;
+        
+        const knownVoices = getVoiceProfiles();
+        const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
+        SPEAKER_STATE.transcriptSegments[segmentIndex] = transcript;
+        SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
+        await generateLiveNotes();
+        updateRecordingUI();
+        SPEAKER_STATE.audioChunks.length = 0;
+      }
+      
+      // Ensure all segments are in order
+      const orderedTranscript = SPEAKER_STATE.transcriptSegments
+        .map((segment, index) => ({ index, text: segment }))
+        .filter(seg => seg.text && seg.text.trim())
+        .sort((a, b) => a.index - b.index)
+        .map(seg => seg.text)
+        .join('\n\n');
+      
+      if (orderedTranscript !== SPEAKER_STATE.liveTranscript) {
+        SPEAKER_STATE.liveTranscript = orderedTranscript;
+      }
+      
+      // Save final transcript as note (only once)
+      saveRecordingAsNote();
+    } catch (error) {
+      console.error('Error during final processing:', error);
+      toast('Recording stopped but there was an error processing the final segment.', 'error', 6000);
+    } finally {
+      // Always cleanup
+      cleanupRecording();
+      SPEAKER_STATE.isStopping = false;
+      updateRecordingUI();
+      toast('Recording stopped. Transcript saved as note.');
+    }
+  });
 }
 
 // Pause recording
 function pauseRecording() {
-  if (!SPEAKER_STATE.isRecording) return;
+  if (!SPEAKER_STATE.isRecording || SPEAKER_STATE.isPaused || SPEAKER_STATE.isStopping) return;
   
   if (SPEAKER_STATE.mediaRecorder) {
-    SPEAKER_STATE.mediaRecorder.pause();
-    SPEAKER_STATE.isPaused = true;
+    try {
+      SPEAKER_STATE.mediaRecorder.pause();
+      SPEAKER_STATE.isPaused = true;
+      toast('Recording paused');
+    } catch (error) {
+      console.error('Error pausing recording:', error);
+      toast('Could not pause recording.', 'error');
+    }
   }
   
-  toast('Recording paused');
   updateRecordingUI();
 }
 
@@ -543,26 +643,41 @@ function resumeRecording() {
   if (!SPEAKER_STATE.isRecording || !SPEAKER_STATE.isPaused) return;
   
   if (SPEAKER_STATE.mediaRecorder) {
-    SPEAKER_STATE.mediaRecorder.resume();
-    SPEAKER_STATE.isPaused = false;
+    try {
+      SPEAKER_STATE.mediaRecorder.resume();
+      SPEAKER_STATE.isPaused = false;
+      toast('Recording resumed');
+    } catch (error) {
+      console.error('Error resuming recording:', error);
+      toast('Could not resume recording.', 'error');
+    }
   }
   
-  toast('Recording resumed');
   updateRecordingUI();
 }
 
 // Save recording as note
 function saveRecordingAsNote() {
   const transcript = SPEAKER_STATE.liveTranscript;
-  const notes = SPEAKER_STATE.liveNotes;
+  const aiNotesText = SPEAKER_STATE.liveNotes;
   
-  if (!transcript) {
+  if (!transcript || !transcript.trim()) {
     toast('No transcript to save');
     return;
   }
   
   const mode = SPEAKER_STATE.mode || 'class';
   const timestamp = new Date(SPEAKER_STATE.startTime).toLocaleString();
+  const durationMs = Date.now() - SPEAKER_STATE.startTime;
+  
+  // Ensure segments are in correct order
+  const orderedSegments = SPEAKER_STATE.transcriptSegments
+    .map((segment, index) => ({ index, text: segment }))
+    .filter(seg => seg.text && seg.text.trim())
+    .sort((a, b) => a.index - b.index)
+    .map(seg => seg.text);
+  
+  const finalTranscript = orderedSegments.join('\n\n') || transcript;
   
   const note = normalizeNote({
     id: uid(),
@@ -571,13 +686,14 @@ function saveRecordingAsNote() {
     folderPath: mode === 'meeting' ? 'Meetings' : 'Classes',
     tags: ['recording', mode, 'transcript'],
     kind: 'markdown',
-    body: `# ${mode === 'meeting' ? 'Meeting' : 'Class'} Recording\n\n**Date:** ${timestamp}\n**Duration:** ${formatDuration(Date.now() - SPEAKER_STATE.startTime)}\n\n## Transcript\n\n${transcript}\n\n## AI Notes\n\n${notes}`,
+    body: `# ${mode === 'meeting' ? 'Meeting' : 'Class'} Recording\n\n**Date:** ${timestamp}\n**Duration:** ${formatDuration(durationMs)}\n\n## Transcript\n\n${finalTranscript}\n\n${aiNotesText ? `## AI Notes\n\n${aiNotesText}` : ''}`,
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
   
-  // Add to notes
-  notes = [note, ...notes];
+  // Add to global notes array
+  const globalNotes = window.notes || [];
+  window.notes = [note, ...globalNotes];
   addFolderPath(note.folderPath);
   persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
   renderEverything();
@@ -603,19 +719,50 @@ function formatDuration(ms) {
 
 // Cleanup recording state
 function cleanupRecording() {
+  // Stop all tracks from media recorder stream
   if (SPEAKER_STATE.mediaRecorder) {
-    SPEAKER_STATE.mediaRecorder.stream?.getTracks().forEach(track => track.stop());
-    SPEAKER_STATE.mediaRecorder = null;
+    try {
+      if (SPEAKER_STATE.mediaRecorder.stream) {
+        SPEAKER_STATE.mediaRecorder.stream.getTracks().forEach(track => {
+          try { track.stop(); } catch (e) { console.warn('Error stopping track:', e); }
+        });
+      }
+      SPEAKER_STATE.mediaRecorder = null;
+    } catch (error) {
+      console.error('Error cleaning up media recorder:', error);
+    }
   }
   
+  // Stop all tracks from main stream
   if (SPEAKER_STATE.stream) {
-    SPEAKER_STATE.stream.getTracks().forEach(track => track.stop());
-    SPEAKER_STATE.stream = null;
+    try {
+      SPEAKER_STATE.stream.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) { console.warn('Error stopping track:', e); }
+      });
+      SPEAKER_STATE.stream = null;
+    } catch (error) {
+      console.error('Error cleaning up stream:', error);
+    }
   }
   
+  // Clear segment interval
+  if (SPEAKER_STATE.segmentInterval) {
+    clearInterval(SPEAKER_STATE.segmentInterval);
+    SPEAKER_STATE.segmentInterval = null;
+  }
+  
+  // Reset all state
   SPEAKER_STATE.isRecording = false;
   SPEAKER_STATE.isPaused = false;
+  SPEAKER_STATE.isStopping = false;
   SPEAKER_STATE.audioChunks = [];
+  SPEAKER_STATE.transcriptSegments = [];
+  SPEAKER_STATE.liveTranscript = '';
+  SPEAKER_STATE.liveNotes = '';
+  SPEAKER_STATE.startTime = 0;
+  SPEAKER_STATE.elapsedMs = 0;
+  SPEAKER_STATE.mimeType = null;
+  SPEAKER_STATE.mode = null;
 }
 
 // =============================================================================
