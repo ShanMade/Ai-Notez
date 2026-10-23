@@ -35,6 +35,7 @@ class Settings:
         if origin.strip()
     )
     default_provider: str = os.getenv("AI_DEFAULT_PROVIDER", "gemini").lower()
+    mistral_enabled: bool = os.getenv("AI_MISTRAL_ENABLED", "false").lower() in {"true", "1", "yes"}
     gemini_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GEMINI_MODELS",
@@ -45,6 +46,13 @@ class Settings:
         item.strip() for item in os.getenv(
             "AI_GROQ_MODELS",
             "llama-3.3-70b-versatile,openai/gpt-oss-120b,openai/gpt-oss-20b,meta-llama/llama-4-scout-17b-16e-instruct,qwen/qwen3-32b,llama-3.1-8b-instant",
+        ).split(",") if item.strip()
+    )
+    mistral_key: str = os.getenv("AI_MISTRAL_API_KEY", "")
+    mistral_models: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "AI_MISTRAL_MODELS",
+            "mistral-large-latest,mistral-small-latest,mistral-tiny-latest",
         ).split(",") if item.strip()
     )
     gemini_key: str = os.getenv("AI_GEMINI_API_KEY", "")
@@ -63,11 +71,11 @@ class Settings:
 
 settings = Settings()
 
-if settings.default_provider not in {"gemini", "groq"}:
-    raise ValueError("AI_DEFAULT_PROVIDER must be 'gemini' or 'groq'.")
+if settings.default_provider not in {"gemini", "groq", "mistral"}:
+    raise ValueError("AI_DEFAULT_PROVIDER must be 'gemini', 'groq', or 'mistral'.")
 if not settings.gemini_models or not settings.groq_models:
     raise ValueError("AI_GEMINI_MODELS and AI_GROQ_MODELS must each contain at least one model.")
-if settings.embedding_provider not in {"gemini", "groq"}:
-    raise ValueError("AI_EMBEDDING_PROVIDER must be 'gemini' or 'groq'.")
+if settings.embedding_provider not in {"gemini", "groq", "mistral"}:
+    raise ValueError("AI_EMBEDDING_PROVIDER must be 'gemini', 'groq', or 'mistral'.")
 if not 0 <= settings.min_similarity <= 1:
     raise ValueError("AI_MIN_SIMILARITY must be between 0 and 1.")

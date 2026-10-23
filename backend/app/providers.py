@@ -12,6 +12,7 @@ from .config import settings
 MODEL_DEFAULTS = {
     "gemini": settings.gemini_models,
     "groq": settings.groq_models,
+    "mistral": settings.mistral_models,
 }
 _cooldowns: dict[str, float] = {}
 _cooldown_lock = threading.Lock()
@@ -32,11 +33,13 @@ def provider_key(provider: str) -> str:
         return settings.gemini_key
     if provider == "groq":
         return settings.groq_key
+    if provider == "mistral":
+        return settings.mistral_key
     return ""
 
 
 def embedding_key() -> str:
-    return settings.embedding_key or provider_key("gemini") or provider_key("groq")
+    return settings.embedding_key or provider_key("gemini") or provider_key("groq") or provider_key("mistral")
 
 
 def configured_providers() -> list[str]:
@@ -110,6 +113,25 @@ async def generate(
             text = str(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
             if data.get("choices", [{}])[0].get("finish_reason") == "length":
                 raise HTTPException(status_code=502, detail="The AI answer was cut off.")
+        elif provider == "mistral":
+            response = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "temperature": temperature,
+                    "messages": [
+                        {"role": "system", "content": f"{system_prompt}\n\nThe actual generation provider is Mistral and the model is {model}."},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+            if not response.is_success:
+                raise _provider_error(response)
+            data = response.json()
+            text = str(data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            if data.get("choices", [{}])[0].get("finish_reason") == "length":
+                raise HTTPException(status_code=502, detail="The AI answer was cut off.")
         else:
             parts: list[dict[str, Any]] = [{"text": prompt}]
             for image in images:
@@ -152,11 +174,16 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     embed_model = settings.embedding_model
     embed_dimensions = settings.embedding_dimensions
     
-    # If gemini is the embedding provider but has no key, try groq
-    if embed_provider == "gemini" and not settings.gemini_key and settings.groq_key:
-        embed_provider = "groq"
-        embed_model = settings.groq_embedding_model
-        embed_dimensions = 1024  # Groq text-embedding-3-small uses 1024 dimensions
+    # If gemini is the embedding provider but has no key, try groq or mistral
+    if embed_provider == "gemini" and not settings.gemini_key:
+        if settings.groq_key:
+            embed_provider = "groq"
+            embed_model = settings.groq_embedding_model
+            embed_dimensions = 1024  # Groq text-embedding-3-small uses 1024 dimensions
+        elif settings.mistral_key:
+            embed_provider = "mistral"
+            embed_model = "mistral-embedding"
+            embed_dimensions = 1024  # Mistral embedding uses 1024 dimensions
     
     if embed_provider == "gemini":
         requests = [
@@ -185,6 +212,20 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             try:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/embeddings",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"model": embed_model, "input": texts},
+                )
+                if not response.is_success:
+                    raise _provider_error(response)
+                data = response.json()
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail="Embedding request timed out.")
+        vectors = [item.get("embedding", []) for item in data.get("data", [])]
+    elif embed_provider == "mistral":
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    "https://api.mistral.ai/v1/embeddings",
                     headers={"Authorization": f"Bearer {key}"},
                     json={"model": embed_model, "input": texts},
                 )
