@@ -2411,3 +2411,8 @@ html[data-theme="dark"] .ai-search-input { background: #142236; }
 .ai-search-clear:hover { opacity: 1; }
 .ai-search-highlight { background: color-mix(in srgb, var(--nz-accent) 30%, transparent); color: var(--nz-accent); padding: 1px 3px; border-radius: 3px; }
 html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--nz-accent) 40%, #ffffff); }
+
+/* Saving status */
+.save-spinner { font-size: 11px; opacity: .7; }
+.save-spinner::after { content: '.'; animation: nzDots 1s infinite; }
+@media (prefers-reduced-motion: reduce) { .save-spinner::after { animation: none; } }

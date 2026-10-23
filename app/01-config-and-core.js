@@ -1298,7 +1298,9 @@
       reviewClockId = window.setInterval(refreshReviewIndicators, 60_000);
     }
     async function persistNote(note) {
-      if (currentSession?.mode === 'demo') { localNotesWrite(); return; }
+      if (noteSaving) return; // Prevent duplicate saves
+      noteSaving = true;
+      if (currentSession?.mode === 'demo') { localNotesWrite(); noteSaving = false; return; }
       if (currentSession?.mode === 'cloud') {
         const uidValue = currentSession.user.uid;
         // Persist to the timestamped outbox immediately so refresh/offline cannot lose a change.
@@ -1313,11 +1315,13 @@
           markPending(uidValue, prepared.id, false);
           writeCloudCache(uidValue, notes);
           setSyncState(hasPendingCloudChanges(uidValue) ? 'pending' : 'cloud');
-        } catch (error) { setSyncState('pending'); throw error; }
+        } catch (error) { setSyncState('pending'); noteSaving = false; throw error; }
+        noteSaving = false;
       }
     }
 
-    const noteSearchCache = new WeakMap();
+    let noteSaving = false;
+const noteSearchCache = new WeakMap();
     function foldSearchText(value = '') {
       return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     }
