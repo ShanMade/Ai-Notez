@@ -1161,7 +1161,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
       const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+notes\s+(?:do\s+i\s+have|are\s+in\s+(?:my|the)\s+library)\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
-      const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
 
@@ -1220,8 +1219,11 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         }
       }
       
-      // Fall back to local retrieval if knowledge index didn't return results
-      if ((!found.length || !note) && !wantsLibrary && !wantsInventory) {
+      // Fall back to local retrieval if knowledge index didn't return results.
+      // (The old `wantsLibrary` guard skipped retrieval exactly for questions
+      // phrased "from my notes" / "across all notes", so BYOK chats answered
+      // without any note context.)
+      if ((!found.length || !note) && !wantsInventory) {
         if (note) {
           const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
           context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
@@ -1229,7 +1231,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           // Try backend semantic search as fallback
           if (aiBackendSession()) {
             try {
-              const result = await aiBackendRequest('/v1/index/search', { query: question, limit: 5 });
+              // Managed AI supports guest sessions, so retrieval must too.
+              const result = await aiBackendRequest('/v1/index/search', { query: question, limit: 5 }, 'POST', undefined, true);
               found = (result.results || []).map(item => ({ id: item.id, title: item.title, folderPath: item.folderPath, body: item.text }));
             } catch (error) {
               console.warn('Notez semantic search failed; using local retrieval:', error);

@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from .config import settings
+from .config import EMBEDDING, settings
 
 
 # =============================================================================
@@ -73,7 +73,7 @@ def provider_key(provider: str) -> str:
 
 
 def embedding_key() -> str:
-    return settings.embedding_key or provider_key("gemini") or provider_key("groq") or provider_key("mistral")
+    return EMBEDDING.key
 
 
 def configured_providers() -> list[str]:
@@ -198,44 +198,32 @@ async def generate(
     return {"text": text, "provider": provider, "model": model}
 
 
-async def embed_texts(texts: list[str]) -> list[list[float]]:
-    key = embedding_key()
-    if not key:
+async def _embed(texts: list[str], task_type: str) -> list[list[float]]:
+    """Embed texts with the resolved provider/profile.
+
+    ``task_type`` is only understood by Gemini; it keeps query and document
+    embeddings in the same retrieval space (an asymmetric-embedding fix).
+    """
+    profile = EMBEDDING
+    if not profile.key:
         raise HTTPException(status_code=503, detail="Semantic indexing is not configured with an embedding credential.")
-    
-    # Check embedding rate limit
-    embed_provider = settings.embedding_provider
-    await embedding_limiter.check(embed_provider)
-    
-    # Determine which embedding provider to use
-    embed_model = settings.embedding_model
-    embed_dimensions = settings.embedding_dimensions
-    
-    # If gemini is the embedding provider but has no key, try groq or mistral
-    if embed_provider == "gemini" and not settings.gemini_key:
-        if settings.groq_key:
-            embed_provider = "groq"
-            embed_model = settings.groq_embedding_model
-            embed_dimensions = 1024  # Groq text-embedding-3-small uses 1024 dimensions
-        elif settings.mistral_key:
-            embed_provider = "mistral"
-            embed_model = "mistral-embedding"
-            embed_dimensions = 1024  # Mistral embedding uses 1024 dimensions
-    
-    if embed_provider == "gemini":
+    await embedding_limiter.check(profile.provider)
+
+    if profile.provider == "gemini":
         requests = [
             {
-                "model": f"models/{embed_model}",
+                "model": f"models/{profile.model}",
                 "content": {"parts": [{"text": text}]},
-                "outputDimensionality": embed_dimensions,
+                "taskType": task_type,
+                "outputDimensionality": profile.dimensions,
             }
             for text in texts
         ]
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             try:
                 response = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{embed_model}:batchEmbedContents",
-                    params={"key": key},
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{profile.model}:batchEmbedContents",
+                    params={"key": profile.key},
                     json={"requests": requests},
                 )
                 if not response.is_success:
@@ -244,27 +232,13 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail="Embedding request timed out.")
         vectors = [item.get("values", []) for item in data.get("embeddings", [])]
-    else:  # groq
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-            try:
-                response = await client.post(
-                    "https://api.groq.com/openai/v1/embeddings",
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={"model": embed_model, "input": texts},
-                )
-                if not response.is_success:
-                    raise _provider_error(response)
-                data = response.json()
-            except httpx.TimeoutException:
-                raise HTTPException(status_code=504, detail="Embedding request timed out.")
-        vectors = [item.get("embedding", []) for item in data.get("data", [])]
-    if embed_provider == "mistral":
+    elif profile.provider == "mistral":
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             try:
                 response = await client.post(
                     "https://api.mistral.ai/v1/embeddings",
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={"model": embed_model, "input": texts},
+                    headers={"Authorization": f"Bearer {profile.key}"},
+                    json={"model": profile.model, "input": texts},
                 )
                 if not response.is_success:
                     raise _provider_error(response)
@@ -272,14 +246,33 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail="Embedding request timed out.")
         vectors = [item.get("embedding", []) for item in data.get("data", [])]
-    
-    if len(vectors) != len(texts) or any(len(vector) != embed_dimensions for vector in vectors):
-        raise HTTPException(status_code=502, detail=f"The embedding provider returned an incompatible vector dimension. Expected {embed_dimensions}.")
+    else:  # groq-compatible embeddings endpoint
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/embeddings",
+                    headers={"Authorization": f"Bearer {profile.key}"},
+                    json={"model": profile.model, "input": texts},
+                )
+                if not response.is_success:
+                    raise _provider_error(response)
+                data = response.json()
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail="Embedding request timed out.")
+        vectors = [item.get("embedding", []) for item in data.get("data", [])]
+
+    if len(vectors) != len(texts) or any(len(vector) != profile.dimensions for vector in vectors):
+        raise HTTPException(
+            status_code=502,
+            detail=f"The embedding provider returned an incompatible vector dimension. Expected {profile.dimensions}.",
+        )
     return vectors
 
 
+async def embed_texts(texts: list[str]) -> list[list[float]]:
+    return await _embed(texts, task_type="RETRIEVAL_DOCUMENT")
+
+
 async def embed_query(text: str) -> list[float]:
-    # Check embedding rate limit for query
-    await embedding_limiter.check(settings.embedding_provider)
-    vectors = await embed_texts([text])
+    vectors = await _embed([text], task_type="RETRIEVAL_QUERY")
     return vectors[0]
