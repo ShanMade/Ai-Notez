@@ -187,7 +187,7 @@ def test_inventory_intent_detection():
 def test_inventory_overrides_existing_semantic_context_skip():
     index = FakeIndex()
     prompt, sources = call(
-        'NUMBERED NOTES FROM THE USER\'S LIBRARY:\\n[1] Irrelevant note\\n<note>old context</note>\\nUSER: What\'s in my library?',
+        'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n[1] Irrelevant note\n<note>old context</note>\nUSER: What\'s in my library?',
         {"a1": {"title": "Actual inventory note"}},
         index,
     )
@@ -199,7 +199,7 @@ def test_inventory_overrides_existing_semantic_context_skip():
 
 def test_latest_user_message_controls_inventory_intent():
     prompt, sources = call(
-        "USER: What's in my library?\\nASSISTANT: Here is an overview.\\nUSER: Explain photosynthesis.",
+        "USER: What's in my library?\nASSISTANT: Here is an overview.\nUSER: Explain photosynthesis.",
         {"bio": {"title": "Biology", "body": "Photosynthesis details"}},
         FakeIndex(),
     )
