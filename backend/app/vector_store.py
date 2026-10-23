@@ -88,13 +88,13 @@ class _ReadableHTML(HTMLParser):
         if tag.lower() in {"script", "style", "noscript", "svg", "head"}:
             self.skip += 1
         elif not self.skip and tag.lower() in {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
-            self.parts.append("\\n")
+            self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag.lower() in {"script", "style", "noscript", "svg", "head"} and self.skip:
             self.skip -= 1
         elif not self.skip and tag.lower() in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
-            self.parts.append("\\n")
+            self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
         if not self.skip and data.strip():
@@ -123,7 +123,7 @@ def _readable_text(value: object) -> str:
                         collect(child)
             collect(parsed)
             if values:
-                return "\\n".join(values)
+                return "\n".join(values)
         except (ValueError, TypeError):
             pass
     if "<" in value and ">" in value:
@@ -147,7 +147,7 @@ def note_text(note: dict) -> str:
         if extra and extra not in {body, readable}:
             extra_text.append(extra)
     if readable:
-        body = f"{body}\\n{readable}".strip()
+        body = f"{body}\n{readable}".strip()
     tags = note.get("tags", [])
     if not isinstance(tags, (list, tuple)):
         tags = []
@@ -159,7 +159,7 @@ def note_text(note: dict) -> str:
         body,
         *extra_text,
     ]
-    return "\\n".join(part for part in fields if part).strip()[:200_000]
+    return "\n".join(part for part in fields if part).strip()[:200_000]
 
 
 def split_chunks(text: str) -> list[str]:
