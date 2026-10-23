@@ -688,13 +688,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const order = [active, ...(aiStore.get('notez-ai-autoswitch', '1') === '1' ? Object.keys(AI_PROVIDERS).filter(id => id !== active && aiKey(id)) : [])];
       let lastError;
       for (const provider of order) {
-        for (let attempt = 0; attempt < 3; attempt++) {
+        let attempt = 0;
+        while (attempt < 3) {
           try { return await aiCall(provider, prompt, options); }
           catch (error) {
             lastError = error;
-            const transient = error.status === 429 || error.status >= 500 || error instanceof TypeError || error.name === 'AbortError';
-            if (!transient) throw error;
-            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1) + Math.random() * 300));
+            const isRateLimited = error.status === 429;
+            const isTransient = error.status >= 500 || error instanceof TypeError || error.name === 'AbortError';
+            if (!isRateLimited && !isTransient) throw error;
+            if (isRateLimited) break;
+            attempt++;
+            if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1) + Math.random() * 300));
           }
         }
       }
