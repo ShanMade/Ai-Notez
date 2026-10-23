@@ -755,7 +755,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     // ================= NotezAi docked panel with chat history =================
     const NZAI_CHAT_KEY = () => 'notez-ai-chats-v2-' + (currentSession?.mode === 'cloud' ? currentSession.user.uid : 'demo');
-    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [] };
+    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [], rendering: false };
     function nzaiReadChats() { try { const list = JSON.parse(localStorage.getItem(NZAI_CHAT_KEY())); return Array.isArray(list) ? list : []; } catch { return []; } }
     function nzaiWriteChats(list) {
       const trimmed = list.slice(0, 50).map(chat => ({ ...chat, messages: (chat.messages || []).slice(-100) }));
@@ -769,8 +769,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       list.sort((x, y) => y.updatedAt - x.updatedAt); nzaiWriteChats(list);
       return chat;
     }
-    function nzaiNewChat() { nzai.chatId = ''; nzai.view = 'chat'; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
-    function nzaiGoView(view) { nzai.view = view; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
+    function nzaiNewChat() { nzai.chatId = ''; nzai.view = 'chat'; nzai.searchQuery = ''; nzai.searchResults = []; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
+    function nzaiGoView(view) { nzai.view = view; if (nzai.dock === 'voice') return dockShow('ai'); nzai.searchQuery = ''; nzai.searchResults = []; nzaiRender(); }
     // Keeps the floating header in step with the open screen: close or back on the left, the current screen lit in the toolbar.
     function nzaiCtxHtml() {
       const note = nzaiScopeNote(), inNote = nzai.scope === 'note' && note;
@@ -921,6 +921,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <div class="ai-foot"><button type="button" class="ai-foot-link" data-nzai="settings" title="Change provider or model">${esc(provider)}</button><span>${nzaiReadChats().length} saved chat${nzaiReadChats().length === 1 ? '' : 's'}</span></div>`;
       const threadEl = $('#nzai-messages', body); if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
       if (nzai.reveal) nzaiStartReveal();
+      nzai.rendering = false;
       // Setup auto-growing textarea
       const textarea = $('#nzai-input', body);
       if (textarea && !textarea.dataset.autoGrow) {
