@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-face="sans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reader mock · Notez</title>
+<link rel="stylesheet" href="../vendor/katex/katex.min.css" />
+<style>
+  /* ---------------------------------------------------------------- tokens */
+  :root {
+    --canvas: #f1eee5;
+    --sheet: #fffdf8;
+    --sheet-2: #faf7ef;
+    --ink: #1b211a;
+    --ink-soft: #3a4239;
+    --muted: #6b7268;
+    --faint: #9aa196;
+    --line: rgba(27, 33, 26, .105);
+    --line-strong: rgba(27, 33, 26, .18);
+    --accent: #0c4a2e;
+    --accent-ink: #0a3f27;
+    --accent-soft: rgba(12, 74, 46, .065);
+    --gold: #9c7d14;
+    --shadow-sm: 0 1px 2px rgba(24, 32, 26, .05);
+    --shadow-md: 0 1px 2px rgba(24, 32, 26, .04), 0 14px 34px -22px rgba(24, 32, 26, .35);
+    --radius: 16px;
+    --topbar: 62px;
+    --rail: 216px;
+    --dock: 386px;
+    --read-size: 16.5px;
+    --read-lead: 1.76;
+    --measure: 68ch;
+    --read-font: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    --ui-font: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    --canvas: #0a100d;
+    --sheet: #101814;
+    --sheet-2: #0d1512;
+    --ink: #e9efea;
+    --ink-soft: #c8d2cb;
+    --muted: #93a29a;
+    --faint: #6d7b73;
+    --line: rgba(226, 240, 232, .12);
+    --line-strong: rgba(226, 240, 232, .22);
+    --accent: #4fc79a;
+    --accent-ink: #7ad9b4;
+    --accent-soft: rgba(79, 199, 154, .10);
+    --gold: #d9b25a;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, .4), 0 22px 44px -30px rgba(0, 0, 0, .9);
+    color-scheme: dark;
+  }
+  html[data-face="serif"] { --read-font: "Iowan Old Style", "Charter", "Palatino Linotype", Palatino, Georgia, serif; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: calc(var(--topbar) + 14px); }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--ui-font);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .btn.on { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 45%, transparent); background: color-mix(in srgb, var(--gold) 10%, var(--sheet)); }
+  a { color: var(--accent-ink); text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 2px; }
+  ::selection { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+  /* --------------------------------------------------------------- topbar */
+  .progress { position: fixed; inset: 0 0 auto; height: 3px; z-index: 60; background: transparent; }
+  .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--gold))); transition: width .08s linear; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    height: var(--topbar);
+    display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center; gap: 16px;
+    padding: 0 18px 0 12px;
+    background: color-mix(in srgb, var(--canvas) 78%, transparent);
+    backdrop-filter: saturate(1.15) blur(16px);
+    -webkit-backdrop-filter: saturate(1.15) blur(16px);
+    border-bottom: 1px solid transparent;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .topbar.stuck { border-bottom-color: var(--line); background: color-mix(in srgb, var(--canvas) 92%, transparent); }
+  .tb-left, .tb-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .tb-right { justify-content: flex-end; }
+  .icon-btn {
+    flex: 0 0 auto; width: 34px; height: 34px; display: inline-grid; place-items: center;
+    border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted);
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .icon-btn:hover { background: var(--sheet); border-color: var(--line); color: var(--ink); box-shadow: var(--shadow-sm); }
+  .icon-btn:focus-visible, .chip:focus-visible, .btn:focus-visible, .toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .icon-btn svg { width: 17px; height: 17px; }
+
+  .crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 4px; font-size: 12.5px; color: var(--muted); }
+  .crumbs b { min-width: 0; color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumbs span { color: var(--faint); }
+  .crumbs .folder { white-space: nowrap; }
+
+  .scroll-title {
+    justify-self: center; max-width: 46vw; font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    opacity: 0; transform: translateY(4px); transition: opacity .22s ease, transform .22s ease;
+    pointer-events: none;
+  }
+  .topbar.stuck .scroll-title { opacity: 1; transform: none; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--sheet);
+    font-size: 12.5px; font-weight: 550; color: var(--ink-soft); box-shadow: var(--shadow-sm);
+    transition: border-color .15s ease, background .15s ease, transform .15s ease;
+  }
+  .btn:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+  .btn svg { width: 15px; height: 15px; }
+  .btn.primary { background: var(--ink); border-color: transparent; color: var(--canvas); }
+  html[data-theme="dark"] .btn.primary { background: var(--accent); color: #06130d; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.ghost { background: transparent; box-shadow: none; border-color: transparent; color: var(--muted); }
+  .btn.ghost:hover { background: var(--sheet); border-color: var(--line); color: var(--ink); }
+  .btn .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .5; }
+  .pill-mock {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--gold);
+    border: 1px dashed color-mix(in srgb, var(--gold) 45%, transparent);
+    padding: 4px 7px; border-radius: 999px; margin-left: 6px;
+  }
+
+  /* ----------------------------------------------------------------- shell */
+  .shell {
+    display: grid;
+    grid-template-columns: var(--rail) minmax(0, 1fr);
+    gap: 0;
+    align-items: start;
+    max-width: 1660px;
+    margin: 0 auto;
+    transition: grid-template-columns .22s ease;
+  }
+  body.dock-open .shell { grid-template-columns: var(--rail) minmax(0, 1fr) var(--dock); }
+  body.focus .shell { grid-template-columns: minmax(0, 1fr); }
+  body.focus .rail { display: none; }
+
+  /* ------------------------------------------------------------------ rail */
+  .rail {
+    position: sticky; top: var(--topbar);
+    height: calc(100vh - var(--topbar));
+    padding: 26px 18px 22px 20px;
+    display: flex; flex-direction: column; gap: 18px;
+    overflow: auto; scrollbar-width: thin;
+  }
+  .eyebrow {
+    font-size: 9.5px; font-weight: 680; letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+    margin: 0 0 10px;
+  }
+  .toc { display: flex; flex-direction: column; gap: 1px; }
+  .toc a {
+    position: relative; display: block; padding: 7px 10px 7px 12px; border-radius: 8px;
+    color: var(--muted); font-size: 12.5px; line-height: 1.35; text-decoration: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: color .15s ease, background .15s ease;
+  }
+  .toc a::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px;
+    background: transparent; transition: background .15s ease;
+  }
+  .toc a:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .toc a.on { color: var(--ink); font-weight: 600; }
+  .toc a.on::before { background: var(--accent); }
+  .toc a.sub { padding-left: 24px; font-size: 12px; color: var(--faint); }
+  .toc a.sub.on { color: var(--ink-soft); }
+
+  .rail-card {
+    margin-top: auto; display: grid; gap: 9px; padding: 12px;
+    border: 1px solid var(--line); border-radius: 13px; background: color-mix(in srgb, var(--sheet) 70%, transparent);
+  }
+  .rail-card .row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted); }
+  .rail-card b { color: var(--ink); font-weight: 600; }
+  .rail-card .bar { height: 4px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .rail-card .bar i { display: block; height: 100%; width: 62%; background: var(--accent); border-radius: 3px; }
+  .rail-card .ask {
+    margin-top: 2px; height: 32px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--sheet); font-size: 12px; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .rail-card .ask:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent-ink); }
+
+  /* ----------------------------------------------------------------- stage */
+  .stage { padding: 26px clamp(18px, 3vw, 40px) 90px; min-width: 0; }
+  .paper {
+    width: 100%; max-width: calc(var(--measure) + 160px);
+    margin: 0 auto; padding: clamp(28px, 4vw, 58px) clamp(22px, 5vw, 76px) 44px;
+    background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+  }
+  body.focus .paper { max-width: calc(var(--measure) + 40px); border-color: transparent; box-shadow: none; background: transparent; }
+
+  /* ------------------------------------------------------------------ head */
+  .kicker { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 620; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-ink); }
+  .kicker .sep { color: var(--faint); }
+  .kicker .kind { color: var(--muted); letter-spacing: .1em; }
+  h1 {
+    margin: 14px 0 0; font-size: clamp(31px, 3.6vw, 44px); line-height: 1.08; letter-spacing: -.035em;
+    font-weight: 620; color: var(--ink); text-wrap: balance;
+  }
+  .dek { margin: 14px 0 0; max-width: 56ch; font-size: 16px; line-height: 1.6; color: var(--muted); }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 22px 0 0; font-size: 12px; color: var(--muted); }
+  .meta .chip {
+    display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--sheet-2); color: var(--ink-soft);
+  }
+  .meta .chip.accent { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 26%, transparent); background: var(--accent-soft); }
+  .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+
+  .head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 22px 0 0; padding: 0 0 22px; border-bottom: 1px solid var(--line); }
+  .head-actions .btn { height: 32px; font-size: 12px; }
+  .head-actions .spacer { flex: 1; }
+
+  /* ---------------------------------------------------------------- article */
+  .article { margin-top: 30px; font-family: var(--read-font); font-size: var(--read-size); line-height: var(--read-lead); color: var(--ink-soft); }
+  .article > p:first-of-type { color: var(--ink); }
+  .article p { margin: 0 0 1.05em; }
+  .article strong { color: var(--ink); font-weight: 640; }
+  .article h2 {
+    display: flex; align-items: baseline; gap: 10px;
+    margin: 2.1em 0 .55em; font-family: var(--ui-font); font-size: 1.36em; line-height: 1.25;
+    letter-spacing: -.02em; font-weight: 620; color: var(--ink); scroll-margin-top: calc(var(--topbar) + 18px);
+  }
+  .article h2 .num {
+    flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px;
+    border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink);
+    font-size: 11.5px; font-weight: 700; letter-spacing: .02em; transform: translateY(-1px);
+  }
+  .article h3 { margin: 1.7em 0 .45em; font-family: var(--ui-font); font-size: 1.02em; font-weight: 650; letter-spacing: -.01em; color: var(--ink); scroll-margin-top: calc(var(--topbar) + 18px); }
+  .article ul, .article ol { margin: 0 0 1.1em; padding-left: 1.25em; }
+  .article li { margin: 0 0 .42em; }
+  .article li::marker { color: var(--faint); }
+  .article a { font-family: var(--ui-font); font-size: .94em; }
+  .article hr { border: 0; border-top: 1px solid var(--line); margin: 2.2em 0; }
+
+  .lead-in { font-size: 1.08em; color: var(--ink); }
+
+  .callout {
+    position: relative; margin: 1.5em 0; padding: 16px 18px 15px 20px;
+    border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px;
+    background: var(--accent-soft); font-size: .98em; line-height: 1.65;
+  }
+  .callout .label {
+    display: block; margin-bottom: 5px; font-family: var(--ui-font);
+    font-size: 9.5px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--accent-ink);
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout.gold { border-left-color: var(--gold); background: color-mix(in srgb, var(--gold) 9%, transparent); }
+  .callout.gold .label { color: color-mix(in srgb, var(--gold) 80%, var(--ink)); }
+
+  .formula {
+    margin: 1.35em 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--sheet-2); overflow-x: auto; scrollbar-width: thin;
+  }
+  .formula .katex-display { margin: 0; }
+  .formula .note { margin: 8px 0 0; font-family: var(--ui-font); font-size: 11.5px; line-height: 1.5; color: var(--muted); text-align: center; }
+
+  .table-wrap { margin: 1.5em 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--ui-font); font-size: 13px; line-height: 1.55; }
+  th, td { padding: 11px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+    background: var(--sheet-2); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
+  td .katex { font-size: 1.02em; }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 1.3em 0; font-family: var(--ui-font); font-size: .94em; }
+  .steps li { counter-increment: step; position: relative; padding: 0 0 0 38px; margin: 0 0 16px; line-height: 1.6; }
+  .steps li::before {
+    content: counter(step); position: absolute; left: 0; top: -1px;
+    width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+    border: 1px solid var(--line-strong); color: var(--muted); font-size: 11px; font-weight: 650;
+    background: var(--sheet);
+  }
+  .steps .katex-display { margin: .4em 0; }
+
+  .takeaways { margin: 1.2em 0 0; padding: 0; list-style: none; font-size: .98em; }
+  .takeaways li { position: relative; padding: 0 0 0 26px; margin: 0 0 12px; line-height: 1.55; }
+  .takeaways li::before {
+    content: "✓"; position: absolute; left: 0; top: 0; color: var(--accent); font-weight: 700; font-size: 12px;
+    width: 17px; height: 17px; display: grid; place-items: center; border-radius: 5px; background: var(--accent-soft);
+  }
+
+  /* -------------------------------------------------------------- article foot */
+  .sources { margin: 2.2em 0 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--sheet-2); font-family: var(--ui-font); }
+  .sources summary { cursor: pointer; font-size: 11.5px; font-weight: 620; color: var(--muted); letter-spacing: .02em; }
+  .sources summary::-webkit-details-marker { display: none; }
+  .sources summary::before { content: "▸"; display: inline-block; margin-right: 7px; transition: transform .15s ease; }
+  .sources[open] summary::before { transform: rotate(90deg); }
+  .sources .list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .src {
+    display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+    padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--sheet);
+    font-size: 11.5px; color: var(--ink-soft); text-decoration: none;
+  }
+  .src:hover { border-color: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--accent-ink); }
+  .src i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+
+  .next {
+    margin: 30px 0 0; padding: 22px; border: 1px solid var(--line); border-radius: 14px;
+    background: linear-gradient(180deg, var(--sheet-2), var(--sheet)); font-family: var(--ui-font);
+  }
+  .next h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; color: var(--ink); }
+  .next p { margin: 0 0 14px; font-size: 12px; color: var(--muted); }
+  .next .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  .next a.card {
+    display: block; padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px;
+    background: var(--sheet); text-decoration: none; transition: border-color .15s ease, transform .15s ease;
+  }
+  .next a.card:hover { border-color: color-mix(in srgb, var(--accent) 35%, transparent); transform: translateY(-1px); }
+  .next .card b { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+  .next .card small { font-size: 11px; color: var(--muted); }
+
+  .paper-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--line); font-family: var(--ui-font); font-size: 11px; color: var(--faint); }
+  .paper-foot .review { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+
+  /* ------------------------------------------------------------------ dock */
+  .dock {
+    position: sticky; top: var(--topbar); height: calc(100vh - var(--topbar));
+    display: none; flex-direction: column; min-width: 0;
+    border-left: 1px solid var(--line); background: var(--sheet);
+  }
+  body.dock-open .dock { display: flex; }
+  .dock-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px 16px; border-bottom: 1px solid var(--line); }
+  .mark {
+    width: 28px; height: 28px; border-radius: 9px; flex: 0 0 28px;
+    background: radial-gradient(120% 120% at 30% 20%, #2f8a63, var(--accent) 60%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+    display: grid; place-items: center; color: #eaf7f0; font-size: 13px; font-weight: 700;
+  }
+  .dock-head b { display: block; font-size: 13px; font-weight: 650; letter-spacing: -.01em; }
+  .dock-head small { display: block; font-size: 10.5px; color: var(--muted); }
+  .dock-head .spacer { flex: 1; }
+
+  .thread { flex: 1; overflow: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 16px; scrollbar-width: thin; }
+  .q { align-self: flex-end; max-width: 88%; padding: 9px 13px; border-radius: 14px 14px 4px 14px; background: var(--accent-soft); font-size: 13px; line-height: 1.5; color: var(--ink); }
+  .a { font-size: 13.5px; line-height: 1.66; color: var(--ink-soft); }
+  .a p { margin: 0 0 9px; }
+  .a strong { color: var(--ink); }
+  .a .formula { margin: 10px 0; padding: 10px 12px; }
+  .a .src-inline {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; padding: 4px 9px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--sheet-2);
+    font-family: var(--ui-font); font-size: 10.5px; color: var(--muted);
+  }
+  .a .tools { display: flex; gap: 2px; margin-top: 6px; opacity: 0; transition: opacity .15s ease; }
+  .a:hover .tools { opacity: 1; }
+  .tool { border: 0; background: transparent; color: var(--faint); padding: 4px 7px; border-radius: 6px; font-size: 11px; }
+  .tool:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+
+  .quick { display: flex; gap: 6px; overflow-x: auto; padding: 4px 16px 10px; scrollbar-width: none; }
+  .quick::-webkit-scrollbar { display: none; }
+  .qchip {
+    flex: 0 0 auto; height: 30px; padding: 0 11px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--sheet-2); color: var(--ink-soft);
+    font-size: 11.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .qchip:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent-ink); }
+
+  .composer { display: flex; align-items: flex-end; gap: 8px; margin: 0 14px 12px; padding: 9px 9px 9px 14px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--sheet-2); }
+  .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+  .composer textarea { flex: 1; min-height: 22px; max-height: 120px; border: 0; outline: 0; resize: none; background: transparent; color: var(--ink); font: 13px/1.5 var(--ui-font); padding: 2px 0; }
+  .composer .send { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--ink); color: var(--canvas); display: grid; place-items: center; }
+  html[data-theme="dark"] .composer .send { background: var(--accent); color: #06130d; }
+  .dock-foot { padding: 0 16px 12px; font-size: 10px; color: var(--faint); text-align: center; }
+
+  /* ------------------------------------------------------------ selection bar */
+  .selbar {
+    position: fixed; z-index: 70; display: none; align-items: center; gap: 2px;
+    padding: 5px; border-radius: 11px; border: 1px solid var(--line-strong);
+    background: var(--sheet); box-shadow: 0 10px 30px -12px rgba(10, 20, 15, .45);
+    transform: translate(-50%, -100%);
+  }
+  .selbar.show { display: flex; }
+  .selbar button { border: 0; background: transparent; color: var(--ink-soft); font-size: 11.5px; font-weight: 500; padding: 6px 9px; border-radius: 7px; display: inline-flex; align-items: center; gap: 5px; }
+  .selbar button:hover { background: var(--accent-soft); color: var(--accent-ink); }
+  .selbar .split { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
+
+  /* ------------------------------------------------------------------ toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; z-index: 80; transform: translate(-50%, 14px);
+    padding: 10px 16px; border-radius: 11px; border: 1px solid var(--line-strong);
+    background: var(--sheet); color: var(--ink); font-size: 12.5px; box-shadow: var(--shadow-md);
+    opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; max-width: min(92vw, 460px);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* --------------------------------------------------------------- design sheet */
+  .sheet {
+    position: fixed; z-index: 75; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
+    background: var(--sheet); border-left: 1px solid var(--line-strong);
+    box-shadow: -24px 0 60px -30px rgba(10,20,15,.5);
+    transform: translateX(102%); transition: transform .24s ease;
+    display: flex; flex-direction: column;
+  }
+  .sheet.open { transform: none; }
+  .sheet header { display: flex; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .sheet header b { font-size: 13px; }
+  .sheet .body { overflow: auto; padding: 16px 18px 26px; font-size: 12.5px; line-height: 1.6; color: var(--muted); }
+  .sheet h4 { margin: 18px 0 6px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+  .sheet ul { margin: 0; padding-left: 17px; }
+  .sheet li { margin: 0 0 7px; }
+  .sheet li b { color: var(--ink); font-weight: 600; }
+
+  /* -------------------------------------------------------------- responsive */
+  @media (max-width: 1240px) {
+    .scroll-title { max-width: 30vw; }
+    .crumbs .folder { display: none; }
+  }
+  @media (max-width: 1080px) {
+    .tb-mid { display: none; }
+  }
+  @media (max-width: 1180px) {
+    body.dock-open .shell { grid-template-columns: var(--rail) minmax(0, 1fr); }
+    .dock { position: fixed; right: 0; top: var(--topbar); bottom: 0; height: auto; width: min(420px, 92vw); z-index: 55; box-shadow: -30px 0 60px -34px rgba(10,20,15,.55); }
+  }
+  @media (max-width: 980px) {
+    :root { --rail: 0px; }
+    .rail { display: none; }
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    .stage { padding-left: 16px; padding-right: 16px; }
+  }
+  @media (max-width: 720px) {
+    :root { --topbar: 56px; --read-size: 15.5px; }
+    .topbar { grid-template-columns: minmax(0, 1fr) auto; padding: 0 10px; }
+    .tb-mid, .scroll-title, .hide-sm { display: none !important; }
+    .paper { border-radius: 12px; padding: 26px 20px 34px; }
+    .head-actions { gap: 4px; }
+    .head-actions .btn span { display: none; }
+    .head-actions .btn { width: 32px; padding: 0; justify-content: center; }
+    .head-actions .btn.primary span { display: inline; }
+    .head-actions .btn.primary { width: auto; padding: 0 11px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress" aria-hidden="true"><i id="progressBar"></i></div>
+
+<header class="topbar" id="topbar">
+  <div class="tb-left">
+    <button class="icon-btn" id="backBtn" title="Back to Physics" aria-label="Back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></svg>
+    </button>
+    <nav class="crumbs" aria-label="Breadcrumb">
+      <span class="folder">Physics</span>
+      <span>/</span>
+      <b>Thermal equilibrium</b>
+    </nav>
+    <span class="pill-mock hide-sm">Mock</span>
+  </div>
+
+  <div class="tb-mid">
+    <span class="scroll-title" id="scrollTitle">Thermal equilibrium &amp; temperature scales</span>
+  </div>
+
+  <div class="tb-right">
+    <button class="icon-btn hide-sm" id="designBtn" title="Design notes" aria-label="Design notes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2m0 14v2M4.2 7.5l1.8 1m12 7l1.8 1M4.2 16.5l1.8-1m12-7 1.8-1"/><circle cx="12" cy="12" r="3.4"/></svg>
+    </button>
+    <div class="type-controls" id="typeControls" style="display:flex;align-items:center;gap:2px">
+      <button class="icon-btn hide-sm" id="faceBtn" title="Switch serif / sans" aria-label="Switch typeface">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19 9.5 5 15 19M6.2 14.5h6.6M17 19V9m0 0 3 2"/></svg>
+      </button>
+      <button class="icon-btn" id="sizeDown" title="Smaller text" aria-label="Smaller text">A−</button>
+      <button class="icon-btn" id="sizeUp" title="Larger text" aria-label="Larger text">A+</button>
+    </div>
+    <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 1 1 9.8 4a6.6 6.6 0 0 0 10.2 10.2Z"/></svg>
+    </button>
+    <button class="btn hide-sm" id="focusBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9m6 0h3.5A1.5 1.5 0 0 1 20 5.5V9m0 6v3.5a1.5 1.5 0 0 1-1.5 1.5H15m-6 0H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg>
+      <span>Focus</span>
+    </button>
+    <button class="btn primary" id="askBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 13.9 9l5.6 2-5.6 2L12 18.5 10.1 13 4.5 11l5.6-2Z"/></svg>
+      <span>Ask NotezAi</span>
+    </button>
+  </div>
+</header>
+
+<main class="shell" id="shell">
+  <!-- ------------------------------------------------------------- left rail -->
+  <aside class="rail" aria-label="Note contents">
+    <div>
+      <p class="eyebrow">In this note</p>
+      <nav class="toc" id="toc"></nav>
+    </div>
+    <div class="rail-card">
+      <div class="row"><span>Reviewed</span><b>2 / 5 times</b></div>
+      <div class="bar"><i></i></div>
+      <div class="row"><span>Next review</span><b>in 3 days</b></div>
+      <button class="ask" id="railAsk">✦ Ask about this note</button>
+    </div>
+  </aside>
+
+  <!-- ---------------------------------------------------------------- article -->
+  <section class="stage">
+    <article class="paper" id="paper">
+      <header>
+        <div class="kicker">
+          <span>Physics</span><span class="sep">·</span><span>Unit 5</span>
+          <span class="sep">·</span><span class="kind">Imported HTML</span>
+        </div>
+        <h1 id="noteTitle">Thermal equilibrium &amp; temperature scales</h1>
+        <p class="dek">How temperature is defined, how the scales relate, and where the kinetic model comes from.</p>
+
+        <div class="meta">
+          <span class="chip accent">Physics</span>
+          <span class="chip">20 min read</span>
+          <span class="dot"></span>
+          <span>Updated 15 Oct 2026</span>
+          <span class="dot"></span>
+          <span>1,840 words</span>
+        </div>
+
+        <div class="head-actions">
+          <button class="btn" id="starBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="m12 3.8 2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.82l-5.1 2.68.97-5.68-4.12-4.02 5.7-.83L12 3.8Z"/></svg>
+            <span>Star</span>
+          </button>
+          <button class="btn" id="reviewBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="m8.5 12.2 2.3 2.3 4.8-5"/></svg>
+            <span>Review</span>
+          </button>
+          <button class="btn" id="editBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            <span>Edit</span>
+          </button>
+          <button class="btn hide-sm" id="exportBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0-3.6-3.6M12 14l3.6-3.6M5 17.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-1.5"/></svg>
+            <span>Export</span>
+          </button>
+          <span class="spacer"></span>
+          <button class="btn ghost" id="moreBtn" title="More">···</button>
+        </div>
+      </header>
+
+      <div class="article" id="article">
+        <p class="lead-in">Heat always moves from hot to cold — but what does <em>hot</em> mean, exactly? This note builds temperature from the ground up: the zeroth law, the three everyday scales, and the kinetic picture that connects them to molecular speeds.</p>
+
+        <div class="callout">
+          <span class="label">Key idea</span>
+          <p>Temperature is the <strong>state variable</strong> that decides the direction of spontaneous heat flow. Nothing more, nothing less — it is defined by equilibrium, not by a thermometer.</p>
+        </div>
+
+        <h2 id="s-equilibrium"><span class="num">01</span>Temperature &amp; thermal equilibrium</h2>
+        <p>Two objects in contact exchange energy until neither has any net flow left. At that point they are in <strong>thermal equilibrium</strong>, and we say they share a temperature. The zeroth law turns that observation into a measuring rule:</p>
+
+        <div class="formula">
+          <span data-tex="A \leftrightarrow B \;\text{ and }\; B \leftrightarrow C \;\Rightarrow\; A \leftrightarrow C" data-display="1"></span>
+          <p class="note">If A and C are each in equilibrium with B, they are in equilibrium with each other — so B can act as a thermometer.</p>
+        </div>
+
+        <p>For a dilute ideal gas, temperature is proportional to the mean translational kinetic energy per molecule:</p>
+
+        <div class="formula">
+          <span data-tex="\langle K_{\text{tr}}\rangle = \tfrac{3}{2}\,k_B T" data-display="1"></span>
+          <p class="note">k<sub>B</sub> = 1.381 × 10<sup>−23</sup> J/K. Temperature is an <em>average</em>, not a total: a cup of tea and a bathtub can share a temperature while holding very different internal energy.</p>
+        </div>
+
+        <div class="callout gold">
+          <span class="label">Common trap</span>
+          <p>Temperature is not “total internal energy”. Doubling the amount of matter doubles the energy at the same temperature.</p>
+        </div>
+
+        <h2 id="s-scales"><span class="num">02</span>Temperature scales</h2>
+        <p>Every scale needs two fixed, reproducible points. Celsius uses the ice and steam points of water at 1 atm; Kelvin shifts the zero to absolute zero.</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Scale</th><th>Reference points</th><th>Conversion</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Celsius</strong> (°C)</td><td>0 °C ice melt · 100 °C boil</td><td><span data-tex="T(\mathrm{K}) = t(^{\circ}\mathrm{C}) + 273.15"></span></td></tr>
+              <tr><td><strong>Fahrenheit</strong> (°F)</td><td>32 °F · 212 °F</td><td><span data-tex="t(^{\circ}\mathrm{F}) = 1.8\,t(^{\circ}\mathrm{C}) + 32"></span></td></tr>
+              <tr><td><strong>Kelvin</strong> (K)</td><td>Absolute zero = 0 K</td><td><span data-tex="t(^{\circ}\mathrm{C}) = \frac{5}{9}\left[t(^{\circ}\mathrm{F}) - 32\right]"></span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>Only Kelvin is an absolute scale: <span data-tex="0\ \mathrm{K} = -273.15\ ^{\circ}\mathrm{C}"></span> is the point where molecular translational motion stops, so ratios of temperatures are only meaningful in kelvin.</p>
+
+        <h2 id="s-kinetic"><span class="num">03</span>Kinetic theory quick reference</h2>
+        <p>Three speeds come out of the Maxwell–Boltzmann distribution. They differ only by constants, but the differences matter for transport problems.</p>
+
+        <div class="formula">
+          <span data-tex="v_{\text{rms}} = \sqrt{\frac{3k_BT}{m}} = \sqrt{\frac{3RT}{M}}" data-display="1"></span>
+          <p class="note">Root-mean-square speed — used in pressure and energy calculations.</p>
+        </div>
+
+        <div class="formula">
+          <span data-tex="\bar v = \sqrt{\frac{8RT}{\pi M}} \qquad v_{\text{mp}} = \sqrt{\frac{2RT}{M}}" data-display="1"></span>
+          <p class="note">Mean speed (transport, collision rates) and most probable speed (peak of the distribution).</p>
+        </div>
+
+        <h2 id="s-example"><span class="num">04</span>Worked example</h2>
+        <p>A nitrogen molecule (<span data-tex="M = 28\ \mathrm{g/mol}"></span>) sits in air at 27 °C. Find its rms speed.</p>
+        <ol class="steps">
+          <li>Convert to kelvin.
+            <div class="formula"><span data-tex="T = 27 + 273.15 = 300.15\ \mathrm{K}" data-display="1"></span></div>
+          </li>
+          <li>Use molar mass in kg: <span data-tex="M = 0.028\ \mathrm{kg/mol}"></span>.</li>
+          <li>Substitute into the rms formula.
+            <div class="formula"><span data-tex="v_{\text{rms}} = \sqrt{\frac{3(8.314)(300.15)}{0.028}} \approx 5.2 \times 10^{2}\ \mathrm{m/s}" data-display="1"></span></div>
+          </li>
+        </ol>
+        <p>That is roughly 1,900 km/h — fast, but the mean free path is only ~70 nm, so a molecule collides billions of times per second.</p>
+
+        <h2 id="s-takeaways"><span class="num">05</span>Key takeaways</h2>
+        <ul class="takeaways">
+          <li>Equilibrium defines temperature; the zeroth law makes thermometers possible.</li>
+          <li><span data-tex="\langle K_{\text{tr}}\rangle = \tfrac{3}{2}k_BT"></span> ties the macroscopic scale to molecular motion.</li>
+          <li>Convert to kelvin before using any ratio or gas law.</li>
+          <li>rms &gt; mean &gt; most probable — always, for the same gas and temperature.</li>
+        </ul>
+
+        <details class="sources">
+          <summary>Sources used for this answer (2)</summary>
+          <div class="list">
+            <a class="src" href="#"><i></i>Physics · Unit 5 — this note</a>
+            <a class="src" href="#"><i></i>Thermodynamics lecture 04</a>
+          </div>
+        </details>
+
+        <section class="next" aria-label="Continue studying">
+          <h3>Keep going</h3>
+          <p>Pick up the two threads this note leaves open.</p>
+          <div class="row">
+            <a class="card" href="#"><b>Maxwell–Boltzmann distribution</b><small>Derivation · 12 min</small></a>
+            <a class="card" href="#"><b>Heat vs. internal energy</b><small>Worked problems · 8 min</small></a>
+          </div>
+        </section>
+
+        <footer class="paper-foot">
+          <span>2,153 characters · last edited 15 Oct 2026</span>
+          <span class="review">● Reviewed 2 days ago</span>
+        </footer>
+      </div>
+    </article>
+  </section>
+
+  <!-- ------------------------------------------------------------------- dock -->
+  <aside class="dock" id="dock" aria-label="NotezAi">
+    <div class="dock-head">
+      <span class="mark">✦</span>
+      <div>
+        <b>NotezAi</b>
+        <small>This note · Physics</small>
+      </div>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="dockClose" title="Close" aria-label="Close assistant">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="thread">
+      <div class="q">Why do we need kelvin for the gas laws?</div>
+      <div class="a">
+        <p>Because the laws are <strong>proportional</strong> statements. <span data-tex="V \propto T"></span> only holds when <span data-tex="T"></span> is measured from absolute zero — at 0 °C a gas still has motion, so Celsius would make the ratio collapse at an arbitrary point.</p>
+        <div class="formula"><span data-tex="\frac{V_1}{T_1} = \frac{V_2}{T_2}, \qquad T \text{ in kelvin}" data-display="1"></span></div>
+        <p>Kelvin also keeps the kinetic formula honest: <span data-tex="\langle K_{\text{tr}}\rangle = \tfrac{3}{2}k_BT"></span> must reach zero when the motion does.</p>
+        <div class="tools">
+          <button class="tool">Copy</button><button class="tool">Retry</button><button class="tool">Good</button>
+        </div>
+        <span class="src-inline">● Physics · Unit 5 — this note</span>
+      </div>
+    </div>
+
+    <div class="quick">
+      <button class="qchip">✦ Summarize</button>
+      <button class="qchip">Key points</button>
+      <button class="qchip">Make MCQs</button>
+      <button class="qchip">Flashcards</button>
+      <button class="qchip">Explain simply</button>
+    </div>
+
+    <div class="composer">
+      <textarea rows="1" placeholder="Ask about this note, or type /"></textarea>
+      <button class="send" title="Send" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m0 0-5 5m5-5 5 5"/></svg>
+      </button>
+    </div>
+    <p class="dock-foot">Answers use this note plus your library · check important facts</p>
+  </aside>
+</main>
+
+<!-- selection toolbar -->
+<div class="selbar" id="selbar" role="toolbar" aria-label="Selection actions">
+  <button data-act="explain">✦ Explain</button>
+  <button data-act="simplify">Simplify</button>
+  <button data-act="card">Make flashcard</button>
+  <span class="split"></span>
+  <button data-act="copy">Copy</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- design notes -->
+<aside class="sheet" id="designSheet" aria-label="Design notes">
+  <header>
+    <b>What changed in this reader</b>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="designClose" aria-label="Close design notes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </header>
+  <div class="body">
+    <h4>Structure</h4>
+    <ul>
+      <li><b>Contents rail.</b> Sections are always visible, with the current one tracked while you scroll — no more hunting through a long note.</li>
+      <li><b>Sticky reading header.</b> Breadcrumb, actions and progress stay in reach; the title slides in once the headline scrolls away.</li>
+      <li><b>One column, 68 characters.</b> Text stops at a readable measure instead of stretching across the window.</li>
+    </ul>
+    <h4>Typography</h4>
+    <ul>
+      <li><b>Serif or sans</b> for the body, with two size steps — separate from the assistant’s own text size.</li>
+      <li><b>Numbered section chips</b> give long notes a spine you can scan.</li>
+      <li><b>Formula cards.</b> Display math gets its own quiet surface, a caption, and horizontal scroll instead of overflowing.</li>
+    </ul>
+    <h4>Actions</h4>
+    <ul>
+      <li><b>Select text → act.</b> Explain, simplify, turn into a flashcard, or copy — the selection becomes the question.</li>
+      <li><b>Sources stay collapsible</b>, so citations never become a wall of pills.</li>
+      <li><b>Continue studying</b> closes the note with the next two threads instead of a dead end.</li>
+    </ul>
+    <h4>Not in this mock</h4>
+    <ul>
+      <li>Real data: the note is fixed content, the assistant answers are static.</li>
+      <li>Editing, comments and highlights are shown but not wired.</li>
+    </ul>
+  </div>
+</aside>
+
+<script src="../vendor/katex/katex.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const root = document.documentElement;
+
+  /* ---------------------------------------------------------------- math */
+  $$('[data-tex]').forEach(el => {
+    if (!window.katex) return;
+    try {
+      katex.render(el.dataset.tex, el, {
+        displayMode: el.dataset.display === '1',
+        throwOnError: false,
+        strict: 'ignore',
+        trust: false
+      });
+      el.dataset.rendered = '1';
+    } catch (err) { el.textContent = el.dataset.tex; }
+  });
+
+  /* --------------------------------------------------------------- theme */
+  try {
+    const saved = localStorage.getItem('nzv-mock-theme');
+    if (saved) root.dataset.theme = saved;
+    const face = localStorage.getItem('nzv-mock-face');
+    if (face) root.dataset.face = face;
+    const size = Number(localStorage.getItem('nzv-mock-size'));
+    if (size) root.style.setProperty('--read-size', size + 'px');
+  } catch (err) {}
+  const persist = (key, value) => { try { localStorage.setItem(key, value); } catch (err) {} };
+
+  $('#themeBtn').addEventListener('click', () => {
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    persist('nzv-mock-theme', root.dataset.theme);
+  });
+
+  /* ------------------------------------------------------------ type size */
+  const sizes = [14.5, 15.5, 16.5, 17.5, 19];
+  const currentSize = () => parseFloat(getComputedStyle(root).getPropertyValue('--read-size')) || 16.5;
+  const setSize = value => {
+    const px = Math.min(19, Math.max(14.5, value));
+    root.style.setProperty('--read-size', px + 'px');
+    persist('nzv-mock-size', String(px));
+  };
+  $('#sizeDown').addEventListener('click', () => setSize(currentSize() - 1));
+  $('#sizeUp').addEventListener('click', () => setSize(currentSize() + 1));
+  $('#faceBtn').addEventListener('click', () => {
+    root.dataset.face = root.dataset.face === 'serif' ? 'sans' : 'serif';
+    persist('nzv-mock-face', root.dataset.face);
+  });
+
+  /* ------------------------------------------------------------------ toc */
+  const toc = $('#toc');
+  const headings = $$('.article h2[id]');
+  headings.forEach((heading, index) => {
+    const link = document.createElement('a');
+    link.href = '#' + heading.id;
+    link.textContent = heading.textContent.replace(/^\d+/, '').trim();
+    link.dataset.target = heading.id;
+    if (index === 0) link.classList.add('on');
+    toc.appendChild(link);
+  });
+
+  const toast = $('#toast');
+  let toastTimer = 0;
+  const say = message => {
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2400);
+  };
+
+  const setActive = id => {
+    $$('#toc a').forEach(a => a.classList.toggle('on', a.dataset.target === id));
+  };
+
+  /* -------------------------------------------------------------- progress */
+  const bar = $('#progressBar');
+  const topbar = $('#topbar');
+  const article = $('#article');
+  const updateScroll = () => {
+    const rect = article.getBoundingClientRect();
+    const start = window.scrollY + rect.top - 120;
+    const total = article.offsetHeight - window.innerHeight + 260;
+    const pct = Math.min(1, Math.max(0, (window.scrollY - start) / Math.max(1, total)));
+    bar.style.width = (pct * 100).toFixed(1) + '%';
+
+    topbar.classList.toggle('stuck', window.scrollY > 26);
+
+    let active = headings[0];
+    headings.forEach(heading => {
+      if (heading.getBoundingClientRect().top <= 140) active = heading;
+    });
+    if (active) setActive(active.id);
+  };
+  window.addEventListener('scroll', updateScroll, { passive: true });
+  window.addEventListener('resize', updateScroll);
+  updateScroll();
+
+  /* ------------------------------------------------------------------ dock */
+  const openDock = () => { document.body.classList.add('dock-open'); setTimeout(() => $('.composer textarea')?.focus({ preventScroll: true }), 260); };
+  const closeDock = () => document.body.classList.remove('dock-open');
+  $('#askBtn').addEventListener('click', () => {
+    if (document.body.classList.contains('dock-open')) closeDock(); else openDock();
+  });
+  $('#railAsk').addEventListener('click', openDock);
+  $('#dockClose').addEventListener('click', closeDock);
+
+  $$('.qchip').forEach(chip => chip.addEventListener('click', () => {
+    say('Quick command → “' + chip.textContent.trim() + '” (mock)');
+  }));
+
+  /* ----------------------------------------------------------------- focus */
+  $('#focusBtn').addEventListener('click', () => {
+    document.body.classList.toggle('focus');
+    if (document.body.classList.contains('focus')) closeDock();
+    updateScroll();
+  });
+
+  /* ------------------------------------------------------- selection toolbar */
+  const selbar = $('#selbar');
+  const hideSelbar = () => selbar.classList.remove('show');
+  document.addEventListener('mouseup', event => {
+    if (event.target.closest('#selbar')) return;
+    setTimeout(() => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) return hideSelbar();
+      const range = selection.getRangeAt(0);
+      if (!article.contains(range.commonAncestorContainer)) return hideSelbar();
+      const box = range.getBoundingClientRect();
+      if (!box || (!box.width && !box.height)) return hideSelbar();
+      selbar.style.left = box.left + box.width / 2 + 'px';
+      selbar.style.top = box.top - 10 + 'px';
+      selbar.classList.add('show');
+    }, 10);
+  });
+  document.addEventListener('mousedown', event => {
+    if (!event.target.closest('#selbar')) hideSelbar();
+  });
+  document.addEventListener('scroll', hideSelbar, { passive: true });
+  selbar.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    const selection = window.getSelection();
+    const text = selection ? selection.toString().trim() : '';
+    if (button.dataset.act === 'copy') {
+      if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+      say('Copied ' + text.split(/\s+/).length + ' words');
+    } else {
+      openDock();
+      say('Sent to NotezAi: “' + button.textContent.replace('✦', '').trim() + '” (mock)');
+    }
+    hideSelbar();
+  });
+
+  /* ----------------------------------------------------------- design sheet */
+  $('#designBtn').addEventListener('click', () => $('#designSheet').classList.add('open'));
+  $('#designClose').addEventListener('click', () => $('#designSheet').classList.remove('open'));
+
+  /* ------------------------------------------------------------- mock chrome */
+  $('#backBtn').addEventListener('click', () => say('Back to Physics (mock)'));
+  $('#starBtn').addEventListener('click', event => {
+    event.currentTarget.classList.toggle('on');
+    say('Starred (mock)');
+  });
+  $('#reviewBtn').addEventListener('click', () => say('Review saved: Good · next in 3 days (mock)'));
+  $('#editBtn').addEventListener('click', () => say('Opening the editor (mock)'));
+  $('#exportBtn').addEventListener('click', () => say('Export as Markdown / PDF (mock)'));
+  $('#moreBtn').addEventListener('click', () => say('Move, duplicate, history… (mock)'));
+  $$('.next a').forEach(card => card.addEventListener('click', event => { event.preventDefault(); say('Opening related note (mock)'); }));
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { hideSelbar(); closeDock(); $('#designSheet').classList.remove('open'); }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'j') { event.preventDefault(); openDock(); }
+  });
+
+  // dock open on wide screens so the design is visible first
+  if (window.innerWidth > 1280) document.body.classList.add('dock-open');
+})();
+</script>
+</body>
+</html>
