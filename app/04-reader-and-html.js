@@ -1038,11 +1038,14 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           }
         } else found = nzaiRetrieve(question, 5);
         sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title }));
-        context = found.length ? 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n') : 'No notes in the library matched this question.';
+        context = found.length ? 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n') : '';
       }
+      const hasNotes = note || found.length > 0;
       const rules = note
         ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
-        : 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.';
+        : hasNotes
+          ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
+          : 'Answer the user\'s question directly using your general knowledge and the context provided in the user\'s message.';
       let prompt = `${nzaiTranscript(chatBefore)}${context}\n\n${rules}\n\nUSER: ${question}`;
       if (note && nzai.quiz === note.id && !task) {
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
@@ -1057,7 +1060,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzaiRender();
       try {
         const taskDef = task ? AI_TASKS[task] : null;
-        const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : context}` : prompt, { json: Boolean(taskDef?.json) });
+        const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : (hasNotes ? context : '')}` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
         nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', text: answer.text, model: `${AI_PROVIDERS[answer.provider]?.label || ''} · ${answer.model}`, sources, replace: Boolean(taskDef?.replace), t: Date.now(), fresh: true }));
         nzai.busy = false; nzaiRender(); nzaiStartReveal();
