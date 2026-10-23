@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import logging
 import re
@@ -18,7 +20,7 @@ from .config import EMBEDDING, settings
 from .firebase import user_note, user_notes
 from .automatic_rag import augment_prompt
 from .vector_store import note_text
-from .providers import MODEL_DEFAULTS, configured_providers, cool_down, embed_query, embed_texts, generate, provider_cooling_down, provider_key
+from .providers import MODEL_DEFAULTS, configured_providers, cool_down, embed_query, embed_texts, generate, provider_cooling_down, provider_key, transcribe_audio
 from .indexing import (
     index_manager,
     indexing_queue,
@@ -203,25 +205,63 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
     providers = configured_providers()
     if not providers:
         raise HTTPException(status_code=503, detail="Application-managed AI is not configured on this backend. Set AI_GEMINI_API_KEY or AI_GROQ_API_KEY in the backend environment.")
-    ordered = [settings.default_provider, *[item for item in providers if item != settings.default_provider]]
-    ordered = [item for item in ordered if item in providers and not provider_cooling_down(item) and provider_key(item)]
-    if body.images:
-        # Only Gemini accepts image/audio parts; Groq would fail with a 422 and block the fallback chain.
-        ordered = [item for item in ordered if item == "gemini"]
-    if not ordered:
-        raise HTTPException(status_code=503, detail="Configured AI providers are cooling down after rate limits or have no valid credentials. Try again shortly.")
+    preferred = [settings.default_provider, *[item for item in providers if item != settings.default_provider]]
+    preferred = [item for item in preferred if item in providers and provider_key(item)]
+
+    audio = next((item for item in body.images if item.mime.startswith("audio/")), None)
+    audio_bytes = b""
+    if audio:
+        try:
+            audio_bytes = base64.b64decode(audio.data)
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="The audio part is not valid base64.") from exc
+        # Audio is transcribed by Gemini inline, or by Groq's Whisper endpoint.
+        capable = [item for item in preferred if item in {"gemini", "groq"}]
+        if not capable:
+            raise HTTPException(status_code=503, detail="No configured AI provider can transcribe audio. Set AI_GEMINI_API_KEY or AI_GROQ_API_KEY.")
+    elif body.images:
+        # Only Gemini accepts image parts; Groq would fail with a 422 and block the chain.
+        capable = [item for item in preferred if item == "gemini"]
+        if not capable:
+            raise HTTPException(status_code=503, detail="No configured AI provider can read images. Set AI_GEMINI_API_KEY.")
+    else:
+        capable = preferred
+
+    # A provider cooling down after a rate limit is tried last, not skipped: one
+    # short cooldown must never turn into "all providers failed" when another
+    # provider (or the same one, a moment later) could still answer.
+    ready = [item for item in capable if not provider_cooling_down(item)]
+    ordered = ready or capable
+
     last_error: HTTPException | None = None
     for index, provider in enumerate(ordered):
         model = body.model if provider == body.provider and body.model else MODEL_DEFAULTS[provider][0]
         try:
-            result = await generate(provider, model, provider_key(provider), prompt, system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
+            if audio and provider != "gemini":
+                result = await transcribe_audio(
+                    provider,
+                    provider_key(provider),
+                    audio_bytes,
+                    audio.mime,
+                    body.prompt,
+                )
+            else:
+                result = await generate(provider, model, provider_key(provider), prompt, system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
             result["sources"] = rag_sources
             return result
         except HTTPException as exc:
             last_error = exc
             if exc.status_code in {429, 503}:
                 cool_down(provider, seconds=45 if exc.status_code == 429 else 15)
-            if exc.status_code not in {401, 403, 429, 503} or index == len(ordered) - 1:
+            # Any provider left in the chain gets a turn, whatever the failure
+            # was: a rejected credential or a bad model on one provider says
+            # nothing about the next one.
+            if index == len(ordered) - 1:
+                if len(ordered) > 1:
+                    raise HTTPException(
+                        status_code=exc.status_code,
+                        detail=f"{exc.detail} (tried {', '.join(ordered)}).",
+                    ) from exc
                 raise
     raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
 
