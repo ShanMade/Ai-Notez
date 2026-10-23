@@ -36,7 +36,7 @@ def provider_key(provider: str) -> str:
 
 
 def embedding_key() -> str:
-    return settings.embedding_key or provider_key("gemini")
+    return settings.embedding_key or provider_key("gemini") or provider_key("groq")
 
 
 def configured_providers() -> list[str]:
@@ -146,29 +146,57 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     key = embedding_key()
     if not key:
         raise HTTPException(status_code=503, detail="Semantic indexing is not configured with an embedding credential.")
-    requests = [
-        {
-            "model": f"models/{settings.embedding_model}",
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": settings.embedding_dimensions,
-        }
-        for text in texts
-    ]
-    async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        try:
-            response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.embedding_model}:batchEmbedContents",
-                params={"key": key},
-                json={"requests": requests},
-            )
-            if not response.is_success:
-                raise _provider_error(response)
-            data = response.json()
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="Embedding request timed out.")
-    vectors = [item.get("values", []) for item in data.get("embeddings", [])]
-    if len(vectors) != len(texts) or any(len(vector) != settings.embedding_dimensions for vector in vectors):
-        raise HTTPException(status_code=502, detail="The embedding provider returned an incompatible vector dimension.")
+    
+    # Determine which embedding provider to use
+    embed_provider = settings.embedding_provider
+    embed_model = settings.embedding_model
+    embed_dimensions = settings.embedding_dimensions
+    
+    # If gemini is the embedding provider but has no key, try groq
+    if embed_provider == "gemini" and not settings.gemini_key and settings.groq_key:
+        embed_provider = "groq"
+        embed_model = settings.groq_embedding_model
+        embed_dimensions = 1024  # Groq text-embedding-3-small uses 1024 dimensions
+    
+    if embed_provider == "gemini":
+        requests = [
+            {
+                "model": f"models/{embed_model}",
+                "content": {"parts": [{"text": text}]},
+                "outputDimensionality": embed_dimensions,
+            }
+            for text in texts
+        ]
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{embed_model}:batchEmbedContents",
+                    params={"key": key},
+                    json={"requests": requests},
+                )
+                if not response.is_success:
+                    raise _provider_error(response)
+                data = response.json()
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail="Embedding request timed out.")
+        vectors = [item.get("values", []) for item in data.get("embeddings", [])]
+    else:  # groq
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/embeddings",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"model": embed_model, "input": texts},
+                )
+                if not response.is_success:
+                    raise _provider_error(response)
+                data = response.json()
+            except httpx.TimeoutException:
+                raise HTTPException(status_code=504, detail="Embedding request timed out.")
+        vectors = [item.get("embedding", []) for item in data.get("data", [])]
+    
+    if len(vectors) != len(texts) or any(len(vector) != embed_dimensions for vector in vectors):
+        raise HTTPException(status_code=502, detail=f"The embedding provider returned an incompatible vector dimension. Expected {embed_dimensions}.")
     return vectors
 
 

@@ -53,6 +53,7 @@ class Settings:
     embedding_provider: str = os.getenv("AI_EMBEDDING_PROVIDER", "gemini").lower()
     embedding_model: str = os.getenv("AI_EMBEDDING_MODEL", "gemini-embedding-001")
     embedding_dimensions: int = _integer("AI_EMBEDDING_DIMENSIONS", 768, 64, 3072)
+    groq_embedding_model: str = os.getenv("AI_GROQ_EMBEDDING_MODEL", "text-embedding-3-small")
     request_timeout_seconds: int = _integer("AI_REQUEST_TIMEOUT_SECONDS", 60, 5, 180)
     max_prompt_chars: int = _integer("AI_MAX_PROMPT_CHARS", 60000, 1000, 200000)
     max_chunks_per_user: int = _integer("AI_MAX_CHUNKS_PER_USER", 20000, 100, 100000)
@@ -66,7 +67,7 @@ if settings.default_provider not in {"gemini", "groq"}:
     raise ValueError("AI_DEFAULT_PROVIDER must be 'gemini' or 'groq'.")
 if not settings.gemini_models or not settings.groq_models:
     raise ValueError("AI_GEMINI_MODELS and AI_GROQ_MODELS must each contain at least one model.")
-if settings.embedding_provider != "gemini":
-    raise ValueError("This backend currently supports Gemini embeddings only.")
+if settings.embedding_provider not in {"gemini", "groq"}:
+    raise ValueError("AI_EMBEDDING_PROVIDER must be 'gemini' or 'groq'.")
 if not 0 <= settings.min_similarity <= 1:
     raise ValueError("AI_MIN_SIMILARITY must be between 0 and 1.")
