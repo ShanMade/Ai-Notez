@@ -755,7 +755,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     // ================= NotezAi docked panel with chat history =================
     const NZAI_CHAT_KEY = () => 'notez-ai-chats-v2-' + (currentSession?.mode === 'cloud' ? currentSession.user.uid : 'demo');
-    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false };
+    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [] };
     function nzaiReadChats() { try { const list = JSON.parse(localStorage.getItem(NZAI_CHAT_KEY())); return Array.isArray(list) ? list : []; } catch { return []; } }
     function nzaiWriteChats(list) {
       const trimmed = list.slice(0, 50).map(chat => ({ ...chat, messages: (chat.messages || []).slice(-100) }));
@@ -915,27 +915,36 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         : '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       body.innerHTML = `${scope}${quizStop ? `<div class="ai-quizbar">Quiz in progress${quizStop}</div>` : ''}${notice}
         <div class="ai-thread-wrap"><div class="ai-thread" id="nzai-messages" aria-live="polite">${thread}${thinking}</div><button type="button" class="ai-jump" id="ai-jump" hidden data-nzai="jump">↓ Latest</button></div>
+        ${messages.length ? `<div class="ai-search-wrap"><input type="text" id="ai-chat-search" class="ai-search-input" placeholder="Search this chat..." aria-label="Search chat messages" data-nzai="chat-search" /><button type="button" class="ai-search-clear" data-nzai="chat-search-clear" aria-label="Clear search" hidden>×</button></div>` : ''}
         ${quick}${editing}
         <div class="ai-composer-wrap">${slash}<div class="ai-composer"><textarea id="nzai-input" rows="1" placeholder="${inNote ? 'Ask about this note, or type /' : 'Ask your notes, or type /'}" aria-label="Message NotezAi" ${disabled}></textarea><button type="button" class="ai-ibtn" data-nzai="slash-open" aria-label="Slash commands" title="Commands" ${disabled}>/</button><button type="button" class="ai-ibtn" data-nzai="record" aria-label="Record a voice note" title="Record a voice note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></button><button type="button" class="ai-send${busy ? ' stop' : ''}" data-nzai="${busy ? 'stop' : 'send'}" ${!busy && false ? 'disabled' : ''} aria-label="${busy ? 'Stop generating' : 'Send message'}" title="${busy ? 'Stop' : 'Send (Enter)'}">${sendIcon}</button></div></div>
         <div class="ai-foot"><button type="button" class="ai-foot-link" data-nzai="settings" title="Change provider or model">${esc(provider)}</button><span>${nzaiReadChats().length} saved chat${nzaiReadChats().length === 1 ? '' : 's'}</span></div>`;
       const threadEl = $('#nzai-messages', body); if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
       if (nzai.reveal) nzaiStartReveal();
+      // Setup search input event listener
+      const searchInput = $('#ai-chat-search', body);
+      if (searchInput && !searchInput.dataset.nzaiListener) {
+        searchInput.dataset.nzaiListener = 'true';
+        searchInput.addEventListener('input', nzaiSearchChat);
+      }
     }
     function nzaiFormat(text) { return markdownToHtml(String(text || '')); }
     function nzaiCodeBlocks(html) { return html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, inner) => `<div class="ai-code"><button type="button" class="ai-copy-code" data-nzai="copy-code">Copy</button><pre>${inner}</pre></div>`); }
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
-        return `<div class="ai-msg user"><div class="ai-bubble-user">${esc(msg.text)}</div><div class="ai-user-tools"><button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
+        const highlightedText = nzai.searchQuery ? msg.text.replace(new RegExp(nzai.searchQuery, 'gi'), match => `<mark class="ai-search-highlight">${match}</mark>`) : msg.text;
+      return `<div class="ai-msg user"><div class="ai-bubble-user">${esc(highlightedText)}</div><div class="ai-user-tools">`<button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
       }
       const note = nzaiScopeNote();
       const sources = (msg.sources || []).length ? `<div class="ai-sources"><span>Sources</span>${msg.sources.map(src => `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}">[${src.n}] ${esc(src.title)}</button>`).join('')}</div>` : '';
       const folderAction = msg.action === 'clean-folders' ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="clean-folders">Review empty folders</button></div>` : '';
       const revealing = nzai.reveal && nzai.reveal.chatId === nzai.chatId && nzai.reveal.index === index;
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
+      const highlightedText = nzai.searchQuery ? shown.replace(new RegExp(nzai.searchQuery, 'gi'), match => `<mark class="ai-search-highlight">${match}</mark>`) : shown;
       const tools = msg.text && !msg.error && !revealing ? `<div class="ai-actions-row"><button type="button" class="ai-action ai-ic" data-nzai="copy" data-i="${index}" aria-label="Copy answer" title="Copy"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="save" data-i="${index}" aria-label="Save answer as note" title="Save as note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M12 11v6M9 14h6"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="regen" data-i="${index}" aria-label="Regenerate answer" title="Regenerate"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></g></svg></button><span class="ai-fb" role="group" aria-label="Rate this answer"><button type="button" class="ai-action ai-ic${msg.fb === 'up' ? ' on' : ''}" data-nzai="fb" data-fb="up" data-i="${index}" aria-pressed="${msg.fb === 'up'}" aria-label="Helpful" title="Helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10Z"/><path d="M7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7"/></g></svg></button><button type="button" class="ai-action ai-ic${msg.fb === 'down' ? ' on' : ''}" data-nzai="fb" data-fb="down" data-i="${index}" aria-pressed="${msg.fb === 'down'}" aria-label="Not helpful" title="Not helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h4v11Z"/><path d="M17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17"/></g></svg></button></span>${note && nzai.scope === 'note' ? `<button type="button" class="ai-action ai-txt" data-nzai="replace" data-i="${index}" title="Replace this note's text with this answer">Use as note text</button>` : ''}</div>` : '';
       const retryBtn = msg.error ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="retry" data-i="${index}" aria-label="Retry">Retry</button></div>` : '';
-${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-body"><div class="ai-name">NotezAi${time ? `<time>${time}</time>` : ''}</div><div class="ai-md" data-i="${index}">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
+${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-body"><div class="ai-name">NotezAi${time ? `<time>${time}</time>` : ''}</div><div class="ai-md" data-i="${index}">${nzaiCodeBlocks(nzaiFormat(highlightedText))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
     }
     // Typing reveal: new answers appear word by word; Stop shows the full text at once.
     function nzaiStartReveal() {
@@ -986,6 +995,70 @@ ${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data
       if (!chats.length) rows = '<div class="ai-welcome"><p>No saved chats yet. Conversations are kept on this device.</p></div>';
       body.innerHTML = `<div class="hist-list">${rows}</div>`;
     }
+
+    function nzaiSearchChat() {
+      const input = $('#ai-chat-search');
+      if (!input) return;
+      const query = input.value.trim().toLowerCase();
+      nzai.searchQuery = query;
+      
+      if (!query) {
+        nzai.searchResults = [];
+        $('#ai-chat-search').nextElementSibling?.setAttribute('hidden', 'hidden');
+        nzaiRender();
+        return;
+      }
+      
+      $('#ai-chat-search').nextElementSibling?.removeAttribute('hidden');
+      const chat = nzaiChat();
+      if (!chat) return;
+      
+      const results = [];
+      chat.messages.forEach((msg, index) => {
+        if (msg.text && msg.text.toLowerCase().includes(query)) {
+          results.push(index);
+        }
+      });
+      
+      nzai.searchResults = results;
+      nzaiRender();
+      
+      // Scroll to first result
+      if (results.length > 0) {
+        const firstMsg = $(`#nzai-messages .ai-msg[data-msg="${results[0]}"]`);
+        if (firstMsg) {
+          firstMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+
+    function nzaiClearChatSearch() {
+      const input = $('#ai-chat-search');
+      if (input) input.value = '';
+      nzai.searchQuery = '';
+      nzai.searchResults = [];
+      $('#ai-chat-search').nextElementSibling?.setAttribute('hidden', 'hidden');
+      nzaiRender();
+    }
+
+    function nzaiHighlightSearchResults() {
+      const query = nzai.searchQuery.toLowerCase();
+      if (!query) return '';
+      
+      return (text) => {
+        if (!text) return text;
+        const lowerText = text.toLowerCase();
+        const index = lowerText.indexOf(query);
+        if (index === -1) return text;
+        
+        const before = text.slice(0, index);
+        const match = text.slice(index, index + query.length);
+        const after = text.slice(index + query.length);
+        
+        return `${before}<mark class="ai-search-highlight">${match}</mark>${after}`;
+      };
+    }
+
     function nzaiRenderSettings(body) {
       const provider = nzai.tab, info = AI_PROVIDERS[provider], key = aiKey(provider), pref = aiModelPref(provider);
       const models = [...new Set([...aiKnownModels(provider), ...info.models, pref].filter(Boolean))];
@@ -1176,6 +1249,8 @@ ${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data
       if (act === 'stop-quiz') { nzai.quiz = ''; nzai.notice = 'Quiz stopped.'; return nzaiRender(); }
       if (act === 'open-chat') { nzai.chatId = el.dataset.id; const chat = nzaiChat(); if (chat) { nzai.scope = chat.scope || 'library'; nzai.noteId = chat.noteId || nzai.noteId; } nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'delete-chat') { if (!(await uiConfirm({ title: 'Delete this chat?', message: 'The conversation is removed from this device.', confirmLabel: 'Delete chat', danger: true }))) return; nzaiWriteChats(nzaiReadChats().filter(chat => chat.id !== el.dataset.id)); if (nzai.chatId === el.dataset.id) nzai.chatId = ''; return nzaiRender(); }
+      if (act === 'chat-search') { nzaiSearchChat(); return; }
+      if (act === 'chat-search-clear') { nzaiClearChatSearch(); return; }
       if (act === 'open-source') { const target = notes.find(note => note.id === el.dataset.id); if (target) openNote(target.id); return; }
       if (act === 'tab') { nzai.tab = el.dataset.p; nzai.notice = ''; return nzaiRender(); }
       if (act === 'save-key') {

@@ -2402,3 +2402,12 @@ html[data-theme="dark"] #nz-ai { --v3-card: #16263a; --v3-edge: rgba(173,194,220
       .markdown-body table.markdown-table { font-size: 12px; }
     }
 
+/* Chat search */
+.ai-search-wrap { padding: 8px 14px; }
+.ai-search-input { width: 100%; padding: 8px 12px; border: 1px solid var(--line, rgba(128,148,170,.28)); border-radius: 9px; background: var(--panel, #fff); color: inherit; font: inherit; }
+html[data-theme="dark"] .ai-search-input { background: #142236; }
+.ai-search-input::placeholder { color: var(--muted, #63778a); }
+.ai-search-clear { border: 0; background: transparent; color: inherit; padding: 4px 8px; cursor: pointer; font-size: 18px; opacity: .6; }
+.ai-search-clear:hover { opacity: 1; }
+.ai-search-highlight { background: color-mix(in srgb, var(--nz-accent) 30%, transparent); color: var(--nz-accent); padding: 1px 3px; border-radius: 3px; }
+html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--nz-accent) 40%, #ffffff); }
