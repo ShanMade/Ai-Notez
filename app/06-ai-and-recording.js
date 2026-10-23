@@ -115,9 +115,10 @@ async function openWikiLink(title) {
         <h3>Storage</h3>${storageMeterHtml()}`;
       if (id === 'ai') return `
         <h3>NotezAi</h3>
-        <p class="hub-note">Use your own free Gemini or Groq key. It is saved once on this device.</p>
+        <p class="hub-note">NotezAi is included and works as a guest or signed in. Prefer your own free Gemini or Groq key (BYOK)? Switch the source below; Voice-to-Note follows it too.</p>
+        <div class="hub-row"><div><b>Current AI source</b><small>${aiUsesManaged() ? 'NotezAi (default)' : 'My own key (BYOK)'}</small></div></div>
         ${hubRow('Open NotezAi', 'Chat about your notes, quizzes, summaries.', 'ai')}
-        ${hubRow('Provider, key and model', 'Change the provider, model or response style.', 'ai-settings', 'Configure')}`;
+        ${hubRow('AI source, key and model', 'Choose NotezAi or your own key (BYOK), plus model and response style.', 'ai-settings', 'Configure')}`;
       if (id === 'help') return `
         <h3>Diagnostics</h3>
         <p class="hub-note">If something goes wrong, copy this report and send it with a description of what you did. It contains no note text.</p>
@@ -283,6 +284,7 @@ async function openWikiLink(title) {
     }
     // Check if a provider supports audio transcription
     const recAudioProviders = () => {
+      if (aiUsesManaged()) return ['gemini']; // NotezAi (default): the backend transcribes with its managed Gemini
       const providers = [];
       if (aiKey('gemini')) providers.push('gemini'); // Gemini supports audio via generateContent with inline data
       if (aiKey('groq')) providers.push('groq'); // Groq supports audio via Whisper API
@@ -300,12 +302,12 @@ async function openWikiLink(title) {
     }
     async function recTranscribePart(blob, index) {
       const steps = [];
-      if (aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
+      if (aiUsesManaged() || aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index), { temperature: 0, images: [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }] });
         return answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
       } });
-      if (aiKey('groq')) steps.push({ name: 'groq', run: async () => {
+      if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
         const raw = await recTranscribeGroq(blob);
         if (!raw) return '';
         return (await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 })).text.trim();
@@ -416,7 +418,7 @@ Output only the transcript.`;
       if (!currentSession) return;
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('This browser cannot record audio. Use Chrome or Edge on https.', 'error', 6000); return; }
       if (!hasAudioProvider()) { 
-        toast('Add a Gemini or Groq key in NotezAi settings. Recording needs one to transcribe audio.', 'error', 6000); 
+        toast('Recording needs NotezAi or your own Gemini/Groq key. Check AI source in NotezAi settings.', 'error', 6000); 
         return; 
       }
       if (REC.status === REC_STATUS.DONE) { 
@@ -457,7 +459,7 @@ Output only the transcript.`;
     }
     function recProviderStrip() {
       const failed = REC.failedOn || new Set();
-      return ['gemini', 'groq'].filter(id => aiKey(id)).map(id => {
+      return (aiUsesManaged() ? ['gemini'] : ['gemini', 'groq'].filter(id => aiKey(id))).map(id => {
         const state = REC.provider === id && (REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.FINALIZING) ? 'active' : failed.has(id) && REC.provider !== id ? 'stopped' : REC.provider === id ? 'used' : 'standby';
         const label = { active: 'Working', used: 'Last used', stopped: 'Stopped, switched', standby: 'Standby' }[state];
         return `<span class="rec-prov ${state}"><i></i><b>${recLabel(id)}</b><small>${label}</small></span>`;
