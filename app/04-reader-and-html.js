@@ -781,17 +781,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     function nzaiNewChat() { nzai.chatId = ''; nzai.view = 'chat'; nzai.searchQuery = ''; nzai.searchResults = []; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
     function nzaiGoView(view) { nzai.view = view; if (nzai.dock === 'voice') return dockShow('ai'); nzai.searchQuery = ''; nzai.searchResults = []; nzaiRender(); }
     // Keeps the floating header in step with the open screen: close or back on the left, the current screen lit in the toolbar.
-    function nzaiCtxHtml() {
-      const note = nzaiScopeNote(), inNote = nzai.scope === 'note' && note;
-      if (!inNote) return '';
-      const chipTitle = note.title;
-      return `<button type="button" class="ai-ctx-chip" data-nzai="scope-toggle" aria-label="Answering from ${esc(chipTitle)}. Switch between this note and All my notes" title="Switch between this note and All my notes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></g></svg><span class="ai-ctx-name">${esc(chipTitle)}</span><span class="ai-ctx-pill">This note<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
-    }
     function nzaiSyncChrome() {
       const panel = $('#nz-ai'); if (!panel) return;
       const screen = nzai.dock === 'voice' ? 'voice' : nzai.view;
-      const slot = panel.querySelector('#dock-ctx');
-      if (slot) slot.innerHTML = screen === 'chat' ? nzaiCtxHtml() : `<span class="dock-ctx-title">${{ history: 'History', settings: 'Settings', voice: 'Voice notes' }[screen] || ''}</span>`;
+      const scopeButton = panel.querySelector('#dock-scope');
+      if (scopeButton) {
+        const hasNote = Boolean(nzaiScopeNote());
+        scopeButton.style.display = hasNote ? 'inline-flex' : 'none';
+        const toLibrary = nzai.scope === 'note';
+        scopeButton.title = toLibrary ? 'Search all notes' : 'Use this note';
+        scopeButton.setAttribute('aria-label', scopeButton.title);
+      }
       const lead = panel.querySelector('#dock-lead');
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
       panel.querySelectorAll('[data-nav]').forEach(btn => { const on = btn.dataset.nav === screen; btn.classList.toggle('on', on); if (on) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current'); });
@@ -805,9 +805,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       panel.innerHTML = `<div class="dock-grab" aria-hidden="true"></div>
         <header class="dock-chrome">
           <button type="button" class="fl-btn fl-lead" id="dock-lead" data-nzai="close" aria-label="Close panel" title="Close (Esc)"><svg class="ic-x" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="ic-down" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="ic-back" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <div class="dock-ctx" id="dock-ctx"></div>
           <div class="fl-bar" role="toolbar" aria-label="Panel actions">
-            <button type="button" class="fl-btn fl-new" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+            <button type="button" class="fl-btn fl-new" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button><button type="button" class="fl-btn" id="dock-scope" data-nzai="scope-toggle" aria-label="Switch note scope" title="Switch note scope" style="display:none"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v17H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v17h5.5A2.5 2.5 0 0 1 20 22z"/><path d="M7 7h2M15 7h2"/></g></svg></button>
             <button type="button" class="fl-btn" data-nzai="history" data-nav="history" aria-label="History" title="History"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></g></svg></button>
             <button type="button" class="fl-btn" data-dock="voice" data-nav="voice" aria-label="Voice notes" title="Voice notes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg><span class="dock-badge" id="dock-rec-badge" hidden aria-label="Recording">●</span></button>
             <button type="button" class="fl-btn" data-nzai="settings" data-nav="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></g></svg></button>
@@ -919,14 +918,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       let thread = '';
       if (!messages.length) thread = welcome;
       else {
-        let lastDay = '';
-        messages.forEach((msg, index) => {
-          const day = nzaiDayLabel(msg.t || Date.now());
-          if (day !== lastDay) { lastDay = day; }
-          thread += nzaiBubble(msg, index);
-        });
+        messages.forEach((msg, index) => { thread += nzaiBubble(msg, index); });
       }
-      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-typing" data-nzai="thinking"><span></span><span></span><span></span><em id="nzai-thinking-msg">Thinking…</em></div></div>` : '';
+      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><div class="ai-typing" data-nzai="thinking"><span></span><span></span><span></span><em id="nzai-thinking-msg">Thinking…</em></div></div>` : '';
       const quizStop = nzai.quiz && inNote ? '<button type="button" class="ai-action danger" data-nzai="stop-quiz">Stop quiz</button>' : '';
       const notice = nzai.notice ? `<div class="ai-notice" role="status">${esc(nzai.notice)}</div>` : '';
       const editing = nzai.editAt != null ? `<div class="ai-editing"><span>Editing a question. Sending replaces it and everything after it.</span><button type="button" class="ai-action" data-nzai="cancel-edit">Cancel</button></div>` : '';
