@@ -2436,3 +2436,11 @@ html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--n
 .ai-composer textarea { resize: none; transition: height 0.15s ease; }
 #nz-ai .ai-composer textarea { min-height: 28px; }
 @media (prefers-reduced-motion: reduce) { .ai-composer textarea { transition: none; } }
+
+/* Copy code button */
+.ai-code { position: relative; }
+.ai-copy-code { position: absolute; top: 4px; right: 4px; border: 0; background: rgba(128,148,170,.2); color: inherit; padding: 3px 8px; border-radius: 6px; font: 10.5px system-ui, sans-serif; cursor: pointer; opacity: .7; transition: all .15s ease; }
+.ai-copy-code:hover { opacity: 1; background: rgba(128,148,170,.3); }
+.ai-copy-code:active { transform: scale(0.95); }
+.ai-code pre { margin: 0; padding: 9px 11px 9px 32px; }
+@media (prefers-reduced-motion: reduce) { .ai-copy-code { transition: none; } }

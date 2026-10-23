@@ -938,7 +938,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
     }
     function nzaiFormat(text) { return markdownToHtml(String(text || '')); }
-    function nzaiCodeBlocks(html) { return html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, inner) => `<div class="ai-code"><button type="button" class="ai-copy-code" data-nzai="copy-code">Copy</button><pre>${inner}</pre></div>`); }
+    function nzaiCodeBlocks(html) { return html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, inner) => `<div class="ai-code"><button type="button" class="ai-copy-code" data-nzai="copy-code" aria-label="Copy code" title="Copy code">Copy</button><pre>${inner}</pre></div>`); }
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
