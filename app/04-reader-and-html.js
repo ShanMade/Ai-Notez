@@ -1254,7 +1254,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
           : hasNotes
             ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
-            : 'Answer the user\\'s question directly using your general knowledge and the context provided in the user\\'s message.';
+            : 'Answer the user\'s question directly using your general knowledge and the context provided in the user\'s message.';
       let prompt = `${nzaiTranscript(chatBefore)}${context}\n\n${rules}\n\nUSER: ${question}`;
       if (note && nzai.quiz === note.id && !task) {
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
