@@ -235,6 +235,24 @@
     .reader-subject { color: color-mix(in srgb, var(--nz-accent) 55%, #8fa3b5); }
     .reader-rule { border: 0; height: 1px; background: color-mix(in srgb, var(--nz-accent) 40%, #ffffff); margin: 0 0 29px; }
     .markdown-body { color: #344151; font-size: 14px; line-height: 1.86; overflow-wrap: anywhere; }
+    .markdown-body table.markdown-table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; overflow-x: auto; display: block; }
+    .markdown-body table.markdown-table th, .markdown-body table.markdown-table td { border: 1px solid var(--line, rgba(128,148,170,.3)); padding: 8px 12px; }
+    .markdown-body table.markdown-table th { background: rgba(128,148,170,.1); font-weight: 600; text-align: left; }
+    .markdown-body table.markdown-table tr:nth-child(even) { background: rgba(128,148,170,.03); }
+    .markdown-body pre { background: rgba(128,148,170,.12); padding: 12px 14px; border-radius: 8px; overflow: auto; }
+    .markdown-body code { font: 12px ui-monospace, monospace; background: rgba(128,148,170,.14); padding: 1px 5px; border-radius: 4px; }
+    .markdown-body blockquote { margin: 12px 0; padding: 8px 16px; border-left: 3px solid var(--nz-accent); color: var(--muted, #63778a); background: rgba(128,148,170,.05); border-radius: 0 4px 4px 0; }
+    .markdown-body h1 { font-size: 1.8em; margin: 16px 0 8px; font-weight: 700; }
+    .markdown-body h2 { font-size: 1.5em; margin: 14px 0 6px; font-weight: 700; }
+    .markdown-body h3 { font-size: 1.3em; margin: 12px 0 4px; font-weight: 700; }
+    .markdown-body h4, .markdown-body h5, .markdown-body h6 { font-size: 1.15em; margin: 10px 0 4px; font-weight: 700; }
+    .markdown-body p { margin: 0 0 10px; line-height: 1.7; }
+    .markdown-body ul, .markdown-body ol { margin: 0 0 10px; padding-left: 24px; }
+    .markdown-body li { margin: 4px 0; }
+    .markdown-body hr { border: 0; height: 1px; background: var(--line, rgba(128,148,170,.3)); margin: 16px 0; }
+    .markdown-body a { color: var(--nz-accent); text-decoration: none; }
+    .markdown-body a:hover { text-decoration: underline; }
+
     .markdown-body > :first-child { margin-top: 0; }
     .markdown-body h2, .markdown-body h3, .markdown-body h4 { color: #1d2a39; letter-spacing: -.035em; line-height: 1.3; margin: 32px 0 12px; font-weight: 680; }
     .markdown-body h2 { font-size: 22px; }
@@ -1904,6 +1922,21 @@
     .ai-md p { margin: 0 0 8px; } .ai-md ul, .ai-md ol { margin: 0 0 8px; padding-left: 20px; } .ai-md li { margin: 2px 0; }
     .ai-md code { font: 12px ui-monospace, monospace; background: rgba(128,148,170,.14); padding: 1px 5px; border-radius: 5px; }
     .ai-md pre { background: rgba(128,148,170,.12); padding: 9px 11px; border-radius: 9px; overflow: auto; }
+    .ai-md table.markdown-table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+    .ai-md table.markdown-table th, .ai-md table.markdown-table td { border: 1px solid var(--line, rgba(128,148,170,.3)); padding: 6px 10px; }
+    .ai-md table.markdown-table th { background: rgba(128,148,170,.1); font-weight: 600; }
+    .ai-md table.markdown-table tr:nth-child(even) { background: rgba(128,148,170,.03); }
+    .ai-md blockquote { margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--nz-accent); color: var(--muted, #63778a); background: rgba(128,148,170,.05); border-radius: 0 4px 4px 0; }
+    .ai-md h1, .ai-md h2, .ai-md h3, .ai-md h4, .ai-md h5, .ai-md h6 { font-weight: 700; margin: 10px 0 4px; }
+    .ai-md h1 { font-size: 1.4em; }
+    .ai-md h2 { font-size: 1.3em; }
+    .ai-md h3 { font-size: 1.2em; }
+    .ai-md h4, .ai-md h5, .ai-md h6 { font-size: 1.1em; }
+    .ai-md p { margin: 0 0 8px; }
+    .ai-md hr { border: 0; height: 1px; background: var(--line, rgba(128,148,170,.3)); margin: 12px 0; }
+
+    .ai-md code { font: 12px ui-monospace, monospace; background: rgba(128,148,170,.14); padding: 1px 5px; border-radius: 5px; }
+    .ai-md pre { background: rgba(128,148,170,.12); padding: 9px 11px; border-radius: 9px; overflow: auto; }
     .ai-msg.error .ai-md { color: #d9534f; }
     .ai-sources { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 8px; }
     .ai-sources > span { font-size: 10.5px; color: var(--muted, #63778a); margin-right: 2px; }
@@ -1920,6 +1953,8 @@
     .ai-typing span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; animation: nzDots 1s infinite; }
     .ai-typing span:nth-child(2) { animation-delay: .15s; } .ai-typing span:nth-child(3) { animation-delay: .3s; }
     .ai-typing em { font-style: normal; margin-left: 6px; }
+    @keyframes nzDots { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .ai-typing span { animation: none; opacity: .5; } }
     .ai-composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px; border: 1px solid var(--line, rgba(128,148,170,.3)); border-radius: 14px; background: var(--panel, #fff); }
     html[data-theme="dark"] .ai-composer { background: #142236; }
     .ai-composer textarea { flex: 1; resize: none; border: 0; outline: none; background: transparent; color: inherit; font: inherit; line-height: 1.45; max-height: 160px; padding: 4px 4px; }
@@ -2359,3 +2394,11 @@ html[data-theme="dark"] #nz-ai { --v3-card: #16263a; --v3-edge: rgba(173,194,220
    never treats it as a login and never fills your email or password into it or the search box. */
 #nz-ai .nzai-secret { -webkit-text-security: disc; text-security: disc; font-family: inherit; letter-spacing: .08em; }
 #nz-ai .nzai-secret::placeholder { -webkit-text-security: none; letter-spacing: normal; }
+
+    /* Responsive tables for mobile */
+    .markdown-table { width: 100%; max-width: 100%; overflow-x: auto; display: block; }
+    @media (max-width: 768px) {
+      .ai-md table.markdown-table { font-size: 11px; }
+      .markdown-body table.markdown-table { font-size: 12px; }
+    }
+

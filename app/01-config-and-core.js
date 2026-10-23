@@ -283,6 +283,10 @@
       updateReviewPopover(note);
     }
     function markdownToHtml(markdown) {
+      // Use the safe renderer if available, otherwise fall back to basic
+      if (typeof window.markdownToHtmlSafe === 'function') {
+        return window.markdownToHtmlSafe(markdown);
+      }
       const inline = source => {
         let text = esc(source);
         text = text.replace(/`([^`]+)`/g, '<code>$1</code>');

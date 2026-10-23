@@ -904,7 +904,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           thread += nzaiBubble(msg, index);
         });
       }
-      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-typing"><span></span><span></span><span></span><em>Reading your ${inNote ? 'note' : 'notes'}…</em></div></div>` : '';
+      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-typing" data-nzai="thinking"><span></span><span></span><span></span><em id="nzai-thinking-msg">Thinking…</em></div></div>` : '';
       const quizStop = nzai.quiz && inNote ? '<button type="button" class="ai-action danger" data-nzai="stop-quiz">Stop quiz</button>' : '';
       const notice = nzai.notice ? `<div class="ai-notice" role="status">${esc(nzai.notice)}</div>` : '';
       const editing = nzai.editAt != null ? `<div class="ai-editing"><span>Editing a question. Sending replaces it and everything after it.</span><button type="button" class="ai-action" data-nzai="cancel-edit">Cancel</button></div>` : '';
@@ -934,7 +934,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const revealing = nzai.reveal && nzai.reveal.chatId === nzai.chatId && nzai.reveal.index === index;
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
       const tools = msg.text && !msg.error && !revealing ? `<div class="ai-actions-row"><button type="button" class="ai-action ai-ic" data-nzai="copy" data-i="${index}" aria-label="Copy answer" title="Copy"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="save" data-i="${index}" aria-label="Save answer as note" title="Save as note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M12 11v6M9 14h6"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="regen" data-i="${index}" aria-label="Regenerate answer" title="Regenerate"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></g></svg></button><span class="ai-fb" role="group" aria-label="Rate this answer"><button type="button" class="ai-action ai-ic${msg.fb === 'up' ? ' on' : ''}" data-nzai="fb" data-fb="up" data-i="${index}" aria-pressed="${msg.fb === 'up'}" aria-label="Helpful" title="Helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10Z"/><path d="M7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7"/></g></svg></button><button type="button" class="ai-action ai-ic${msg.fb === 'down' ? ' on' : ''}" data-nzai="fb" data-fb="down" data-i="${index}" aria-pressed="${msg.fb === 'down'}" aria-label="Not helpful" title="Not helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h4v11Z"/><path d="M17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17"/></g></svg></button></span>${note && nzai.scope === 'note' ? `<button type="button" class="ai-action ai-txt" data-nzai="replace" data-i="${index}" title="Replace this note's text with this answer">Use as note text</button>` : ''}</div>` : '';
-      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-body"><div class="ai-name">NotezAi${time ? `<time>${time}</time>` : ''}</div><div class="ai-md" data-i="${index}">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
+      const retryBtn = msg.error ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="retry" data-i="${index}" aria-label="Retry">Retry</button></div>` : '';
+${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-avatar" aria-hidden="true"></div><div class="ai-body"><div class="ai-name">NotezAi${time ? `<time>${time}</time>` : ''}</div><div class="ai-md" data-i="${index}">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
     }
     // Typing reveal: new answers appear word by word; Stop shows the full text at once.
     function nzaiStartReveal() {
@@ -956,7 +957,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       clearInterval(nzai.revealTimer); nzai.revealTimer = 0;
       if (nzai.reveal) { const chat = nzaiChat(); if (chat && chat.messages[nzai.reveal.index]) nzaiUpdateChat(c => { const m = c.messages[nzai.reveal.index]; if (m) delete m.fresh; }); nzai.reveal = null; }
     }
-    function nzaiStop() { nzai.run = (nzai.run || 0) + 1; nzai.busy = false; nzaiStopReveal(); nzai.notice = 'Stopped. Ask again to continue.'; nzaiRender(); }
+    function nzaiStop() { nzai.run = (nzai.run || 0) + 1; nzai.busy = false; nzaiStopReveal(); nzai.notice = \'Stopped. Ask again to continue.\'; nzaiRender();
+      if (nzai.thinkingInterval) { clearInterval(nzai.thinkingInterval); nzai.thinkingInterval = null; }
+    }
     function nzaiSlash(query) {
       const menu = $('#ai-slash'); if (!menu) return;
       const note = !!nzaiScopeNote() && nzai.scope === 'note';
@@ -1031,6 +1034,21 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       noteTextCache.set(key, text);
       return text;
     }
+        // Update thinking message with rotating status texts
+    function nzaiUpdateThinking() {
+      const el = $('#nzai-thinking-msg');
+      if (!el) return;
+      const messages = [
+        'Thinking...',
+        'Analyzing your request...',
+        'Preparing a response...',
+        'Writing your answer...'
+      ];
+      const now = Date.now();
+      const index = Math.floor((now / 2000) % messages.length);
+      el.textContent = messages[index];
+    }
+
     async function nzaiAsk(question, { task = '', editAt = null } = {}) {
       if (nzai.busy) return;
       nzaiStopReveal();
@@ -1068,6 +1086,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
       }
       nzai.busy = true; nzai.notice = '';
+      nzaiUpdateThinking();
+      if (nzai.thinkingInterval) clearInterval(nzai.thinkingInterval);
+      nzai.thinkingInterval = setInterval(nzaiUpdateThinking, 2000);
       nzaiUpdateChat(chat => {
         if (editAt != null && editAt < chat.messages.length) chat.messages.splice(editAt);
         if (!chat.messages.length) chat.title = (task ? AI_TASKS[task]?.label || 'Quick action' : question).slice(0, 60);
@@ -1085,7 +1106,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       } catch (error) {
         console.warn('NotezAi error:', error);
         if (run === nzai.run) nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', text: `I could not answer: ${aiErrorMessage(error)}`, error: true, t: Date.now() }));
-      } finally { if (run === nzai.run) { nzai.busy = false; nzaiRender(); } }
+        if (nzai.thinkingInterval) { clearInterval(nzai.thinkingInterval); nzai.thinkingInterval = null; }
+      } finally { if (run === nzai.run) { nzai.busy = false; nzaiRender(); }
+        if (nzai.thinkingInterval) { clearInterval(nzai.thinkingInterval); nzai.thinkingInterval = null; } }
     }
     function nzaiSendFromInput() {
       const input = $('#nzai-input'); const text = (input?.value || '').trim();
@@ -1142,6 +1165,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'fb') { const i = Number(el.dataset.i), v = el.dataset.fb; nzaiUpdateChat(c => { const m = c.messages[i]; if (m) m.fb = m.fb === v ? '' : v; }); return nzaiRender(); }
       if (act === 'copy-code') { const pre = el.parentElement?.querySelector('pre'); try { await navigator.clipboard.writeText(pre?.textContent || ''); el.textContent = 'Copied'; setTimeout(() => { el.textContent = 'Copy'; }, 1400); } catch { toast('Your browser blocked clipboard access.', 'error'); } return; }
       if (act === 'rename-chat') { const id = el.dataset.id, chat = nzaiReadChats().find(c => c.id === id); if (!chat) return; const title = await uiPrompt({ title: 'Rename chat', value: chat.title, placeholder: 'Chat name', confirmLabel: 'Rename' }); if (title && title.trim()) { nzaiWriteChats(nzaiReadChats().map(c => c.id === id ? { ...c, title: title.trim().slice(0, 80) } : c)); nzaiRender(); } return; }
+      if (act === 'retry') { const chat = nzaiChat(), idx = Number(el.dataset.i); if (!chat) return; const msg = chat.messages[idx]; if (!msg || !msg.error) return; const userIdx = idx - 1; if (userIdx >= 0 && chat.messages[userIdx]) return nzaiAsk(chat.messages[userIdx].text); return; }
       if (act === 'regen') {
         const chat = nzaiChat(), idx = Number(el.dataset.i); if (!chat) return;
         let userIdx = idx - 1; while (userIdx >= 0 && chat.messages[userIdx].role !== 'user') userIdx--;
