@@ -967,7 +967,11 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const title = String(src.title || 'Untitled note');
         const folder = String(src.folderPath || '').trim();
         const label = folder && folder !== title ? `${title} — ${folder}` : title;
-        return `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" title="Open: ${esc(label)}" aria-label="Open source note: ${esc(label)}"><span class="ai-src-n" aria-hidden="true">${Number(src.n) || ''}</span><span class="ai-src-t">${esc(title)}</span></button>`;
+        // The backend sends the matched excerpt (or computed attributes). It
+        // distinguishes the many identically titled notes on hover.
+        const snippet = String(src.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        const hint = snippet ? `${label} · ${snippet}` : label;
+        return `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" title="Open: ${esc(hint)}" aria-label="Open source note: ${esc(label)}"><span class="ai-src-n" aria-hidden="true">${Number(src.n) || ''}</span><span class="ai-src-t">${esc(title)}</span></button>`;
       }).join('');
       const toggle = list.length > NZAI_SOURCE_PREVIEW
         ? `<button type="button" class="ai-sources-toggle" data-nzai="toggle-sources" data-i="${index}" aria-expanded="${open}" aria-controls="${gridId}">${open ? 'Show less' : `Show all ${list.length}`}</button>`

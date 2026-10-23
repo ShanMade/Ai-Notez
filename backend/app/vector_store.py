@@ -62,6 +62,11 @@ def _terms(text: str) -> set[str]:
     }
 
 
+def content_terms(text: str) -> set[str]:
+    """Meaningful lowercase terms in ``text`` (stop-words removed)."""
+    return _terms(text)
+
+
 def keyword_relevance(text: str, query: str) -> float:
     """Score keyword relevance in a bounded [0, 1] range.
 
@@ -72,11 +77,11 @@ def keyword_relevance(text: str, query: str) -> float:
     """
     if not text or not query:
         return 0.0
-    query_terms = _terms(query)
+    query_terms = content_terms(query)
     if not query_terms:
         return 0.0
     text_lower = text.lower()
-    text_terms = _terms(text)
+    text_terms = content_terms(text)
     if not text_terms:
         return 0.0
 
@@ -211,6 +216,34 @@ def note_text(note: dict) -> str:
         *extra_text,
     ]
     return "\n".join(part for part in fields if part).strip()[:200_000]
+
+
+def note_metadata_prefix(note: dict) -> str:
+    """The metadata lines ``note_text`` puts before a note's content."""
+    tags = note.get("tags", [])
+    if not isinstance(tags, (list, tuple)):
+        tags = []
+    fields = [
+        str(note.get("title") or "Untitled note"),
+        str(note.get("subject") or ""),
+        str(note.get("folderPath") or ""),
+        " ".join(str(tag) for tag in tags if isinstance(tag, (str, int, float))),
+    ]
+    return "\n".join(part for part in fields if part)
+
+
+def strip_note_metadata(note: dict, chunk: str) -> str:
+    """Remove the metadata header from a stored chunk.
+
+    Chunks begin with title/subject/folder/tags because that text is embedded
+    with the content. Retrieved excerpts already carry those attributes in
+    their own header, so the prefix must not be repeated to the model.
+    """
+    prefix = " ".join(note_metadata_prefix(note).split())
+    text = " ".join(str(chunk or "").split())
+    if prefix and text.startswith(prefix):
+        return text[len(prefix):].lstrip()
+    return text
 
 
 def split_chunks(text: str) -> list[str]:

@@ -16,6 +16,7 @@ Each test pins a defect that was found by auditing the pipeline:
 import asyncio
 import hashlib
 import math
+import re
 from contextlib import contextmanager
 
 import pytest
@@ -448,7 +449,7 @@ class TestGenerateEndpointRetrieval:
                 json={
                     "provider": "gemini",
                     "model": "gemini-2.5-flash",
-                    "prompt": "USER: Explain mitochondria.",
+                    "prompt": "USER: Mitochondria cellular energy",
                     "api_key": "user-owned-test-key",
                 },
             )
@@ -456,8 +457,9 @@ class TestGenerateEndpointRetrieval:
             app.dependency_overrides.clear()
 
         assert response.status_code == 200
-        assert response.json()["sources"] == [
-            {"id": "bio", "title": "Biology", "folderPath": ""}
+        sources = response.json()["sources"]
+        assert [(source["id"], source["title"], source["folderPath"]) for source in sources] == [
+            ("bio", "Biology", "")
         ]
         assert "Mitochondria generate cellular energy." in captured["prompt"]
         assert "untrusted source material" in captured["system_prompt"]
@@ -559,3 +561,167 @@ def frozen_settings(module=None, **overrides):
     finally:
         for target, name, value in previous:
             object.__setattr__(target, name, value)
+
+
+# =============================================================================
+# Query intelligence: vague follow-ups and attribute questions
+# =============================================================================
+
+class TestQueryIntelligence:
+    def test_fragments_are_detected(self):
+        from app.automatic_rag import _is_vague
+
+        for fragment in ("largest?", "and the second one?", "that", "more"):
+            assert _is_vague(fragment), fragment
+        for question in ("Explain photosynthesis from my notes", "Which note mentions Newton?"):
+            assert not _is_vague(question), question
+
+    def test_follow_up_is_resolved_against_the_previous_turn(self):
+        from app.automatic_rag import _contextual_query
+
+        prompt = "USER: summarise the physics note\nASSISTANT: It covers photons.\nUSER: largest?"
+        query, fragment = _contextual_query("largest?", prompt)
+        assert fragment is True
+        assert query.startswith("summarise the physics note")
+        assert "largest?" in query
+
+    def test_self_contained_question_is_not_rewritten(self):
+        from app.automatic_rag import _contextual_query
+
+        prompt = "USER: earlier question\nASSISTANT: ok\nUSER: explain the photoelectric effect"
+        query, fragment = _contextual_query("explain the photoelectric effect", prompt)
+        assert query == "explain the photoelectric effect"
+        assert fragment is False
+
+    def test_attribute_intent_detection(self):
+        from app.automatic_rag import _attribute_intent
+
+        assert _attribute_intent("which note is the largest?") == "largest"
+        assert _attribute_intent("what is my shortest note") == "smallest"
+        assert _attribute_intent("what did I edit most recently") == "recent"
+        assert _attribute_intent("explain photosynthesis") is None
+
+
+class TestAttributeAnswers:
+    NOTES = {
+        "big": {"title": "Physics — photoelectric effect", "body": "word " * 400, "folderPath": "Physics"},
+        "small": {"title": "Ch5 Culture of Pakistan", "body": "culture " * 40, "folderPath": "Pakistan Studies"},
+        "notes-a": {"title": "Notes", "body": "quantum " * 90, "folderPath": "Physics"},
+    }
+
+    def test_largest_question_uses_computed_attributes_not_similarity(self):
+        # Every semantic hit is weak; the old code injected them anyway and the
+        # model answered "you have three notes in your lab".
+        index = FakeIndex(results=[
+            {"id": "small", "title": "Ch5", "text": "culture", "contentHash": "x", "similarity": 0.24},
+            {"id": "notes-a", "title": "Notes", "text": "quantum", "contentHash": "x", "similarity": 0.21},
+            {"id": "big", "title": "Physics", "text": "word", "contentHash": "x", "similarity": 0.19},
+        ])
+        prompt, sources = _augment("USER: largest?", dict(self.NOTES), index)
+        assert "NOTE ATTRIBUTES" in prompt
+        first = prompt.split("NOTE ATTRIBUTES", 1)[1]
+        assert "400 words" in first       # physics body: "word " * 400
+        assert "90 words" in first        # quantum notes
+        assert "40 words" in first        # culture notes
+        # Weak semantic hits are never injected as note content.
+        assert "contentHash" not in prompt
+        assert first.index("Physics — photoelectric effect") < first.index("Ch5 Culture of Pakistan")
+        assert [source["id"] for source in sources][0] == "big"
+        assert "Culture of Pakistan" not in prompt.split("NOTE ATTRIBUTES", 1)[0]
+
+    def test_attribute_report_orders_and_formats_notes(self):
+        from app.automatic_rag import _attribute_report
+        from app.vector_store import note_body
+
+        report, sources = _attribute_report(dict(self.NOTES), "largest", 5, note_body)
+        assert "Notes with readable content: 3" in report
+        assert report.index("[1] Physics — photoelectric effect") < report.index("[2] Notes")
+        assert sources[0]["id"] == "big"
+        assert "words" in sources[0]["snippet"]
+
+    def test_sources_carry_a_snippet_for_the_ui(self):
+        note = {"title": "Biology", "body": "Mitochondria generate cellular energy."}
+        digest = hashlib.sha256(note_text(note).encode()).hexdigest()
+        index = FakeIndex(results=[{
+            "id": "bio", "title": "Biology", "text": "Mitochondria generate cellular energy.",
+            "contentHash": digest, "similarity": 0.62,
+        }])
+        _, sources = _augment("USER: explain mitochondria cellular energy", {"bio": note}, index)
+        assert sources[0]["snippet"].startswith("Mitochondria generate")
+        assert sources[0]["similarity"] >= 0.6
+
+    def test_citation_numbers_match_source_order_when_report_and_excerpts_combine(self):
+        # An attribute answer can also quote strong hits. The bracket numbers in
+        # the prompt must line up with the order of `sources` (the UI renders one
+        # chip per source in that order), and a note must never appear twice.
+        notes = {note_id: dict(note) for note_id, note in self.NOTES.items()}
+        index = FakeIndex(results=[
+            {
+                "id": note_id,
+                "title": notes[note_id]["title"],
+                "text": notes[note_id]["body"],
+                "contentHash": hashlib.sha256(note_text(notes[note_id]).encode()).hexdigest(),
+                "similarity": similarity,
+            }
+            for note_id, similarity in (("notes-a", 0.66), ("big", 0.61))
+        ])
+        prompt, sources = _augment("USER: largest?", notes, index)
+        ids = [source["id"] for source in sources]
+        assert ids[0] == "big"                      # computed attributes decide the ranking
+        assert len(ids) == len(set(ids))            # no duplicate chips
+        assert "[1] Physics — photoelectric effect" in prompt
+        cited = re.findall(r'^\[(\d+)\] "([^"]+)"', prompt, re.M)
+        assert cited, "expected at least one quoted excerpt"
+        for number, title in cited:
+            assert sources[int(number) - 1]["title"] == title
+
+    def test_excerpt_header_includes_note_attributes(self):
+        note = {"title": "Biology", "body": "Mitochondria generate cellular energy.", "folderPath": "Science"}
+        digest = hashlib.sha256(note_text(note).encode()).hexdigest()
+        index = FakeIndex(results=[{
+            "id": "bio", "title": "Biology", "folderPath": "Science",
+            "text": "Mitochondria generate cellular energy.",
+            "contentHash": digest, "similarity": 0.62,
+        }])
+        prompt, _ = _augment("USER: explain mitochondria cellular energy", {"bio": note}, index)
+        assert "4 words" in prompt          # content-only word count
+        assert "folder=Science" in prompt
+        assert "match=0.62" in prompt
+
+
+class TestLowConfidenceGate:
+    def test_weak_matches_are_not_injected(self):
+        note = {"title": "Culture of Pakistan", "body": "Culture and heritage notes."}
+        index = FakeIndex(results=[{
+            "id": "culture", "title": "Culture of Pakistan",
+            "text": "Culture and heritage notes.", "contentHash": hashlib.sha256(note_text(note).encode()).hexdigest(),
+            "similarity": 0.19,
+        }])
+        prompt, sources = _augment("USER: explain the Krebs cycle", {"culture": note}, index)
+        assert "Culture and heritage notes." not in prompt
+        assert sources == []
+        assert "No note was similar enough" in prompt
+        assert "never say 'in your library'" in prompt
+
+    def test_low_confidence_answer_forbids_note_counts(self):
+        note = {"title": "Culture of Pakistan", "body": "Culture and heritage notes."}
+        index = FakeIndex(results=[{
+            "id": "culture", "title": "Culture of Pakistan",
+            "text": "Culture and heritage notes.", "contentHash": hashlib.sha256(note_text(note).encode()).hexdigest(),
+            "similarity": 0.20,
+        }])
+        prompt, _ = _augment("USER: largest?", {"culture": note}, index)
+        # "largest?" is an attribute question, so it is answered deterministically.
+        assert "NOTE ATTRIBUTES" in prompt
+        assert "Do not claim you lack access" in prompt
+
+    def test_confident_match_still_reports_rules(self):
+        note = {"title": "Biology", "body": "Mitochondria generate cellular energy."}
+        index = FakeIndex(results=[{
+            "id": "bio", "title": "Biology", "text": "Mitochondria generate cellular energy.",
+            "contentHash": hashlib.sha256(note_text(note).encode()).hexdigest(), "similarity": 0.71,
+        }])
+        prompt, sources = _augment("USER: explain mitochondria cellular energy", {"bio": note}, index)
+        assert sources
+        assert "RULES FOR THE RETRIEVED CONTEXT" in prompt
+        assert "Never report how many notes were retrieved" in prompt

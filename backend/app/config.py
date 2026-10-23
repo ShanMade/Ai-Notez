@@ -69,6 +69,8 @@ class Settings:
     max_search_results: int = _integer("AI_MAX_SEARCH_RESULTS", 8, 1, 25)
     min_similarity: float = float(os.getenv("AI_MIN_SIMILARITY", "0.18"))
     rag_max_index_updates: int = _integer("AI_RAG_MAX_INDEX_UPDATES", 24, 0, 500)
+    rag_min_confidence: float = float(os.getenv("AI_RAG_MIN_CONFIDENCE", "0.32"))
+    rag_max_excerpts: int = _integer("AI_RAG_MAX_EXCERPTS", 4, 1, 12)
 
 settings = Settings()
 
@@ -137,5 +139,7 @@ if not settings.gemini_models or not settings.groq_models:
     raise ValueError("AI_GEMINI_MODELS and AI_GROQ_MODELS must each contain at least one model.")
 if settings.embedding_provider not in {"gemini", "groq", "mistral"}:
     raise ValueError("AI_EMBEDDING_PROVIDER must be 'gemini', 'groq', or 'mistral'.")
+if not 0 <= settings.rag_min_confidence <= 1:
+    raise ValueError("AI_RAG_MIN_CONFIDENCE must be between 0 and 1.")
 if not 0 <= settings.min_similarity <= 1:
     raise ValueError("AI_MIN_SIMILARITY must be between 0 and 1.")
