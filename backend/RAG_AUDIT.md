@@ -72,6 +72,21 @@ Fixes in `backend/app/automatic_rag.py`:
 | The model described the retrieved set ("you have three notes…") | `RETRIEVAL_RULES` forbid reporting retrieval counts or saying "in your library/lab" unless a count was asked, require stating the interpretation for fragments, and ask for a structured answer rather than pasted excerpts |
 | The UI showed three identical "Notes" chips | Sources now include `snippet` (matched excerpt, or the computed attributes for attribute answers), surfaced in the chip tooltip |
 
+### Follow-up turns in the app
+
+A second screenshot showed the opposite failure: after NotezAi answered *"Nothing is due for review right
+now. Enjoy the break."*, the user typed `ok` and got *"I'm not sure what you have due today — could you let
+me know what assignments, tasks, or deadlines you're referring to?"*.
+
+Two defects in the app's chat plumbing, plus two related gaps:
+
+| Problem | Fix |
+|---|---|
+| `nzaiTranscript` sent `chat.messages.slice(-7, -1)` from a snapshot taken **before** the current message was appended, so it always dropped the newest exchange — the model never saw its own last answer | Keep the last 8 messages, including the previous assistant reply |
+| The transcript used `User:` / `NotezAi:` labels, which the backend's turn parser does not recognise, so `_prior_user_turns` was always empty and no short follow-up could be resolved in the real app | Send `USER:` / `ASSISTANT:` labels so follow-ups such as `largest?` resolve |
+| A bare `ok` / `thanks` went through retrieval, hit the low-confidence template and came back as a clarifying question | Answered locally with a one-line acknowledgement (`nzaiAnswerAck`), and the backend skips retrieval for acknowledgements (`_is_acknowledgement` + `ACKNOWLEDGEMENT_RULES`) |
+| Typed "what is due today?" was left to the model, which cannot see the on-device review queue | Answered deterministically from the same data as the Home card and the `Due` quick action (`nzaiAnswerDue`) |
+
 Tuning: raise `AI_RAG_MIN_CONFIDENCE` for stricter, more conservative answers; lower it to retrieve more
 loosely related notes. `AI_RAG_MAX_EXCERPTS` caps how many notes are quoted per turn.
 

@@ -1135,9 +1135,15 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div>`;
     }
     function nzaiTranscript(chat) {
-      const earlier = (chat?.messages || []).slice(-7, -1);
+      // `chat` is captured before the current message is appended, so the newest
+      // stored message is the previous assistant reply — it must stay in the
+      // transcript. Dropping it is what made a bare "ok" ask "what do you have
+      // due?" right after NotezAi had already answered that.
+      const earlier = (chat?.messages || []).slice(-8);
       if (!earlier.length) return '';
-      return 'Earlier in this chat:\n' + earlier.map(msg => `${msg.role === 'user' ? 'User' : 'NotezAi'}: ${String(msg.text).slice(0, 600)}`).join('\n') + '\n\n';
+      // Uppercase role labels match the backend's turn parser, so short
+      // follow-ups can be resolved against the previous user message.
+      return 'Earlier in this chat:\n' + earlier.map(msg => `${msg.role === 'user' ? 'USER' : 'ASSISTANT'}: ${String(msg.text).slice(0, 600)}`).join('\n') + '\n\n';
     }
     function nzaiRetrieve(question, k = 5) {
       const terms = [...new Set(nzWords(question).filter(word => word.length > 2))];
@@ -1339,6 +1345,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       $('#ai-slash') && ($('#ai-slash').hidden = true);
       const editAt = nzai.editAt;
       if (editAt != null) return nzaiAsk(text, { editAt });
+      if (NZAI_ACK.test(text) && !(nzai.quiz && nzaiScopeNote()) && !nzaiAwaitingAnswer()) return nzaiAnswerAck(text);
+      if (NZAI_DUE_QUESTION.test(text) && !/\b(?:note|notes|file|pdf|chapter|page)\b/i.test(text)) return nzaiAnswerDue(text, notes.filter(note => isReviewDue(note)));
       if (CLEANUP_INTENT.test(text)) {
         const roots = emptyFolderRoots();
         nzaiUpdateChat(chat => { if (!chat.messages.length) chat.title = text.slice(0, 60); chat.messages.push({ role: 'user', text, t: Date.now() }); });
@@ -1349,19 +1357,56 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     async function nzaiQuick(taskKey) {
       if (taskKey === 'plan') return nzaiAskPlan();
-      if (taskKey === 'due') { const due = notes.filter(note => isReviewDue(note)); return nzaiAskDue(due); }
+      if (taskKey === 'due') return nzaiAnswerDue('What is due today?', notes.filter(note => isReviewDue(note)));
       if (!AI_TASKS[taskKey]) return;
       if (!nzaiScopeNote()) { nzai.scope = 'library'; }
       return nzaiAsk(AI_TASKS[taskKey].label, { task: taskKey });
     }
     function nzaiAskPlan() { nzai.scope = 'library'; return nzaiAsk(planPrompt()); }
-    function nzaiAskDue(due) {
+    // The review queue lives on this device, so it is answered from `notes` here
+    // instead of being left to the model, which can only guess (and used to
+    // contradict itself one message later).
+    function nzaiAnswerDue(question, due) {
       nzai.scope = 'library';
-      const list = due.slice(0, 30).map(note => `- ${note.title} (${note.folderPath || 'General'})`).join('\n') || 'Nothing is due.';
-      nzaiUpdateChat(chat => { chat.messages.push({ role: 'user', text: 'What is due today?', t: Date.now() }); chat.title = chat.title && chat.title !== 'New chat' ? chat.title : 'What is due today?'; });
-      nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', text: due.length ? `${due.length} note${due.length === 1 ? ' is' : 's are'} due for review:\n${list}` : 'Nothing is due for review right now. Enjoy the break.', t: Date.now() }));
+      const list = due.slice(0, 30).map(note => `- ${note.title} (${note.folderPath || 'General'})`).join('\n');
+      // Same source as the Home card, so the chat cannot disagree with the app.
+      const now = new Date(), week = readWeek(), today = week[now.getDay()];
+      const note = today.note || (today.off ? 'No study planned' : 'Study day');
+      const plan = today.off
+        ? `Today is ${DAY_NAMES[now.getDay()]} — an off day (${note}).`
+        : `Today is ${DAY_NAMES[now.getDay()]} — ${dayLabel(today)} (${note}).`;
+      const answer = (due.length
+        ? `${due.length} note${due.length === 1 ? ' is' : 's are'} due for review:\n${list}`
+        : 'Nothing is due for review right now. Enjoy the break.') + `\n\n${plan}`;
+      nzaiUpdateChat(chat => {
+        chat.messages.push({ role: 'user', text: question, t: Date.now() });
+        chat.title = chat.title && chat.title !== 'New chat' ? chat.title : question.slice(0, 60);
+      });
+      nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', text: answer, t: Date.now() }));
       nzaiRender();
     }
+    // A bare thanks or "ok" is not a question. Answering it with the model made it
+    // re-answer the previous turn (and contradict the app's own review answer).
+    const NZAI_ACK = /^(?:ok(?:ay)?|k|kk|alright|all right|fine|thanks|thank you|thanks a lot|thx|ty|cheers|got it|gotcha|understood|cool|nice|great|awesome|perfect|exactly|agreed|hmm+|lol|👍|🙏)[\s.!?,]*$/i;
+    // When NotezAi's last message was a question, "ok" is usually the answer to
+    // it, so that turn still goes to the model.
+    function nzaiAwaitingAnswer() {
+      const chat = nzaiChat();
+      const last = [...(chat?.messages || [])].reverse().find(message => message.role === 'assistant');
+      return /\?\s*$/.test(String(last?.text || '').trim());
+    }
+    function nzaiAnswerAck(text) {
+      const reply = 'Got it. Ask me whenever you need something else.';
+      nzaiUpdateChat(chatNow => {
+        if (!chatNow.messages.length) chatNow.title = text.slice(0, 60);
+        chatNow.messages.push({ role: 'user', text, t: Date.now() });
+        chatNow.messages.push({ role: 'assistant', text: reply, t: Date.now() });
+      });
+      nzaiRender();
+    }
+    // "What is due today?" typed into the chat used to be answered by the model,
+    // which has no access to the spaced-review queue.
+    const NZAI_DUE_QUESTION = /^(?:what(?:'s|\s+is|\s+are)?\s+(?:due|left\s+to\s+review|in\s+my\s+review\s+queue)|what\s+do\s+i\s+(?:have\s+)?due|do\s+i\s+have\s+(?:anything|any\s+notes?)\s+due|anything\s+due|what\s+needs?\s+review)\s*(?:for\s+review\s*)?(?:today|now|tomorrow|tonight|this\s+week)?\s*[?.!]*$/i;
     async function nzaiClick(event) {
       const el = event.target.closest('[data-nzai]'); if (!el) return;
       const act = el.dataset.nzai;

@@ -335,6 +335,42 @@ RETRIEVAL_RULES = (
     "- If the excerpts do not answer the question, say so plainly and ask one short clarifying question.",
 )
 
+# A bare "ok" or "thanks" is not a question. Retrieval has nothing to search for,
+# and without guidance the model re-answers the previous turn (which is how an
+# acknowledgement once contradicted the app's own review answer one message later).
+ACKNOWLEDGEMENTS = {
+    "ok", "okay", "k", "kk", "alright", "all right", "fine", "right", "sure",
+    "thanks", "thank you", "thanks a lot", "many thanks", "thx", "ty", "cheers",
+    "got it", "gotcha", "understood", "cool", "nice", "great", "awesome",
+    "perfect", "exactly", "agreed", "hmm", "lol", "👍", "🙏", "ok thanks",
+    "okay thanks", "thanks!", "ok!",
+}
+
+ACKNOWLEDGEMENT_RULES = (
+    "The user is acknowledging your previous answer, not asking a new question. "
+    "Reply in one short sentence and stop. Do not re-answer the previous question, "
+    "do not repeat note contents or citations, and do not ask a clarifying question."
+)
+
+
+def _is_acknowledgement(query: str) -> bool:
+    cleaned = re.sub(r"[\s.!?,;:'\"…]+", " ", (query or "").strip().lower()).strip()
+    return cleaned in ACKNOWLEDGEMENTS
+
+
+def _assistant_asked_question(prompt: str) -> bool:
+    """True when the model's previous turn ended with a question.
+
+    "ok" after "Want an example?" is an answer, not an acknowledgement, so it
+    must reach the model instead of being answered with a canned sign-off.
+    """
+    turns = _turns(prompt)
+    for role, text in reversed(turns[:-1]):
+        if role == "ASSISTANT":
+            return text.rstrip().endswith("?")
+    return False
+
+
 NO_CONFIDENT_MATCH = (
     "NOTE RETRIEVAL STATUS: No note was similar enough to this question to quote from it. "
     "Do not invent note contents, titles, or counts, and never say 'in your library' or list notes as if they were retrieved. "
@@ -408,6 +444,9 @@ async def augment_prompt(
     body_text = body_text or note_body
 
     query = _extract_user_query(prompt)
+    if _is_acknowledgement(query) and not _assistant_asked_question(prompt):
+        # Checked before the length guard: "ok" is two characters long.
+        return prompt + "\n\n" + ACKNOWLEDGEMENT_RULES, []
     if len(query) < 3:
         return prompt, []
 
