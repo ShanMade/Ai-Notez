@@ -546,6 +546,15 @@
               } catch (e) { return authModule.getAuth(app); }
             })(),
             onAuthStateChanged: authModule.onAuthStateChanged,
+            signInAnonymously: authModule.signInAnonymously,
+            guestAuth: (() => {
+              // Separate app + auth so anonymous AI tokens never trigger the main workspace auth listener.
+              try {
+                const guestApp = appModule.getApps().find(candidate => candidate.name === 'notez-ai-guest') || appModule.initializeApp(firebaseConfig, 'notez-ai-guest');
+                try { return authModule.initializeAuth(guestApp, { persistence: [authModule.indexedDBLocalPersistence, authModule.browserLocalPersistence] }); }
+                catch { return authModule.getAuth(guestApp); }
+              } catch { return null; }
+            })(),
             inMemoryPersistence: authModule.inMemoryPersistence,
             GoogleAuthProvider: authModule.GoogleAuthProvider,
             signInWithPopup: authModule.signInWithPopup,
