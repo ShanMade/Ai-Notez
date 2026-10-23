@@ -182,3 +182,26 @@ def test_inventory_intent_detection():
     assert is_inventory_query("How many notes do I have?")
     assert is_inventory_query("Give me an overview of my collection")
     assert not is_inventory_query("Explain photosynthesis from my notes")
+
+
+def test_inventory_overrides_existing_semantic_context_skip():
+    index = FakeIndex()
+    prompt, sources = call(
+        'NUMBERED NOTES FROM THE USER\'S LIBRARY:\\n[1] Irrelevant note\\n<note>old context</note>\\nUSER: What\'s in my library?',
+        {"a1": {"title": "Actual inventory note"}},
+        index,
+    )
+    assert "Exact total note count: 1" in prompt
+    assert "Actual inventory note" in prompt
+    assert sources == [{"id": "a1", "title": "Actual inventory note", "folderPath": ""}]
+    assert index.search_calls == 0
+
+
+def test_latest_user_message_controls_inventory_intent():
+    prompt, sources = call(
+        "USER: What's in my library?\\nASSISTANT: Here is an overview.\\nUSER: Explain photosynthesis.",
+        {"bio": {"title": "Biology", "body": "Photosynthesis details"}},
+        FakeIndex(),
+    )
+    assert "LIBRARY INVENTORY" not in prompt
+    assert sources == []
