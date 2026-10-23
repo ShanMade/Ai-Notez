@@ -221,7 +221,7 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             except httpx.TimeoutException:
                 raise HTTPException(status_code=504, detail="Embedding request timed out.")
         vectors = [item.get("embedding", []) for item in data.get("data", [])]
-    elif embed_provider == "mistral":
+    if embed_provider == "mistral":
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
             try:
                 response = await client.post(
