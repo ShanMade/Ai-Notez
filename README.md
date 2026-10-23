@@ -1,6 +1,6 @@
 # AI-Notez
 
-AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-backed sign-in and sync, voice-note workflows, AI assistance, and a separate Python API for generation and semantic retrieval.
+AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-backed sign-in and sync, voice-note workflows, AI assistance, and a separate Python API for generation and semantic retrieval. The assistant answers with **retrieval-augmented generation (RAG)**: questions are embedded, matched against a per-user vector index, and answered only from notes that clear a confidence threshold.
 
 **Live app:** https://ai-notez.web.app/  
 **Repository:** https://github.com/ShanMade/Ai-Notez
@@ -11,7 +11,8 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Sign in through Firebase Authentication and sync user data with Firebase Realtime Database.
 - Use AI generation through configured Gemini and Groq providers; Mistral support can be enabled in backend configuration.
 - Work with voice-note and transcription workflows, including configurable voice profiles.
-- Index notes and retrieve relevant content through semantic search when embeddings are configured.
+- Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
+- RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
 - Install the app as a PWA; the service worker caches the app shell for improved repeat-load/offline behavior.
 - Use a standalone FastAPI backend for AI requests, indexing, and search.
 
@@ -27,9 +28,9 @@ flowchart TD
     FE -->|Authenticated API requests| API[FastAPI backend]
     API -->|Verify ID token| AUTH
     API --> AI[Gemini / Groq / optional Mistral]
-    API --> EMB[Embedding provider]
-    API --> IDX[USearch HNSW vector index]
-    API --> META[Local metadata and indexing queue]
+    API -->|RAG: embed query, gate on confidence| EMB[Embedding provider]
+    API --> IDX[USearch HNSW vector index, cosine]
+    API <--> META[SQLite: chunks, hashes, indexing queue]
     FE --> SW[Service worker / app-shell cache]
 ```
 
@@ -39,7 +40,7 @@ flowchart TD
 - **Identity and synced data:** Firebase Authentication and Firebase Realtime Database.
 - **Backend API:** FastAPI/Uvicorn under `backend/app/`. It verifies Firebase ID tokens for protected routes, exposes AI generation and retrieval endpoints, and applies request limits.
 - **AI providers:** Provider adapters and model selection live in `backend/app/providers.py`; credentials are configured through environment variables.
-- **Retrieval/indexing:** Indexing and queue orchestration live in `backend/app/indexing.py`; vector-index management is in `backend/app/vector_store.py`. Backend metadata and index files are stored under `NOTEZ_DATA_DIR`.
+- **Retrieval (RAG):** `backend/app/automatic_rag.py` turns a question into a grounded prompt, `backend/app/indexing.py` handles indexing and the queue, and `backend/app/vector_store.py` owns chunking, the USearch HNSW index and hybrid ranking. Backend metadata and index files are stored under `NOTEZ_DATA_DIR`. The browser calls the hybrid search endpoint from `app/09-knowledge-index.js`.
 - **Hosting/deployment:** Firebase Hosting serves the static frontend. The Python API must be deployed separately to a Python-capable host and configured with the correct API base URL and CORS origins.
 
 ## Repository layout
@@ -59,6 +60,7 @@ flowchart TD
 │   │   ├── providers.py     # AI and embedding provider adapters
 │   │   ├── indexing.py      # Indexing and retrieval orchestration
 │   │   └── vector_store.py  # Vector index operations
+│   ├── RAG_AUDIT.md         # Retrieval audit notes and tuning guidance
 │   ├── tests/
 │   ├── pyproject.toml
 │   └── requirements.txt
@@ -150,19 +152,90 @@ and structure stay the same. A provider that is cooling down after a rate limit 
 skipped, so a single 429 never becomes "all providers failed". The browser keeps each failed part's audio
 and offers a retry instead of discarding it.
 
-### Retrieval (RAG)
+### Retrieval settings
 
-`POST /v1/ai/generate` retrieves current notes before generation. The backend keeps a per-user vector index
-in `NOTEZ_DATA_DIR`, refreshes at most `AI_RAG_MAX_INDEX_UPDATES` changed notes per chat request, and falls
-back to keyword matching over the live Firebase notes when embeddings are unavailable. Retrieval never uses
-notes from another account, and index hits are dropped when the note was deleted or edited since indexing.
+The `AI_RAG_*` variables tune the pipeline described in
+[Semantic search and RAG](#semantic-search-and-rag). `AI_RAG_MIN_CONFIDENCE` (default `0.32`) is the cosine
+score a note must reach before its text is quoted, `AI_RAG_MAX_EXCERPTS` (default `4`) caps how many notes
+are quoted per answer, and `AI_RAG_MAX_INDEX_UPDATES` (default `24`) caps how many changed notes are
+re-embedded per chat request. `AI_MIN_SIMILARITY` (default `0.18`) is the floor applied to individual
+chunk hits before ranking, in both RAG and the search endpoints.
 
-Retrieved notes are given to the model with their attributes (word count, character count, folder, subject,
-last update, cosine score), and short follow-ups such as “largest?” are resolved against the previous turn
-before embedding. A note must reach `AI_RAG_MIN_CONFIDENCE` cosine similarity before its text is quoted; below
-that the model is told not to invent notes or report counts, and comparative questions (“largest”, “shortest”,
-“most recent”) are answered from computed note attributes instead of loose similarity. See
-[`backend/RAG_AUDIT.md`](backend/RAG_AUDIT.md) for the audit notes and tuning guidance.
+## Semantic search and RAG
+
+AI-Notez answers from your notes with **retrieval-augmented generation (RAG)**: the backend embeds the
+question, searches a per-user vector index, verifies every hit against Firebase, and only then hands the
+model the passages it is allowed to quote.
+
+### How a question is answered
+
+1. **Understand the query.** `POST /v1/ai/generate` reads the last user turn. Library-inventory questions
+   are answered from the authoritative note list instead of similarity search, and short follow-ups such as
+   “largest?” are resolved against the previous turn before anything is embedded.
+2. **Embed.** The question is embedded with the configured embedding model (`gemini-embedding-001` by
+   default, 768 dimensions; Groq and Mistral use a fixed 1024).
+3. **Search.** USearch HNSW returns the nearest chunks by cosine similarity; semantic hits below
+   `AI_MIN_SIMILARITY` (default `0.18`) are discarded. Hybrid search then blends the remaining hits
+   with bounded keyword relevance: `score = similarity + 0.35 × keyword relevance`, where keyword relevance
+   is the share of the query's meaningful terms a chunk contains, plus a small bonus for quoted phrases and
+   identifiers such as `chapter-3` or `fig2`.
+4. **Verify.** Each hit is checked against the live Firebase note. A hit whose content hash no longer matches
+   is dropped, so a deleted or edited note can never be quoted from a stale index — Firebase stays the source
+   of truth and the index is only a cache.
+5. **Gate on confidence.** A note is quoted only when it reaches `AI_RAG_MIN_CONFIDENCE` (default `0.32`)
+   **and** stays within `0.15` of the best hit. Weaker results produce an explicit "no confident match"
+   instruction, so the model asks a clarifying question instead of inventing an answer or a note count.
+6. **Ground the model.** Up to `AI_RAG_MAX_EXCERPTS` (default `4`) excerpts are passed in, each with computed
+   attributes — title, folder, subject, word and character count, last update and the cosine score — plus a
+   rule block that forbids reporting retrieval counts. Comparative questions (“largest”, “shortest”, “most
+   recent”) are answered from those attributes rather than from loose similarity.
+7. **Cite.** Notes that were used come back as `sources`, which the chat renders as openable chips instead of
+   a wall of links.
+
+### The vector database
+
+The vector database is [USearch](https://github.com/unum-cloud/usearch) — one HNSW graph per user, searched
+by cosine similarity — with chunk text, content hashes and the indexing queue kept in SQLite beside it.
+
+| Detail | Implementation |
+|---|---|
+| Index type | USearch HNSW, `metric="cos"`, `f32`, dimensions pinned to the active embedding profile |
+| Scope | One index per user, keyed by a hash of the Firebase uid — retrieval never crosses accounts |
+| Scoped search | Note- and folder-scoped queries score every chunk of that scope directly in SQLite, so a question about the open note cannot miss it |
+| Chunking | 1,600 characters per chunk with 200 characters of overlap, split on word boundaries |
+| Metadata | SQLite (`notez-vectors.sqlite3`): chunk text, content hash, embedding model, chunk counts and the indexing queue |
+| Storage | `NOTEZ_DATA_DIR` — `indexes/<owner>.usearch` plus the SQLite file; persist this directory to survive restarts |
+| Freshness | At most `AI_RAG_MAX_INDEX_UPDATES` (default `24`) changed notes are re-embedded per chat request; unchanged notes are skipped by content hash |
+| Limits | Up to `AI_MAX_INDEXED_NOTES` (5,000) notes and `AI_MAX_CHUNKS_PER_USER` (20,000) chunks per user; a note above the chunk cap is rejected with `413` |
+
+Changing `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL` or `AI_EMBEDDING_DIMENSIONS` invalidates the stored
+vectors, so the affected user's chunks are dropped and re-embedded by the next note save, rebuild or
+backfill instead of serving vectors the new model can never match.
+
+### Index and search endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /v1/index/notes/{note_id}` | Embed and upsert one note; if the embedding provider is rate limited the note stays saved and a later rebuild or backfill indexes it |
+| `DELETE /v1/index/notes/{note_id}` | Remove a note from the index |
+| `POST /v1/index/rebuild` | Rebuild the caller's index from their current notes |
+| `POST /v1/index/backfill` | Queue a background backfill of notes that are not indexed yet |
+| `GET /v1/index/status` | Queue, backfill and index status for the caller |
+| `GET /v1/index/stats` | Note and chunk counts, revision and the indexed note list |
+| `POST /v1/index/search` | Semantic search, hybrid by default |
+| `POST /v1/index/search/hybrid` | Semantic plus keyword search with `scope` set to `all`, `folder` or `note` |
+
+All of these require a Firebase ID token. Generation is limited to 30 requests per user per minute and
+embedding work to 60 operations per user per minute, counted in process — see
+[Security and operational notes](#security-and-operational-notes) for multi-instance caveats.
+
+### When embeddings are unavailable
+
+If no embedding key is configured, the embedding provider is rate limited, or the index is still empty,
+retrieval falls back to keyword matching over the live Firebase notes. When nothing matches, the model is
+told that no confident match exists and must ask one clarifying question rather than invent notes, titles or
+counts. [`backend/RAG_AUDIT.md`](backend/RAG_AUDIT.md) records the audit behind these rules and how to tune
+them.
 
 ## Tests
 
