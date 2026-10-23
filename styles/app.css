@@ -2918,17 +2918,19 @@ html[data-theme] #nz-ai .ai-src-t { min-width: 0; overflow: hidden; text-overflo
    ========================================================= */
 
 /* The assistant's reading size is its own scale, so the notes column keeps
-   whatever size the rest of the app uses. */
-#nz-ai { --chat-size: 15px; }
-#nz-ai .ai-md { font-size: var(--chat-size, 15px); line-height: 1.68; }
+   whatever size the rest of the app uses. These selectors carry the same
+   html[data-theme] prefix as the final theme block, so they win on order
+   instead of losing on specificity. */
+#nz-ai { --chat-size: 16.5px; }
+#nz-ai .ai-md, html[data-theme] #nz-ai .ai-md { font-size: var(--chat-size, 16.5px); line-height: 1.68; }
 #nz-ai .ai-md > *:last-child { margin-bottom: 0; }
-#nz-ai .ai-bubble-user { font-size: calc(var(--chat-size, 15px) - .5px); line-height: 1.6; }
-#nz-ai .ai-composer textarea { font-size: var(--chat-size, 15px); line-height: 1.55; }
-#nz-ai .ai-md h1, #nz-ai .ai-md h2, #nz-ai .ai-md h3 { font-size: 1.06em; line-height: 1.35; }
+#nz-ai .ai-bubble-user, html[data-theme] #nz-ai .ai-bubble-user { font-size: calc(var(--chat-size, 16.5px) - .5px); line-height: 1.6; }
+#nz-ai .ai-composer textarea, html[data-theme] #nz-ai .ai-composer textarea { font-size: var(--chat-size, 16.5px); line-height: 1.55; }
+#nz-ai .ai-md h1, #nz-ai .ai-md h2, #nz-ai .ai-md h3, html[data-theme] #nz-ai .ai-md h1, html[data-theme] #nz-ai .ai-md h2, html[data-theme] #nz-ai .ai-md h3 { font-size: 1.1em; line-height: 1.35; }
 #nz-ai .ai-md li + li { margin-top: 3px; }
 /* Long lines are hard to track: cap the measure on wide panels rather than
    stretching a paragraph to 120 characters. */
-#nz-ai .ai-md, #nz-ai .ai-bubble-user, #nz-ai .ai-composer textarea { max-width: 82ch; }
+#nz-ai .ai-md, #nz-ai .ai-bubble-user, html[data-theme] #nz-ai .ai-md, html[data-theme] #nz-ai .ai-bubble-user { max-width: 82ch; }
 
 /* A settled thread does not need to repeat the disclaimer on every render. */
 #nz-ai .ai-foot { margin-top: -2px; }
@@ -2961,6 +2963,6 @@ html.nzai-resizing .app-shell { transition: none !important; }
 
 /* Slightly tighter thread spacing: with a readable size, the gaps no longer
    need to carry the separation. */
-#nz-ai .ai-thread { gap: 18px; }
+#nz-ai .ai-thread, html[data-theme] #nz-ai .ai-thread { gap: 18px; }
 /* The resize grip is decorative; the hit area stays 11px wide. */
 @media (prefers-reduced-motion: reduce) { .nzai-resizer::before, .nzai-resizer::after { transition: none; } }

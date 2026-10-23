@@ -890,9 +890,15 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     const NZAI_WIDTH_DEFAULT = 440;
     const NZAI_WIDTH_MIN = 340;
     const NZAI_WIDTH_MAX = 1180;
+    // Display size scales the whole document with CSS zoom, so every geometry
+    // value is converted back to layout pixels before it is compared.
+    function nzaiZoom() {
+      const zoom = parseFloat(getComputedStyle(document.documentElement).zoom);
+      return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+    }
     function nzaiWidthLimits() {
       const min = NZAI_WIDTH_MIN;
-      const available = Math.round(window.innerWidth - 360);
+      const available = Math.round(window.innerWidth / nzaiZoom() - 360);
       const max = Math.max(min, Math.min(NZAI_WIDTH_MAX, available));
       return [min, max];
     }
@@ -912,7 +918,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // A 440 px column is cramped on a laptop: the first open is sized to the
     // window and remembered from then on.
     function nzaiDefaultWidth() {
-      return Math.min(680, Math.max(NZAI_WIDTH_DEFAULT, Math.round(window.innerWidth * 0.32)));
+      const [min, max] = nzaiWidthLimits();
+      const preferred = Math.round(window.innerWidth * 0.36 / nzaiZoom());
+      return Math.min(max, Math.max(min, Math.min(760, Math.max(460, preferred))));
     }
     function nzaiStoredWidth() {
       let saved = 0;
@@ -951,19 +959,19 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         if (!drag) return;
         event.preventDefault();
         // The handle sits on the left edge: dragging left widens the panel.
-        nzaiApplyWidth(drag.startWidth + (drag.startX - event.clientX));
+        nzaiApplyWidth(drag.startWidth + (drag.startX - event.clientX) / nzaiZoom());
       });
       handle.addEventListener('pointerup', finish);
       handle.addEventListener('pointercancel', finish);
       handle.addEventListener('lostpointercapture', finish);
-      handle.addEventListener('dblclick', () => nzaiApplyWidth(NZAI_WIDTH_DEFAULT, true));
+      handle.addEventListener('dblclick', () => nzaiApplyWidth(nzaiDefaultWidth(), true));
       handle.addEventListener('keydown', event => {
         const step = event.shiftKey ? 96 : 24;
         const current = nzaiReadWidth();
         const [, max] = nzaiWidthLimits();
         if (event.key === 'ArrowLeft') { event.preventDefault(); nzaiApplyWidth(current + step, true); }
         else if (event.key === 'ArrowRight') { event.preventDefault(); nzaiApplyWidth(current - step, true); }
-        else if (event.key === 'Home') { event.preventDefault(); nzaiApplyWidth(NZAI_WIDTH_DEFAULT, true); }
+        else if (event.key === 'Home') { event.preventDefault(); nzaiApplyWidth(nzaiDefaultWidth(), true); }
         else if (event.key === 'End') { event.preventDefault(); nzaiApplyWidth(max, true); }
       });
       // Re-clamp against the new window size, but keep returning to the width
@@ -974,8 +982,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // assistant's type scale only, so the notes column and the rest of the app
     // keep their own size. The choice persists per device.
     const NZAI_TEXT_KEY = 'notez-ai-text-v1';
-    const NZAI_TEXT_STEPS = [13.5, 15, 16.5, 18, 19.5];
-    const NZAI_TEXT_DEFAULT = 1;
+    const NZAI_TEXT_STEPS = [13.5, 15, 16.5, 18, 19.5, 21];
+    const NZAI_TEXT_DEFAULT = 2;
     function nzaiTextIndex(value) {
       let best = NZAI_TEXT_DEFAULT, gap = Infinity;
       NZAI_TEXT_STEPS.forEach((px, index) => {
