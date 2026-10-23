@@ -4,8 +4,14 @@ if (typeof nzai === 'undefined') {
 }
 
 function openNotezAi(note = null, preset = '') {
-      if (note) nzai.noteId = note.id;
-      nzaiOpen(note, preset);
+      // Opened from the account menu while reading, the assistant should start
+      // on that note: quick actions then act on what the reader can see.
+      const fallback = !note && currentPage === 'reader' && nzai.scope === 'note'
+        ? notes.find(item => item.id === activeId) || null
+        : null;
+      const target = note || fallback;
+      if (target) nzai.noteId = target.id;
+      nzaiOpen(target, preset);
     }
     const nzaiFab = document.createElement('button');
     nzaiFab.id = 'nzai-fab'; nzaiFab.type = 'button';
