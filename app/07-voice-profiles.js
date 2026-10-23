@@ -75,6 +75,28 @@ const RECORD_CONFIG = {
   bitsPerSecond: 48000
 };
 
+// Recording status constants
+const RECORDING_STATUS = {
+  IDLE: 'idle',
+  RECORDING: 'recording',
+  PAUSED: 'paused',
+  TRANSCRIBING: 'transcribing',
+  CATCHING_UP: 'catching-up',
+  FINALIZING: 'finalizing',
+  SAVED: 'saved',
+  NEEDS_ATTENTION: 'needs-attention'
+};
+
+// Language settings
+const RECORDING_LANGUAGES = {
+  auto: { label: 'Auto-detect', code: 'auto' },
+  en: { label: 'English', code: 'en' },
+  ur: { label: 'Urdu', code: 'ur' },
+  ur_roman: { label: 'Roman Urdu', code: 'ur-Latn' }
+};
+
+const VOICE_RECORDING_KEY = 'notez-recording-settings-v1';
+
 // Detect supported MIME type
 function getSupportedMimeType() {
   const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
@@ -100,13 +122,21 @@ const SPEAKER_STATE = {
   audioChunks: [],
   processingQueue: Promise.resolve(),
   transcriptSegments: [],
+  rawTranscriptSegments: [],
   liveTranscript: '',
+  rawTranscript: '',
   liveNotes: '',
   startTime: 0,
   elapsedMs: 0,
   stream: null,
   segmentInterval: null,
-  mimeType: null
+  mimeType: null,
+  mode: null,
+  language: 'auto',
+  status: RECORDING_STATUS.IDLE,
+  segmentTiming: [],
+  failedSegments: [],
+  needsReview: []
 };
 
 // Initialize voice profiles from storage
@@ -116,6 +146,91 @@ function initVoiceProfiles() {
   if (ownerProfile) {
     SPEAKER_STATE.ownerVoiceId = ownerProfile.id;
   }
+  
+  // Initialize recording settings
+  loadRecordingSettings();
+}
+
+// Recording settings management
+function getRecordingSettings() {
+  try {
+    const stored = localStorage.getItem(VOICE_RECORDING_KEY);
+    return stored ? JSON.parse(stored) : { language: 'auto' };
+  } catch {
+    return { language: 'auto' };
+  }
+}
+
+function saveRecordingSettings(settings) {
+  try {
+    localStorage.setItem(VOICE_RECORDING_KEY, JSON.stringify(settings));
+  } catch {
+    console.warn('Could not save recording settings');
+  }
+}
+
+function loadRecordingSettings() {
+  const settings = getRecordingSettings();
+  SPEAKER_STATE.language = settings.language || 'auto';
+}
+
+function setRecordingLanguage(lang) {
+  if (RECORDING_LANGUAGES[lang]) {
+    SPEAKER_STATE.language = lang;
+    saveRecordingSettings({ language: lang });
+    return true;
+  }
+  return false;
+}
+
+// Segment tracking with timing
+function addSegmentTiming(segmentIndex, startTime, endTime, duration) {
+  SPEAKER_STATE.segmentTiming[segmentIndex] = {
+    startTime,
+    endTime,
+    duration,
+    processed: false,
+    processingStart: null
+  };
+}
+
+// Track failed segments for retry
+function markSegmentFailed(segmentIndex, error) {
+  SPEAKER_STATE.failedSegments.push({
+    index: segmentIndex,
+    error: error?.message || String(error),
+    timestamp: Date.now()
+  });
+}
+
+function markSegmentNeedsReview(segmentIndex, reason) {
+  SPEAKER_STATE.needsReview.push({
+    index: segmentIndex,
+    reason: reason,
+    timestamp: Date.now()
+  });
+}
+
+// Update recording status
+function updateRecordingStatus(status) {
+  SPEAKER_STATE.status = status;
+  updateRecordingUI();
+}
+
+// Get current status label
+function getStatusLabel() {
+  const status = SPEAKER_STATE.status || RECORDING_STATUS.IDLE;
+  const labels = {
+    [RECORDING_STATUS.IDLE]: 'Ready',
+    [RECORDING_STATUS.RECORDING]: 'Recording',
+    [RECORDING_STATUS.PAUSED]: 'Paused',
+    [RECORDING_STATUS.TRANSCRIBING]: 'Transcribing',
+    [RECORDING_STATUS.CATCHING_UP]: 'Catching up',
+    [RECORDING_STATUS.FINALIZING]: 'Finalizing',
+    [RECORDING_STATUS.SAVED]: 'Saved',
+    [RECORDING_STATUS.NEEDS_ATTENTION]: 'Needs attention'
+  };
+  return labels[status] || 'Ready';
 }
 
 // =============================================================================
@@ -317,11 +432,18 @@ async function startEnhancedRecording(mode = 'class') {
   SPEAKER_STATE.isStopping = false;
   SPEAKER_STATE.audioChunks = [];
   SPEAKER_STATE.transcriptSegments = [];
+  SPEAKER_STATE.rawTranscriptSegments = [];
   SPEAKER_STATE.liveTranscript = '';
+  SPEAKER_STATE.rawTranscript = '';
   SPEAKER_STATE.liveNotes = '';
   SPEAKER_STATE.startTime = Date.now();
   SPEAKER_STATE.mode = mode;
   SPEAKER_STATE.elapsedMs = 0;
+  SPEAKER_STATE.segmentTiming = [];
+  SPEAKER_STATE.failedSegments = [];
+  SPEAKER_STATE.needsReview = [];
+  SPEAKER_STATE.status = RECORDING_STATUS.RECORDING;
+  updateRecordingStatus(RECORDING_STATUS.RECORDING);
   
   // Get user media
   try {
@@ -382,31 +504,64 @@ async function startEnhancedRecording(mode = 'class') {
       if (SPEAKER_STATE.audioChunks.length > 0) {
         const blob = new Blob(SPEAKER_STATE.audioChunks, { type: mimeType });
         const segmentIndex = SPEAKER_STATE.transcriptSegments.length;
+        const segmentStartTime = Date.now();
+        
+        // Update status
+        updateRecordingStatus(RECORDING_STATUS.TRANSCRIBING);
+        
+        // Record timing
+        addSegmentTiming(segmentIndex, segmentStartTime, null, null);
         
         // Process in background
         SPEAKER_STATE.processingQueue = SPEAKER_STATE.processingQueue.then(async () => {
           try {
             const knownVoices = getVoiceProfiles();
-            const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
+            const rawTranscript = await processAudioSegment(blob, segmentIndex, knownVoices);
+            
+            // Preserve raw transcript
+            SPEAKER_STATE.rawTranscriptSegments[segmentIndex] = rawTranscript;
+            SPEAKER_STATE.rawTranscript = SPEAKER_STATE.rawTranscriptSegments.filter(Boolean).join('\n\n');
             
             // Extract and match speakers
-            const { detectedVoices, voiceMap } = detectSpeakerFromText(transcript);
+            const { detectedVoices, voiceMap } = detectSpeakerFromText(rawTranscript);
             const voiceMatches = matchVoicesToProfiles(detectedVoices, voiceMap);
             
             // Apply voice labels
-            const enhancedTranscript = applyVoiceLabels(transcript, voiceMatches);
+            const enhancedTranscript = applyVoiceLabels(rawTranscript, voiceMatches);
             
             SPEAKER_STATE.transcriptSegments[segmentIndex] = enhancedTranscript;
             SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
             
+            // Update segment timing
+            const segmentEndTime = Date.now();
+            const segmentDuration = segmentEndTime - segmentStartTime;
+            if (SPEAKER_STATE.segmentTiming[segmentIndex]) {
+              SPEAKER_STATE.segmentTiming[segmentIndex].endTime = segmentEndTime;
+              SPEAKER_STATE.segmentTiming[segmentIndex].duration = segmentDuration;
+              SPEAKER_STATE.segmentTiming[segmentIndex].processed = true;
+            }
+            
             // Generate live notes
             await generateLiveNotes();
+            
+            // Update status
+            updateRecordingStatus(RECORDING_STATUS.RECORDING);
             
             // Update UI
             updateRecordingUI();
           } catch (error) {
             console.error('Segment processing error:', error);
+            
+            // Mark as failed for retry
+            markSegmentFailed(segmentIndex, error);
+            
+            // Update status to needs attention if there are failed segments
+            if (SPEAKER_STATE.failedSegments.length > 0) {
+              updateRecordingStatus(RECORDING_STATUS.NEEDS_ATTENTION);
+            }
+            
             SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Error transcribing segment ${segmentIndex + 1}: ${error.message || 'Unknown error'}]`;
+            SPEAKER_STATE.rawTranscriptSegments[segmentIndex] = '';
             updateRecordingUI();
           }
         });
@@ -481,11 +636,17 @@ async function generateLiveNotes() {
     return;
   }
   
+  const language = SPEAKER_STATE.language || 'auto';
+  const langCode = RECORDING_LANGUAGES[language]?.code || 'auto';
+  
+  // Build language hint for AI
+  const langHint = langCode !== 'auto' ? ` Language: ${RECORDING_LANGUAGES[language]?.label || language}.` : '';
+
   const mode = SPEAKER_STATE.mode || 'class';
   const context = getVoiceContext();
   const ownerProfile = getOwnerVoiceProfile();
   
-  const prompt = `Analyze this transcript and create concise, actionable notes. Context: ${mode} recording.
+  const prompt = `Analyze this transcript and create concise, actionable notes. Context: ${mode} recording.${langHint}
 
 ${ownerProfile?.context ? 'Owner context: ' + ownerProfile.context : ''}
 
@@ -498,7 +659,7 @@ Create:
 3. Questions to research
 4. Important quotes with speaker attribution
 
-Be concise, accurate, and structured.`;
+Be concise, accurate, and structured. Keep the original language of the transcript. Do not translate.`;
   
   try {
     const result = await aiGenerate(prompt, { temperature: 0.2 });
@@ -575,6 +736,9 @@ function stopRecording() {
     }
   }
   
+  // Update status
+  updateRecordingStatus(RECORDING_STATUS.FINALIZING);
+  
   // Wait for any pending processing to complete, then save
   SPEAKER_STATE.processingQueue = SPEAKER_STATE.processingQueue.then(async () => {
     try {
@@ -587,7 +751,9 @@ function stopRecording() {
         const knownVoices = getVoiceProfiles();
         const transcript = await processAudioSegment(blob, segmentIndex, knownVoices);
         SPEAKER_STATE.transcriptSegments[segmentIndex] = transcript;
+        SPEAKER_STATE.rawTranscriptSegments[segmentIndex] = transcript;
         SPEAKER_STATE.liveTranscript = SPEAKER_STATE.transcriptSegments.filter(Boolean).join('\n\n');
+        SPEAKER_STATE.rawTranscript = SPEAKER_STATE.rawTranscriptSegments.filter(Boolean).join('\n\n');
         await generateLiveNotes();
         updateRecordingUI();
         SPEAKER_STATE.audioChunks.length = 0;
@@ -601,14 +767,28 @@ function stopRecording() {
         .map(seg => seg.text)
         .join('\n\n');
       
+      const orderedRawTranscript = SPEAKER_STATE.rawTranscriptSegments
+        .map((segment, index) => ({ index, text: segment }))
+        .filter(seg => seg.text && seg.text.trim())
+        .sort((a, b) => a.index - b.index)
+        .map(seg => seg.text)
+        .join('\n\n');
+      
       if (orderedTranscript !== SPEAKER_STATE.liveTranscript) {
         SPEAKER_STATE.liveTranscript = orderedTranscript;
+      }
+      if (orderedRawTranscript !== SPEAKER_STATE.rawTranscript) {
+        SPEAKER_STATE.rawTranscript = orderedRawTranscript;
       }
       
       // Save final transcript as note (only once)
       saveRecordingAsNote();
+      
+      // Update status
+      updateRecordingStatus(RECORDING_STATUS.SAVED);
     } catch (error) {
       console.error('Error during final processing:', error);
+      updateRecordingStatus(RECORDING_STATUS.NEEDS_ATTENTION);
       toast('Recording stopped but there was an error processing the final segment.', 'error', 6000);
     } finally {
       // Always cleanup
@@ -659,6 +839,7 @@ function resumeRecording() {
 // Save recording as note
 function saveRecordingAsNote() {
   const transcript = SPEAKER_STATE.liveTranscript;
+  const rawTranscript = SPEAKER_STATE.rawTranscript;
   const aiNotesText = SPEAKER_STATE.liveNotes;
   
   if (!transcript || !transcript.trim()) {
@@ -669,6 +850,8 @@ function saveRecordingAsNote() {
   const mode = SPEAKER_STATE.mode || 'class';
   const timestamp = new Date(SPEAKER_STATE.startTime).toLocaleString();
   const durationMs = Date.now() - SPEAKER_STATE.startTime;
+  const language = SPEAKER_STATE.language || 'auto';
+  const langLabel = RECORDING_LANGUAGES[language]?.label || language;
   
   // Ensure segments are in correct order
   const orderedSegments = SPEAKER_STATE.transcriptSegments
@@ -677,16 +860,63 @@ function saveRecordingAsNote() {
     .sort((a, b) => a.index - b.index)
     .map(seg => seg.text);
   
+  const orderedRawSegments = SPEAKER_STATE.rawTranscriptSegments
+    .map((segment, index) => ({ index, text: segment }))
+    .filter(seg => seg.text && seg.text.trim())
+    .sort((a, b) => a.index - b.index)
+    .map(seg => seg.text);
+  
   const finalTranscript = orderedSegments.join('\n\n') || transcript;
+  const finalRawTranscript = orderedRawSegments.join('\n\n') || rawTranscript;
+  
+  // Build note body with both raw and processed transcripts
+  const hasRaw = finalRawTranscript && finalRawTranscript !== finalTranscript;
+  const hasFailed = SPEAKER_STATE.failedSegments.length > 0;
+  const hasNeedsReview = SPEAKER_STATE.needsReview.length > 0;
+  
+  const bodyParts = [
+    `# ${mode === 'meeting' ? 'Meeting' : 'Class'} Recording`,
+    '',
+    `**Date:** ${timestamp}`,
+    `**Duration:** ${formatDuration(durationMs)}`,
+    `**Language:** ${langLabel}`,
+    hasFailed ? `**Status:** Needs attention (${SPEAKER_STATE.failedSegments.length} failed segment${SPEAKER_STATE.failedSegments.length === 1 ? '' : 's'})` : '',
+    '',
+    '## Transcript',
+    '',
+    finalTranscript
+  ];
+  
+  if (hasRaw) {
+    bodyParts.push('', '## Raw Transcript (Unprocessed)', '', finalRawTranscript);
+  }
+  
+  if (hasFailed) {
+    bodyParts.push('', '## Failed Segments', '');
+    SPEAKER_STATE.failedSegments.forEach((failed, i) => {
+      bodyParts.push(`- **Segment ${failed.index + 1}:** ${esc(failed.error)}`);
+    });
+  }
+  
+  if (hasNeedsReview) {
+    bodyParts.push('', '## Needs Review', '');
+    SPEAKER_STATE.needsReview.forEach((item, i) => {
+      bodyParts.push(`- **Segment ${item.index + 1}:** ${esc(item.reason)}`);
+    });
+  }
+  
+  if (aiNotesText) {
+    bodyParts.push('', '## AI Notes', '', aiNotesText);
+  }
   
   const note = normalizeNote({
     id: uid(),
     title: `${mode === 'meeting' ? 'Meeting' : 'Class'} Recording - ${timestamp}`,
     subject: mode === 'meeting' ? 'Meetings' : 'Classes',
     folderPath: mode === 'meeting' ? 'Meetings' : 'Classes',
-    tags: ['recording', mode, 'transcript'],
+    tags: ['recording', mode, 'transcript', language],
     kind: 'markdown',
-    body: `# ${mode === 'meeting' ? 'Meeting' : 'Class'} Recording\n\n**Date:** ${timestamp}\n**Duration:** ${formatDuration(durationMs)}\n\n## Transcript\n\n${finalTranscript}\n\n${aiNotesText ? `## AI Notes\n\n${aiNotesText}` : ''}`,
+    body: bodyParts.join('\n'),
     createdAt: Date.now(),
     updatedAt: Date.now()
   });
@@ -732,8 +962,13 @@ function cleanupRecording() {
       console.error('Error cleaning up media recorder:', error);
     }
   }
-  
-  // Stop all tracks from main stream
+  SPEAKER_STATE.rawTranscriptSegments = [];
+  SPEAKER_STATE.rawTranscript = '';
+  SPEAKER_STATE.segmentTiming = [];
+  SPEAKER_STATE.failedSegments = [];
+  SPEAKER_STATE.needsReview = [];
+  SPEAKER_STATE.status = RECORDING_STATUS.IDLE;
+  SPEAKER_STATE.segmentTiming = [];
   if (SPEAKER_STATE.stream) {
     try {
       SPEAKER_STATE.stream.getTracks().forEach(track => {
@@ -860,6 +1095,22 @@ function renderVoiceProfileSettings() {
             Auto-identify my voice
           </label>
           <small>Automatically label your voice as [Owner] in transcripts</small>
+        </div>
+      </div>
+      
+      <div class="settings-section">
+        <h4>Language Settings</h4>
+        <p>Select the language for transcription. The app will keep the original language and not translate.</p>
+        
+        <div class="field">
+          <label for="recording-language">Transcription Language</label>
+          <select id="recording-language">
+            <option value="auto" ${SPEAKER_STATE.language === 'auto' ? 'selected' : ''}>${RECORDING_LANGUAGES.auto.label}</option>
+            <option value="en" ${SPEAKER_STATE.language === 'en' ? 'selected' : ''}>${RECORDING_LANGUAGES.en.label}</option>
+            <option value="ur" ${SPEAKER_STATE.language === 'ur' ? 'selected' : ''}>${RECORDING_LANGUAGES.ur.label}</option>
+            <option value="ur_roman" ${SPEAKER_STATE.language === 'ur_roman' ? 'selected' : ''}>${RECORDING_LANGUAGES.ur_roman.label}</option>
+          </select>
+          <small>Select the primary language. Auto-detect will attempt to identify the language automatically.</small>
         </div>
       </div>
     </div>

@@ -344,18 +344,6 @@
     return result || '<p class="subtle">There is no content in this note yet. Select <strong>Edit</strong> to add your first thought.</p>';
   };
 
-  // Override the original markdownToHtml function if it exists
-  if (typeof window.markdownToHtml === 'function') {
-    const original = window.markdownToHtml;
-    window.markdownToHtml = function(markdown) {
-      try {
-        return window.markdownToHtmlSafe(markdown);
-      } catch (e) {
-        console.error('Safe markdown renderer failed, falling back:', e);
-        return original(markdown);
-      }
-    };
-  } else {
-    window.markdownToHtml = window.markdownToHtmlSafe;
-  }
+  // Set markdownToHtml to use the safe renderer
+  window.markdownToHtml = window.markdownToHtmlSafe;
 })();
