@@ -306,7 +306,7 @@ async function loadPdfReader(state) {
       const frame = document.createElement('iframe');
       frame.id = toolbar ? 'html-preview-frame' : 'html-editor-frame';
       frame.className = toolbar ? 'attachment-frame html-frame' : 'editor-preview-frame';
-      frame.setAttribute('sandbox', 'allow-scripts allow-forms');
+      frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');
       frame.setAttribute('allow', 'fullscreen');
       frame.title = `${note.title} interactive HTML preview`;
       const token = uid();
