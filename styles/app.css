@@ -2532,3 +2532,255 @@ html[data-theme="dark"] #nz-ai .ai-jump, html[data-theme="dark"] #nz-ai .ai-bubb
 }
 #nz-ai .ai-md { font-size: 13px; }
 #nz-ai .ai-thread { font-size: 14px; }
+
+
+/* =========================================================
+   NotezAi reference redesign — warm editorial chat surface
+   Scoped to the AI dock so the rest of Notez keeps its own theme.
+   ========================================================= */
+#nz-ai {
+  --chat-ink: #292923;
+  --chat-muted: #77766d;
+  --chat-line: #e8e5dc;
+  --chat-soft: #f4f2eb;
+  --v3-card: #fffefa;
+  --v3-edge: #e4e0d6;
+  --v3-tint: #eaf1e8;
+  --v3-shadow: 0 2px 12px rgba(45, 48, 38, .055);
+  background: #fffefa;
+  color: #292923;
+  border-left: 1px solid #e8e5dc;
+  box-shadow: -12px 0 42px rgba(38, 39, 31, .075);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#nz-ai .dock-chrome {
+  min-height: 62px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e8e5dc;
+  background: rgba(255, 254, 250, .96);
+}
+#nz-ai .fl-btn {
+  border-color: #e5e1d7;
+  background: #fffefa;
+  color: #5d6056;
+  box-shadow: none;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+#nz-ai .fl-btn:hover { background: #f3f1e9; border-color: #d7d2c5; color: #292923; }
+#nz-ai .fl-bar { border-color: #e5e1d7; background: #fffefa; box-shadow: none; }
+#nz-ai .fl-bar .fl-btn.on { background: #edf2e9; color: #477458; }
+#nz-ai .fl-bar .fl-new { background: #477458; color: #fff; }
+#nz-ai .dock-ctx { display: flex; }
+#nz-ai .dock-ctx-title { color: #292923; font-size: 13px; font-weight: 650; }
+#nz-ai .ai-ctx-chip {
+  border-color: #dce5d7;
+  background: #edf2e9;
+  color: #354d39;
+  box-shadow: none;
+}
+#nz-ai .ai-ctx-chip svg { color: #477458; }
+#nz-ai .ai-ctx-pill { background: #fffefa; color: #477458; }
+#nz-ai .nzai-body { background: #fffefa; }
+#nz-ai .ai-welcome { padding: 24px 8px 8px; }
+#nz-ai .ai-welcome h3 {
+  max-width: 440px;
+  font: 500 clamp(28px, 3vw, 36px)/1.12 ui-serif, Georgia, "Iowan Old Style", serif;
+  letter-spacing: -.035em;
+  color: #292923;
+}
+#nz-ai .ai-welcome h3 em { color: #477458; }
+#nz-ai .ai-welcome p { max-width: 420px; font-size: 13px; line-height: 1.65; color: #77766d; }
+#nz-ai .ai-card {
+  min-height: 58px;
+  border-bottom-color: #ebe8df;
+  border-radius: 10px;
+  padding: 8px 10px;
+  transition: background .16s ease, transform .16s ease;
+}
+#nz-ai .ai-card:hover:not(:disabled) { background: #f7f6f0; border-color: #e5e1d7; transform: translateX(2px); }
+#nz-ai .ai-card-ic { background: #edf2e9; color: #477458; border-radius: 10px; }
+#nz-ai .ai-card b { font-size: 13px; font-weight: 650; color: #292923; }
+#nz-ai .ai-card small { color: #77766d; line-height: 1.45; }
+#nz-ai .ai-thread { gap: 24px; padding-left: 18px; padding-right: 18px; }
+#nz-ai .ai-msg.user { gap: 6px; }
+#nz-ai .ai-bubble-user {
+  background: #f0efe8;
+  color: #292923;
+  border: 1px solid #e9e6dd;
+  border-radius: 18px 18px 5px 18px;
+  padding: 11px 15px;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+#nz-ai .ai-msg.ai { gap: 5px; }
+#nz-ai .ai-md { color: #34342e; font-size: 14px; line-height: 1.78; overflow-wrap: anywhere; }
+#nz-ai .ai-md p, #nz-ai .ai-md ul, #nz-ai .ai-md ol { margin-bottom: 11px; }
+#nz-ai .ai-md h1, #nz-ai .ai-md h2, #nz-ai .ai-md h3 {
+  margin: 18px 0 7px;
+  color: #292923;
+  font-family: ui-serif, Georgia, "Iowan Old Style", serif;
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+#nz-ai .ai-md h1 { font-size: 23px; }
+#nz-ai .ai-md h2 { font-size: 20px; }
+#nz-ai .ai-md h3 { font-size: 16px; }
+#nz-ai .ai-md blockquote { border-left: 3px solid #cbd9c6; padding: 2px 0 2px 14px; color: #696b61; }
+#nz-ai .ai-md code { background: #f1f0e9; color: #3e5541; border-radius: 5px; padding: 2px 5px; }
+#nz-ai .ai-md pre { border: 1px solid #e8e5dc; background: #f7f6f0; border-radius: 12px; }
+#nz-ai .ai-md pre code { background: transparent; color: inherit; }
+#nz-ai .ai-sources { gap: 7px; }
+#nz-ai .ai-src { border-color: #e4e0d6; background: #fffefa; color: #55594f; }
+#nz-ai .ai-src:hover { border-color: #b9cbb3; background: #f3f6ef; }
+#nz-ai .ai-action.ai-ic { border-radius: 10px; }
+#nz-ai .ai-action.ai-ic:hover { background: #f1f0e9; color: #292923; }
+#nz-ai .ai-action.ai-ic.on { background: #edf2e9; color: #477458; }
+#nz-ai .ai-typing { color: #77766d; }
+#nz-ai .thinking-row .ai-typing { background: #f4f5ef; border: 1px solid #e8e9df; border-radius: 12px; padding: 9px 12px; }
+#nz-ai .ai-qchip {
+  border-color: #e4e0d6;
+  background: #fffefa;
+  color: #55594f;
+  border-radius: 18px;
+  min-height: 34px;
+  padding: 0 13px;
+}
+#nz-ai .ai-qchip:hover:not(:disabled) { border-color: #c6d5c0; background: #f3f6ef; color: #354d39; }
+#nz-ai .ai-composer-wrap { padding: 10px 16px 0; }
+#nz-ai .ai-composer {
+  border: 1px solid #dedbd1;
+  border-radius: 20px;
+  padding: 8px 8px 8px 16px;
+  background: #fffefa;
+  box-shadow: 0 5px 22px rgba(43, 44, 36, .07);
+  gap: 5px;
+}
+#nz-ai .ai-composer:focus-within {
+  border-color: #9bb59a;
+  box-shadow: 0 0 0 3px rgba(71, 116, 88, .09), 0 5px 22px rgba(43, 44, 36, .07);
+}
+#nz-ai .ai-composer textarea { color: #292923; line-height: 1.55; }
+#nz-ai .ai-composer textarea::placeholder { color: #96948a; }
+#nz-ai .ai-ibtn { color: #77766d; }
+#nz-ai .ai-ibtn:hover:not(:disabled) { background: #f1f0e9; color: #292923; }
+#nz-ai .ai-send { background: #477458; color: #fff; border-radius: 50%; box-shadow: none; }
+#nz-ai .ai-send:hover:not(:disabled) { background: #3b634a; }
+#nz-ai .ai-send.stop { background: #373c34; color: #fff; }
+#nz-ai .ai-foot { color: #8b897f; }
+#nz-ai .ai-foot-link { color: #77766d; }
+#nz-ai .ai-foot-link:hover { color: #477458; }
+#nz-ai .ai-notice, #nz-ai .ai-editing, #nz-ai .ai-quizbar { background: #f4f2eb; border: 1px solid #e8e5dc; color: #55594f; }
+#nz-ai .hist-row { border-bottom-color: #ebe8df; }
+#nz-ai .hist-row.current { background: #edf2e9; }
+#nz-ai .hist-open { color: #292923; }
+#nz-ai .hist-open small { color: #77766d; }
+#nz-ai .nzai-source { gap: 10px; }
+#nz-ai .nzai-src {
+  border-color: #e5e1d7;
+  border-radius: 13px;
+  background: #fffefa;
+  padding: 13px 14px;
+  transition: border-color .16s ease, background .16s ease;
+}
+#nz-ai .nzai-src:hover { border-color: #b9cbb3; background: #f8f8f2; }
+#nz-ai .nzai-src.on { border-color: #91ae8b; background: #edf2e9; }
+#nz-ai .nzai-label { color: #62645a; font-size: 11px; font-weight: 700; letter-spacing: .045em; }
+#nz-ai .nzai-field {
+  border: 1px solid #dedbd1;
+  border-radius: 10px;
+  background: #fffefa;
+  color: #292923;
+  min-height: 42px;
+  padding: 10px 12px;
+}
+#nz-ai .nzai-field:focus { outline: 2px solid rgba(71, 116, 88, .25); border-color: #91ae8b; }
+#nz-ai .nzai-primary { background: #477458; color: #fff; border: 1px solid #477458; border-radius: 10px; }
+#nz-ai .nzai-primary:hover { background: #3b634a; }
+#nz-ai .nzai-section-head { color: #292923; }
+#nz-ai .nzai-section-head small, #nz-ai .rec-muted { color: #77766d; }
+#nz-ai .rec-stage { border-color: #e8e5dc; background: #f8f7f1; }
+#nz-ai .rec-stage.idle { background: #edf2e9; border-color: #dce5d7; }
+#nz-ai .rec-ctl { border-color: #e4e0d6; background: #fffefa; color: #45483f; }
+#nz-ai .rec-ctl:hover { background: #f3f6ef; }
+#nz-ai .rec-tabs { background: #f1f0e9; }
+#nz-ai .rec-tabs button[aria-selected="true"] { background: #fffefa; color: #292923; box-shadow: 0 1px 4px rgba(40,40,32,.08); }
+#nz-ai .rec-card { border-color: #e8e5dc; background: #fffefa; }
+#nz-ai .rec-scroll { border-color: #e8e5dc; background: #fffefa; }
+#nz-ai :is(button, input, textarea, select):focus-visible { outline-color: #719776; outline-offset: 2px; }
+@media (min-width: 761px) {
+  #nz-ai { border-radius: 18px 0 0 18px; overflow: hidden; }
+}
+@media (max-width: 760px) {
+  #nz-ai {
+    border: 1px solid #e8e5dc;
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    box-shadow: 0 -12px 44px rgba(38, 39, 31, .12);
+  }
+  #nz-ai .dock-chrome { padding: 8px 12px; background: #fffefa; }
+  #nz-ai .dock-ctx { display: flex; }
+  #nz-ai .dock-ctx-title { font-size: 12.5px; }
+  #nz-ai .nzai-body, #nz-ai .rec-body { padding-left: 14px; padding-right: 14px; }
+  #nz-ai .ai-thread { padding-left: 14px; padding-right: 14px; gap: 20px; }
+  #nz-ai .ai-welcome { padding-top: 18px; }
+  #nz-ai .ai-welcome h3 { font-size: 30px; }
+  #nz-ai .ai-md { font-size: 14.5px; line-height: 1.75; }
+  #nz-ai .ai-composer-wrap { padding: 8px 10px 0; }
+  #nz-ai .ai-composer { border-radius: 19px; padding-left: 13px; }
+  #nz-ai .ai-foot { color: #8b897f; }
+}
+html[data-theme="dark"] #nz-ai {
+  --chat-ink: #e8e6dd;
+  --chat-muted: #aaa99f;
+  --chat-line: rgba(226, 224, 211, .13);
+  --chat-soft: rgba(226, 224, 211, .07);
+  --v3-card: #18221c;
+  --v3-edge: rgba(226, 224, 211, .16);
+  --v3-tint: #24392b;
+  --v3-shadow: 0 2px 12px rgba(0,0,0,.22);
+  background: #121914;
+  color: #e8e6dd;
+  border-left-color: rgba(226,224,211,.13);
+}
+html[data-theme="dark"] #nz-ai .dock-chrome { background: #121914; border-bottom-color: rgba(226,224,211,.13); }
+html[data-theme="dark"] #nz-ai .fl-btn,
+html[data-theme="dark"] #nz-ai .fl-bar { background: #18221c; border-color: rgba(226,224,211,.16); color: #d8d7cd; }
+html[data-theme="dark"] #nz-ai .fl-bar .fl-btn.on,
+html[data-theme="dark"] #nz-ai .ai-ctx-chip,
+html[data-theme="dark"] #nz-ai .ai-card-ic { background: #24392b; color: #c1d8bf; }
+html[data-theme="dark"] #nz-ai .nzai-body,
+html[data-theme="dark"] #nz-ai .ai-composer,
+html[data-theme="dark"] #nz-ai .nzai-field,
+html[data-theme="dark"] #nz-ai .nzai-src,
+html[data-theme="dark"] #nz-ai .rec-card,
+html[data-theme="dark"] #nz-ai .rec-scroll { background: #121914; color: #e8e6dd; }
+html[data-theme="dark"] #nz-ai .ai-welcome h3,
+html[data-theme="dark"] #nz-ai .ai-card b,
+html[data-theme="dark"] #nz-ai .ai-md,
+html[data-theme="dark"] #nz-ai .ai-md h1,
+html[data-theme="dark"] #nz-ai .ai-md h2,
+html[data-theme="dark"] #nz-ai .ai-md h3,
+html[data-theme="dark"] #nz-ai .hist-open { color: #e8e6dd; }
+html[data-theme="dark"] #nz-ai .ai-welcome h3 em,
+html[data-theme="dark"] #nz-ai .ai-ctx-chip svg { color: #a9c8a7; }
+html[data-theme="dark"] #nz-ai .ai-bubble-user { background: #202920; border-color: rgba(226,224,211,.12); color: #e8e6dd; }
+html[data-theme="dark"] #nz-ai .ai-md code,
+html[data-theme="dark"] #nz-ai .ai-md pre { background: #1b261e; color: #d9e5d5; border-color: rgba(226,224,211,.13); }
+html[data-theme="dark"] #nz-ai .ai-src,
+html[data-theme="dark"] #nz-ai .ai-qchip { background: #18221c; border-color: rgba(226,224,211,.16); color: #d8d7cd; }
+html[data-theme="dark"] #nz-ai .ai-composer { border-color: rgba(226,224,211,.18); box-shadow: 0 5px 22px rgba(0,0,0,.22); }
+html[data-theme="dark"] #nz-ai .ai-composer textarea { color: #e8e6dd; }
+html[data-theme="dark"] #nz-ai .ai-composer textarea::placeholder { color: #85877d; }
+html[data-theme="dark"] #nz-ai .ai-send { background: #7fa786; color: #102015; }
+html[data-theme="dark"] #nz-ai .ai-send.stop { background: #c1d8bf; color: #102015; }
+html[data-theme="dark"] #nz-ai .nzai-src.on,
+html[data-theme="dark"] #nz-ai .hist-row.current { background: #24392b; border-color: #45664a; }
+html[data-theme="dark"] #nz-ai .nzai-field { border-color: rgba(226,224,211,.18); }
+html[data-theme="dark"] #nz-ai .nzai-primary { background: #7fa786; color: #102015; border-color: #7fa786; }
+html[data-theme="dark"] #nz-ai .rec-stage,
+html[data-theme="dark"] #nz-ai .rec-stage.idle,
+html[data-theme="dark"] #nz-ai .rec-tabs { background: #1b261e; border-color: rgba(226,224,211,.14); }
+html[data-theme="dark"] #nz-ai .rec-ctl { background: #18221c; color: #e8e6dd; border-color: rgba(226,224,211,.16); }
+@media (prefers-reduced-motion: reduce) {
+  #nz-ai *, #nz-ai *::before, #nz-ai *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
