@@ -2416,3 +2416,18 @@ html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--n
 .save-spinner { font-size: 11px; opacity: .7; }
 .save-spinner::after { content: '.'; animation: nzDots 1s infinite; }
 @media (prefers-reduced-motion: reduce) { .save-spinner::after { animation: none; } }
+
+/* Enhanced sources display */
+.ai-sources { margin-top: 6px; }
+.ai-sources > span { font-size: 10.5px; color: var(--muted, #63778a); margin-right: 4px; }
+.ai-src { border: 1px solid color-mix(in srgb, var(--nz-accent) 45%, transparent); background: color-mix(in srgb, var(--nz-accent) 8%, transparent); color: inherit; border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer; transition: all .15s ease; }
+.ai-src:hover { border-color: var(--nz-accent); background: color-mix(in srgb, var(--nz-accent) 15%, transparent); }
+.ai-src:active { transform: scale(0.95); }
+
+/* Note-grounded indicator */
+.ai-md[data-note-grounded="true"]::before {
+  content: "\2192";
+  color: var(--nz-accent);
+  margin-right: 4px;
+  font-size: .9em;
+}
