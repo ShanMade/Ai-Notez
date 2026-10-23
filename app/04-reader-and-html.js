@@ -997,7 +997,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       body.innerHTML = `<div class="nzai-section-head"><b>${aiBackendConfigured() ? 'AI service' : 'Provider and key'}</b></div>${aiBackendConfigured() ? '' : `<div class="nzai-chips">${tabs}</div>`}${managedBlock}${keyBlock}
         ${aiBackendConfigured() ? '' : `<label class="nzai-label">Model</label><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model">${options}</select><button type="button" data-nzai="load-models">Load</button></div>`}
         <label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        ${aiBackendConfigured() ? '' : `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to my other provider when rate limited</label>`}
+        <label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>
         <button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div>`;
     }
     function nzaiTranscript(chat) {
