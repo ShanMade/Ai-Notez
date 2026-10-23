@@ -50,7 +50,7 @@ async def embed_query(query):
 
 
 def call(prompt, notes, index, uid="user-A"):
-    async def load_notes(requested_uid):
+    def load_notes(requested_uid):
         assert requested_uid == uid
         return notes
     return run(augment_prompt(
@@ -100,7 +100,7 @@ def test_empty_library_is_not_a_retrieval_failure():
 
 
 def test_firebase_failure_is_not_reported_as_empty_library():
-    async def broken_load(uid):
+    def broken_load(uid):
         raise RuntimeError("database unavailable")
     prompt, sources = run(augment_prompt(
         "user-A", "USER: What's in my library?", False,
@@ -126,7 +126,7 @@ def test_deleted_notes_are_removed_and_never_cited():
 
 def test_notes_are_loaded_only_for_authenticated_uid():
     notes_by_uid = {"user-A": {"a1": {"title": "Private A"}}, "user-B": {"b1": {"title": "Private B"}}}
-    async def load_notes(uid):
+    def load_notes(uid):
         return notes_by_uid[uid]
     prompt, sources = run(augment_prompt(
         "user-A", "USER: What's in my library?", False,
