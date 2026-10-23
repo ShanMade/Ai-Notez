@@ -1160,15 +1160,15 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
-      const wantsInventory = /(?:what(?:'s|\\s+is)\\s+in\\s+(?:my|the)\\s+(?:note\\s+)?library|(?:show|list|display)\\s+(?:me\\s+)?(?:all\\s+)?(?:my\\s+)?notes|what\\s+notes\\s+do\\s+i\\s+have|how\\s+many\\s+notes|(?:overview|summary)\\s+of\\s+(?:my\\s+)?(?:notes|library|collection)|what\\s+subjects\\s+have\\s+i\\s+covered|what(?:'s|\\s+is)\\s+in\\s+my\\s+collection)/i.test(question);
-      const wantsLibrary = /library|all\\s+notes|entire\\s+library|all\\s+my\\s+notes|from\\s+my\\s+notes|across\\s+all/i.test(question);
+      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes|what\s+notes\s+do\s+i\s+have|how\s+many\s+notes|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
+      const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
 
       // Inventory questions bypass semantic search. Managed AI receives the authoritative
       // Firebase inventory from the backend; BYOK mode uses the current workspace cache.
       if (wantsInventory && !aiUsesManaged()) {
-        const compact = value => String(value || '').replace(/\\s+/g, ' ').trim();
+        const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
         const inventory = [...notes].sort((a, b) => compact(a.title).localeCompare(compact(b.title))).slice(0, 50);
         const total = notes.length;
         context = [
@@ -1186,12 +1186,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           }),
           total > inventory.length ? (total - inventory.length) + ' additional notes are omitted from this compact inventory.' : '',
           'Use these metadata records for library questions. Do not infer note contents from titles or invent omitted records.'
-        ].filter(Boolean).join('\\n');
+        ].filter(Boolean).join('\n');
         sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180) })).filter(item => item.id);
       }
 
       // Topic questions can use semantic retrieval; inventory questions must not.
-      if (!wantsInventory && aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {        try {
+      if (!wantsInventory && aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
+        try {
           const retrievalResult = await window.retrieveRelevantContext(question, { 
             limit: 5,
             scope: note ? 'note' : 'library',
