@@ -1160,7 +1160,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
-      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes|what\s+notes\s+do\s+i\s+have|how\s+many\s+notes|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
+      const wantsInventory = /(?:what(?:'s|\\s+is)\\s+in\\s+(?:my|the)\\s+(?:note\\s+)?library|(?:show|list|display)\\s+(?:me\\s+)?(?:all\\s+)?(?:my\\s+)?notes(?!\\s+(?:about|on|for|related|containing|with|that|which|where)\\b)|what\\s+notes\\s+do\\s+i\\s+have(?!\\s+(?:about|on|for|related|containing|with|that|which|where)\\b)|how\\s+many\\s+notes\\s+(?:do\\s+i\\s+have|are\\s+in\\s+(?:my|the)\\s+library)|(?:overview|summary)\\s+of\\s+(?:my\\s+)?(?:notes|library|collection)|what\\s+subjects\\s+have\\s+i\\s+covered|what(?:'s|\\s+is)\\s+in\\s+my\\s+collection)/i.test(question);
       const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
