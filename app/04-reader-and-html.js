@@ -1091,20 +1091,26 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
 
     function nzaiRenderSettings(body) {
+      const managedAvailable = aiBackendConfigured();
+      const byok = !managedAvailable || aiSourcePref() === 'byok';
       const provider = nzai.tab, info = AI_PROVIDERS[provider], key = aiKey(provider), pref = aiModelPref(provider);
       const models = [...new Set([...aiKnownModels(provider), ...info.models, pref].filter(Boolean))];
       const tabs = Object.entries(AI_PROVIDERS).map(([id, item]) => `<button type="button" class="nzai-chip ${id === provider ? 'on' : ''}" data-nzai="tab" data-p="${id}">${item.label}${aiKey(id) ? ' ✓' : ''}</button>`).join('');
-      const managedBlock = aiBackendConfigured()
-        ? `<div class="nzai-keybox"><b>Using the Notez AI backend</b><small>No in-app API key is needed. AI requests use the provider credentials configured on the backend.</small>${aiBackendSession() ? '<div class="nzai-actions"><button type="button" data-nzai="check-backend">Check service</button><button type="button" data-nzai="rebuild-index">Build / refresh semantic index</button></div>' : '<small>Sign in to your cloud account to use the backend.</small>'}</div>`
+      const managedBlock = !byok
+        ? `<div class="nzai-keybox"><b>Using NotezAi</b><small>No API key is needed.${aiBackendSession() ? '' : ' You are using it as a guest; sign in to also sync notes and build the semantic index.'}</small>${aiBackendSession() ? '<div class="nzai-actions"><button type="button" data-nzai="check-backend">Check service</button><button type="button" data-nzai="rebuild-index">Build / refresh semantic index</button></div>' : ''}</div>`
         : '';
-      const keyBlock = aiBackendConfigured() ? '' : key
-        ? `<div class="nzai-keybox"><b>Key saved</b><span>••••${esc(key.slice(-4))}</span><small>${aiBackendSession() ? 'Saved on this device; sent to the Notez AI backend over HTTPS for requests, but not stored by the backend.' : 'Saved on this device. You won’t be asked again.'}</small><div class="nzai-actions"><button type="button" data-nzai="change-key">Change key</button><button type="button" class="danger" data-nzai="remove-key">Remove key</button></div></div>`
-        : `<label class="nzai-label">API key</label><input class="nzai-field nzai-secret" id="nzai-key" name="notez-ai-api-token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" placeholder="${esc(info.placeholder)}"><p class="nzai-small">Get a free key at <a href="${info.keyUrl}" target="_blank" rel="noopener">${info.keyHost}</a>. ${aiBackendSession() ? 'It is saved in this browser and sent to the Notez AI backend over HTTPS for each request; the backend does not store it.' : `It is stored only in this browser and sent only to ${info.label}. ${esc(info.privacy)}`}</p><button type="button" class="nzai-primary" data-nzai="save-key">Save key</button>`;
+      const keyBlock = !byok ? '' : key
+        ? `<div class="nzai-keybox"><b>Key saved</b><span>••••${esc(key.slice(-4))}</span><small>Saved on this device only and never synced with your notes. Requests go straight to ${esc(info.label)}. ${esc(info.privacy)}</small><div class="nzai-actions"><button type="button" data-nzai="change-key">Change key</button><button type="button" class="danger" data-nzai="remove-key">Remove key</button></div></div>`
+        : `<label class="nzai-label">API key</label><input class="nzai-field nzai-secret" id="nzai-key" name="notez-ai-api-token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" placeholder="${esc(info.placeholder)}"><p class="nzai-small">Get a free key at <a href="${info.keyUrl}" target="_blank" rel="noopener">${info.keyHost}</a>. It is stored only in this browser and sent only to ${esc(info.label)}. ${esc(info.privacy)}${managedAvailable && !aiHasOwnKey() ? ' Until a key is saved, NotezAi keeps being used.' : ''}</p><button type="button" class="nzai-primary" data-nzai="save-key">Save key</button>`;
       const options = [`<option value="">Automatic (${esc(info.models[0])})</option>`, ...models.map(model => `<option value="${esc(model)}" ${model === pref ? 'selected' : ''}>${esc(model)}</option>`)].join('');
-      body.innerHTML = `<div class="nzai-section-head"><b>${aiBackendConfigured() ? 'AI service' : 'Provider and key'}</b></div>${aiBackendConfigured() ? '' : `<div class="nzai-chips">${tabs}</div>`}${managedBlock}${keyBlock}
-        ${aiBackendConfigured() ? '' : `<label class="nzai-label">Model</label><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model">${options}</select><button type="button" data-nzai="load-models">Load</button></div>`}
+      const sourceBlock = managedAvailable
+        ? `<div class="nzai-source" role="radiogroup" aria-label="AI source"><button type="button" role="radio" aria-checked="${!byok}" class="nzai-src ${!byok ? 'on' : ''}" data-nzai="source" data-v="managed"><b>NotezAi (default)</b><small>Included. Chat, note tools and Voice-to-Note. Works as a guest or signed in.</small></button><button type="button" role="radio" aria-checked="${byok}" class="nzai-src ${byok ? 'on' : ''}" data-nzai="source" data-v="byok"><b>My own key (BYOK)</b><small>Gemini or Groq. Requests go straight to your provider, including Voice-to-Note.</small></button></div>`
+        : '';
+      body.innerHTML = `<div class="nzai-section-head"><b>AI source</b></div>${sourceBlock}${byok ? `<div class="nzai-chips">${tabs}</div>` : ''}${managedBlock}${keyBlock}
+        ${byok ? `<label class="nzai-label">Model</label><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model">${options}</select><button type="button" data-nzai="load-models">Load</button></div>` : ''}
         <label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>
+        ${byok ? `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>` : ''}
+        <p class="nzai-small">Chat, note tools and Voice-to-Note all use the source chosen above.</p>
         <button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div>`;
     }
     function nzaiTranscript(chat) {
