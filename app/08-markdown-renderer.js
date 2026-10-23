@@ -68,25 +68,25 @@
   window.markdownToHtmlSafe = function markdownToHtmlSafe(markdown) {
     const inline = source => {
       if (!source) return '';
-      let text = esc(source);
+      let text = source;  // Do NOT escape here - escape matched content in replacements
       
       // Inline code
-      text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+      text = text.replace(/`([^`]+)`/g, (_, inner) => `<code>${esc(inner)}</code>`);
       
       // Wiki links (internal note links)
       text = text.replace(/\[\[([^\]]+)\]\]/g, (_, title) => 
         `<a href="#" class="nz-wiki" data-wiki="${esc(title.trim())}">${esc(title.trim())}</a>`);
       
       // Bold
-      text = text.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-      text = text.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      text = text.replace(/\*\*([^*]+)\*\*/g, (_, inner) => `<strong>${esc(inner)}</strong>`);
+      text = text.replace(/__([^_]+)__/g, (_, inner) => `<strong>${esc(inner)}</strong>`);
       
       // Italic
-      text = text.replace(/(^|[^*])\\*([^*]+)\\*/g, '$1<em>$2</em>');
-      text = text.replace(/(^|[^_])_([^_]+)_/g, '$1<em>$2</em>');
+      text = text.replace(/(^|[^*])\*([^*]+)\*/g, (_, prefix, inner) => `${prefix}<em>${esc(inner)}</em>`);
+      text = text.replace(/(^|[^_])_([^_]+)_/g, (_, prefix, inner) => `${prefix}<em>${esc(inner)}</em>`);
       
       // Links - with security check
-      text = text.replace(/\[([^\\]]+)\\]\\(([^\\s)]+)\\)/g, (match, linkText, url) => {
+      text = text.replace(/\[([^\]]+)\]\(([^\s)]+)\)/g, (match, linkText, url) => {
         if (isSafeUrl(url)) {
           return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(linkText)}</a>`;
         }

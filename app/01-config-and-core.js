@@ -288,15 +288,16 @@
         return window.markdownToHtmlSafe(markdown);
       }
       const inline = source => {
-        let text = esc(source);
-        text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-        text = text.replace(/\[\[([^\[\]\n]{1,120})\]\]/g, (_, title) => `<a href="#" class="nz-wiki" data-wiki="${title.trim()}">${title.trim()}</a>`);
-        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<strong>$1</strong>');
-        text = text.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
-        text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        let text = source;  // Do NOT escape here - escape matched content in replacements
+        text = text.replace(/`([^`]+)`/g, (_, inner) => `<code>${esc(inner)}</code>`);
+        text = text.replace(/\[\[([^\]]+)\]\]/g, (_, title) => `<a href="#" class="nz-wiki" data-wiki="${esc(title.trim())}">${esc(title.trim())}</a>`);
+        text = text.replace(/\*\*([^*]+)\*\*/g, (_, inner) => `<strong>${esc(inner)}</strong>`).replace(/__([^_]+)__/g, (_, inner) => `<strong>${esc(inner)}</strong>`);
+        text = text.replace(/(^|[^*])\*([^*]+)\*/g, (_, prefix, inner) => `${prefix}<em>${esc(inner)}</em>`);
+        text = text.replace(/\[([^\]]+)\]\(([^\s)]+)\)/g, (match, linkText, url) => {
+          return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(linkText)}</a>`;
+        });
         return text;
       };
-      const lines = String(markdown || '').replace(/\r/g, '').split('\n');
       const output = [];
       let paragraph = [], listType = '', code = false, codeLines = [], quoteLines = [];
       const closeList = () => { if (listType) { output.push(`</${listType}>`); listType = ''; } };

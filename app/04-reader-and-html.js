@@ -943,8 +943,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
-        const highlightedText = nzai.searchQuery ? msg.text.replace(new RegExp(nzai.searchQuery, 'gi'), match => `<mark class="ai-search-highlight">${match}</mark>`) : msg.text;
-      return `<div class="ai-msg user"><div class="ai-bubble-user">${esc(highlightedText)}</div><div class="ai-user-tools"><button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
+      const highlightedText = esc(msg.text);
+      return `<div class="ai-msg user"><div class="ai-bubble-user">${highlightedText}</div><div class="ai-user-tools"><button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
       }
       const note = nzaiScopeNote();
       const sources = (msg.sources || []).length ? `<div class="ai-sources" role="list" aria-label="Source notes used in this answer"><span>→ Sources:</span>${msg.sources.map(src => `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" aria-label="Open source note: ${esc(src.title)}" title="Open: ${esc(src.title)}">[${src.n}] ${esc(src.title)}</button>`).join('')}</div>` : '';
