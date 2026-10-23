@@ -761,7 +761,13 @@ if (act === 'pause') return recPause();
       const text = sel.toString().replace(/\s+/g, ' ').trim();
       if (text.length < 3) { selBar.hidden = true; return; }
       selectedText = text.slice(0, 1600);
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      // Not every environment implements geometry on a Range; fall back to the
+      // middle of the viewport so the bar still appears.
+      let range = null;
+      try { range = sel.getRangeAt(0); } catch {}
+      const rect = range && typeof range.getBoundingClientRect === 'function'
+        ? range.getBoundingClientRect()
+        : { left: window.innerWidth / 2, top: 140, width: 0, height: 0 };
       selBar.hidden = false;
       selBar.style.left = Math.max(120, Math.min(window.innerWidth - 120, rect.left + rect.width / 2)) + 'px';
       selBar.style.top = Math.max(70, rect.top) + 'px';

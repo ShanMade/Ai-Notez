@@ -1,0 +1,498 @@
+/* ==========================================================================
+   Reader v2 — editorial minimal (design A)
+   The note is the page: no card, no frame, one column, one accent. Every
+   rule here is scoped to the reader (#note-view) or to the assistant's sheet
+   state (html.nzai-sheet), so the rest of the app is untouched.
+   ========================================================================== */
+
+html {
+  --rv2-serif: "Iowan Old Style", "Charter", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif;
+  --rv2-sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --rv2-body: var(--rv2-sans);
+  --rv2-read: 17px;
+  --rv2-col: 46rem;
+}
+html[data-reader-face="serif"] { --rv2-body: var(--rv2-serif); }
+
+html[data-theme="light"] {
+  --rv2-paper: #fcfbf7;
+  --rv2-ink: #1a1a16;
+  --rv2-soft: #3f4039;
+  --rv2-muted: #6f7067;
+  --rv2-faint: #9b9c92;
+  --rv2-line: rgba(26, 26, 22, .12);
+  --rv2-line-strong: rgba(26, 26, 22, .24);
+  --rv2-hover: rgba(26, 26, 22, .05);
+  --rv2-accent: #9a7615;
+  --rv2-hl: rgba(226, 192, 96, .38);
+  --rv2-shadow: 0 1px 2px rgba(26, 24, 14, .05), 0 18px 40px -28px rgba(26, 24, 14, .45);
+}
+html[data-theme="dark"] {
+  --rv2-paper: #0a0a0b;
+  --rv2-ink: #eae7df;
+  --rv2-soft: #cbc8bf;
+  --rv2-muted: #9b998f;
+  --rv2-faint: #6d6b64;
+  --rv2-line: rgba(234, 231, 223, .13);
+  --rv2-line-strong: rgba(234, 231, 223, .26);
+  --rv2-hover: rgba(234, 231, 223, .07);
+  --rv2-accent: #e3c476;
+  --rv2-hl: rgba(227, 196, 118, .26);
+  --rv2-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 24px 50px -30px rgba(0, 0, 0, .95);
+}
+
+/* ------------------------------------------------------------------ page */
+body.rv2-reading #workspace-main,
+#note-view { background: var(--rv2-paper); }
+
+/* Reading is immersive: the library top bar steps aside and the editorial
+   header takes over. On phones the header carries its own menu button. */
+body.rv2-reading .topbar { display: none; }
+.rv2-menu { display: none; }
+@media (max-width: 760px) {
+  .rv2-menu { display: inline-grid; }
+}
+
+#note-view {
+  padding: 0 0 110px;
+  min-height: 100%;
+}
+#note-view.hidden { display: none; }
+
+/* The progress hairline that already exists in the shell becomes the design's
+   2px accent line. */
+#reader-progress { height: 2px; z-index: 9; }
+#reader-progress-fill {
+  background: var(--rv2-accent);
+  box-shadow: none;
+  border-radius: 0 2px 2px 0;
+}
+
+/* ------------------------------------------------------------ sticky bar */
+.rv2-bar {
+  position: sticky; top: 2px; z-index: 8;
+  display: none;
+  height: 58px;
+  background: transparent;
+  border-bottom: 1px solid transparent;
+  transition: background .18s ease, border-color .18s ease;
+}
+body.rv2-reading .rv2-bar { display: block; }
+.rv2-bar.stuck {
+  background: color-mix(in srgb, var(--rv2-paper) 88%, transparent);
+  border-bottom-color: var(--rv2-line);
+  backdrop-filter: saturate(1.1) blur(14px);
+  -webkit-backdrop-filter: saturate(1.1) blur(14px);
+}
+.rv2-bar-in {
+  display: flex; align-items: center; gap: 6px;
+  height: 100%;
+  width: min(100% - clamp(24px, 6vw, 56px), calc(var(--rv2-col) + 3.4rem));
+  margin: 0 auto;
+}
+.rv2-icon {
+  flex: 0 0 auto;
+  display: inline-grid; place-items: center;
+  min-width: 32px; height: 32px; padding: 0 7px;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--rv2-muted); font: 500 12.5px/1 var(--rv2-sans); cursor: pointer;
+  transition: color .12s ease, background .12s ease;
+}
+.rv2-icon:hover { color: var(--rv2-ink); background: var(--rv2-hover); }
+.rv2-icon svg { width: 17px; height: 17px; }
+.rv2-icon:disabled { opacity: .28; cursor: default; }
+.rv2-icon.face { font-family: var(--rv2-serif); font-size: 14px; }
+.rv2-back { margin-left: -4px; }
+.rv2-title {
+  min-width: 0; margin-left: 4px;
+  font: 550 13px/1.3 var(--rv2-sans); letter-spacing: -.01em; color: var(--rv2-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: none;
+}
+.rv2-bar.stuck .rv2-title { opacity: 1; transform: none; }
+.rv2-grow { flex: 1 1 auto; }
+.rv2-arc { width: 20px; height: 20px; flex: 0 0 20px; margin: 0 4px; }
+.rv2-arc circle { fill: none; stroke-width: 1.7; }
+.rv2-arc .track { stroke: var(--rv2-line-strong); }
+.rv2-arc .fill { stroke: var(--rv2-accent); stroke-linecap: round; transition: stroke-dashoffset .12s linear; }
+.rv2-sep { width: 1px; height: 17px; background: var(--rv2-line); margin: 0 4px; }
+
+/* ---------------------------------------------------------------- article */
+#note-view #reader-paper {
+  width: min(100% - clamp(24px, 6vw, 56px), var(--rv2-col));
+  max-width: var(--rv2-col);
+  min-height: 0;
+  margin: 0 auto;
+  padding: clamp(30px, 6vw, 62px) 0 0;
+  background: transparent;
+  border: 0; border-radius: 0; box-shadow: none;
+  color: var(--rv2-soft);
+}
+#note-view.html-attachment-reading #reader-paper,
+#note-view.pdf-attachment-reading #reader-paper { width: min(100% - clamp(24px, 6vw, 56px), 68rem); max-width: 68rem; }
+
+#note-view .article-kicker {
+  display: flex; align-items: center; gap: 10px;
+  font: 620 10.5px/1.4 var(--rv2-sans); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--rv2-muted);
+}
+#note-view .article-kicker .kicker-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--rv2-accent); box-shadow: none;
+}
+#note-view .article-kicker .reading-time {
+  margin-left: auto; font-size: 12.5px; font-weight: 500; letter-spacing: -.004em;
+  text-transform: none; color: var(--rv2-faint);
+}
+
+#note-view #reader-title {
+  margin: 18px 0 0;
+  max-width: 40ch;
+  font: 500 clamp(2.05rem, 4.6vw, 3.5rem)/1.05 var(--rv2-serif);
+  letter-spacing: -.035em;
+  color: var(--rv2-ink);
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+#note-view .reader-subtitle {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  margin: 20px 0 0;
+  font: 400 12.5px/1.5 var(--rv2-sans); color: var(--rv2-faint);
+}
+#note-view .reader-subtitle .meta-divider { width: 3px; height: 3px; background: currentColor; border-radius: 50%; opacity: .7; }
+#note-view .reader-subject { color: var(--rv2-accent); }
+#note-view .reader-rule { display: none; }
+#note-view .reader-outline { display: none !important; }
+
+/* Action row — the original toolbar, moved into the article and restyled as
+   quiet text links. All the existing handlers keep working. */
+#note-view .reader-toolbar-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+  max-width: none; margin: 24px 0 0; padding: 0 0 22px;
+  border-bottom: 1px solid var(--rv2-line);
+}
+#note-view .reader-crumb { display: none; }
+#note-view .reader-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; flex: 1 1 auto; }
+#note-view .reader-tool {
+  height: auto; min-width: 0; padding: 2px 0;
+  border: 0; border-radius: 0; background: transparent;
+  color: var(--rv2-muted);
+  font: 500 12.5px/1.4 var(--rv2-sans); letter-spacing: -.005em;
+  gap: 6px;
+  transition: color .12s ease;
+}
+#note-view .reader-tool .icon { width: 14px; height: 14px; }
+#note-view .reader-tool:hover { color: var(--rv2-ink); border: 0; background: transparent; }
+#note-view .reader-tool.starred { color: var(--rv2-accent); }
+#note-view .reader-tool:focus-visible { outline: 2px solid var(--rv2-accent); outline-offset: 3px; border-radius: 3px; }
+#note-view .reader-tool.focus-action { color: var(--rv2-muted); border: 0; }
+#note-view .reader-tool.focus-action:hover { color: var(--rv2-ink); background: transparent; }
+#note-view .reader-tool.exit-focus { display: none; }
+#note-view .reader-tool-label { font-size: 12.5px; }
+#note-view #reader-ai { font-weight: 700; color: var(--rv2-accent); }
+
+/* ----------------------------------------------------------------- prose */
+#note-view #viewer-content,
+#note-view .markdown-body {
+  margin-top: 30px;
+  font-family: var(--rv2-body);
+  font-size: var(--read-size, var(--rv2-read));
+  line-height: 1.72;
+  letter-spacing: -.003em;
+  color: var(--rv2-soft);
+}
+#note-view #viewer-content > p { margin: 0 0 1.15em; }
+#note-view #viewer-content strong { color: var(--rv2-ink); font-weight: 630; }
+#note-view #viewer-content em { font-style: italic; }
+#note-view #viewer-content a {
+  color: var(--rv2-ink); text-decoration: none;
+  border-bottom: 1px solid var(--rv2-line-strong);
+}
+#note-view #viewer-content a:hover { border-bottom-color: var(--rv2-accent); }
+
+/* Section numbers hang in the margin and turn gold once read past. */
+#note-view #viewer-content { counter-reset: rv2sec; }
+#note-view #viewer-content > h2 { counter-increment: rv2sec; }
+#note-view #viewer-content > h2::before {
+  content: counter(rv2sec, decimal-leading-zero);
+  position: absolute; left: -2.95em; top: .18em;
+  font: 400 .6em/1 var(--rv2-serif); letter-spacing: -.02em;
+  color: var(--rv2-faint);
+  font-variant-numeric: tabular-nums;
+  transition: color .3s ease;
+  pointer-events: none;
+}
+#note-view #viewer-content > h2.rv2-seen::before { color: var(--rv2-accent); }
+
+#note-view #viewer-content h1,
+#note-view #viewer-content h2,
+#note-view #viewer-content h3,
+#note-view #viewer-content h4 {
+  position: relative;
+  font-family: var(--rv2-serif);
+  font-weight: 500;
+  color: var(--rv2-ink);
+  letter-spacing: -.028em;
+  line-height: 1.22;
+  scroll-margin-top: 84px;
+  text-wrap: balance;
+}
+#note-view #viewer-content h1 { font-size: 1.72em; margin: 1.9em 0 .55em; }
+#note-view #viewer-content h2 { font-size: 1.62em; margin: 2.5em 0 .62em; }
+#note-view #viewer-content h3 { font-size: 1.2em; margin: 2em 0 .5em; }
+#note-view #viewer-content h4 {
+  font-family: var(--rv2-sans); font-size: .82em; font-weight: 680;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--rv2-muted);
+  margin: 1.9em 0 .5em;
+}
+#note-view #viewer-content > :first-child { margin-top: 0; }
+
+#note-view #viewer-content p { margin: 0 0 1.15em; }
+#note-view #viewer-content ul,
+#note-view #viewer-content ol { margin: 0 0 1.25em; padding-left: 1.3em; }
+#note-view #viewer-content li { margin: 0 0 .42em; padding-left: .1em; }
+#note-view #viewer-content li::marker { color: var(--rv2-faint); }
+#note-view #viewer-content li > p:last-child { margin-bottom: 0; }
+
+#note-view #viewer-content hr {
+  height: 1px; border: 0; margin: 2.6em 0;
+  background: var(--rv2-line);
+}
+
+/* Block quote reads as a pull quote. */
+#note-view #viewer-content blockquote {
+  position: relative;
+  margin: 2.4em 0; padding: 0 0 0 0;
+  border: 0; background: none; border-radius: 0;
+  color: var(--rv2-ink);
+  font: italic 400 clamp(1.2rem, 2.2vw, 1.5rem)/1.42 var(--rv2-serif);
+  letter-spacing: -.015em;
+}
+#note-view #viewer-content blockquote::before {
+  content: ""; display: block; width: 30px; height: 2px;
+  margin-bottom: 16px; border-radius: 2px; background: var(--rv2-accent);
+}
+#note-view #viewer-content blockquote p { margin: 0 0 .5em; }
+#note-view #viewer-content blockquote p:last-child { margin-bottom: 0; }
+#note-view #viewer-content blockquote em { font-style: normal; }
+
+/* Code and formulas. */
+#note-view #viewer-content code {
+  font: .86em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--rv2-ink);
+  background: var(--rv2-hover);
+  padding: 1px 5px; border-radius: 4px;
+}
+#note-view #viewer-content pre {
+  margin: 1.6em 0; padding: 15px 17px;
+  background: var(--rv2-hover); color: var(--rv2-ink);
+  border: 1px solid var(--rv2-line); border-radius: 10px;
+  overflow: auto; font-size: .82em; line-height: 1.7;
+}
+#note-view #viewer-content pre code { background: none; padding: 0; font-size: 1em; }
+#note-view #viewer-content .katex-display { margin: 1.7em 0; }
+#note-view #viewer-content .nz-math-src { font-size: .9em; }
+
+/* Tables: rules only, no container. */
+#note-view #viewer-content table.markdown-table {
+  width: 100%; min-width: 26rem; margin: 1.9em 0;
+  border-collapse: collapse; border: 0;
+  font-family: var(--rv2-sans); font-size: .82em; line-height: 1.5;
+  display: block; overflow-x: auto;
+}
+#note-view #viewer-content table.markdown-table th {
+  padding: 0 16px 10px 0; border: 0; border-bottom: 1px solid var(--rv2-line-strong);
+  background: none; text-align: left; vertical-align: bottom;
+  font-size: .72em; font-weight: 650; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--rv2-faint); white-space: nowrap;
+}
+#note-view #viewer-content table.markdown-table td {
+  padding: 13px 16px 13px 0; border: 0; border-bottom: 1px solid var(--rv2-line);
+  background: none; color: var(--rv2-soft); vertical-align: top;
+}
+#note-view #viewer-content table.markdown-table th:last-child,
+#note-view #viewer-content table.markdown-table td:last-child { padding-right: 0; }
+#note-view #viewer-content table.markdown-table tr:hover td { background: none; }
+#note-view #viewer-content table.markdown-table tbody tr:last-child td { border-bottom: 0; }
+
+#note-view .reader-footer {
+  margin-top: 3.2em; padding-top: 18px;
+  border-top: 1px solid var(--rv2-line);
+  color: var(--rv2-faint); font: 400 11.5px/1.5 var(--rv2-sans);
+}
+
+/* Attachment modes keep the app's own surfaces. */
+#note-view .attachment-frame,
+#note-view .attachment-card,
+#note-view .attachment-image-wrap { border-radius: 12px; }
+
+/* --------------------------------------------------------------- ask bar */
+.rv2-ask {
+  position: fixed; left: 50%; bottom: 22px; z-index: 60;
+  display: none; align-items: center; gap: 12px;
+  width: min(30rem, calc(100vw - 32px)); height: 48px;
+  padding: 0 10px 0 18px;
+  border: 1px solid var(--rv2-line-strong); border-radius: 999px;
+  background: color-mix(in srgb, var(--rv2-paper) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  box-shadow: var(--rv2-shadow);
+  color: var(--rv2-muted); text-align: left; cursor: pointer;
+  transform: translateX(-50%);
+  transition: border-color .16s ease, transform .16s ease, opacity .16s ease;
+}
+body.rv2-reading .rv2-ask { display: flex; }
+html.nzai-open .rv2-ask,
+body.rv2-reading.rv2-sheet-open .rv2-ask { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(8px); }
+.rv2-ask:hover { border-color: var(--rv2-accent); transform: translateX(-50%) translateY(-1px); }
+.rv2-ask .spark { color: var(--rv2-accent); font-size: 13px; }
+.rv2-ask .ph { flex: 1; font: 500 13.5px/1 var(--rv2-sans); letter-spacing: -.008em; }
+.rv2-ask kbd {
+  font: 500 10.5px/1 var(--rv2-sans); color: var(--rv2-faint);
+  border: 1px solid var(--rv2-line); border-radius: 6px; padding: 3px 7px;
+}
+html[data-theme="light"] .rv2-ask { background: rgba(252, 251, 247, .94); }
+html[data-theme="dark"] .rv2-ask { background: rgba(10, 10, 11, .92); }
+
+/* ---------------------------------------------------------------- sheets */
+.rv2-scrim {
+  position: fixed; inset: 0; z-index: 1585;
+  background: rgba(28, 26, 18, .18);
+  opacity: 0; visibility: hidden;
+  transition: opacity .18s ease, visibility .18s ease;
+}
+html[data-theme="dark"] .rv2-scrim { background: rgba(0, 0, 0, .55); }
+.rv2-scrim.on { opacity: 1; visibility: visible; }
+
+.rv2-sheet {
+  position: fixed; left: 50%; bottom: 24px; z-index: 1590;
+  display: flex; flex-direction: column;
+  width: min(26rem, calc(100vw - 28px)); max-height: min(72vh, 40rem);
+  border: 1px solid var(--rv2-line-strong); border-radius: 18px;
+  background: var(--rv2-paper); box-shadow: var(--rv2-shadow);
+  color: var(--rv2-ink);
+  opacity: 0; visibility: hidden;
+  transform: translateX(-50%) translateY(12px);
+  transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
+  overflow: hidden;
+}
+.rv2-sheet[hidden] { display: none; }
+.rv2-sheet.open { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.rv2-sheet-hd {
+  display: flex; align-items: center; gap: 10px;
+  padding: 15px 14px 14px 20px; border-bottom: 1px solid var(--rv2-line);
+}
+.rv2-sheet-hd b { display: block; font: 600 13px/1.4 var(--rv2-sans); letter-spacing: -.01em; }
+.rv2-sheet-hd small { display: block; font: 400 11px/1.4 var(--rv2-sans); color: var(--rv2-faint); }
+.rv2-sheet-close {
+  margin-left: auto; display: inline-grid; place-items: center;
+  height: 28px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--rv2-line);
+  background: transparent; color: var(--rv2-faint); font: 500 10.5px/1 var(--rv2-sans); cursor: pointer;
+}
+.rv2-sheet-close:hover { color: var(--rv2-ink); border-color: var(--rv2-line-strong); }
+.rv2-toc { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px; scrollbar-width: thin; }
+.rv2-toc button {
+  display: flex; align-items: baseline; gap: 12px; width: 100%;
+  padding: 10px 12px; border: 0; border-radius: 9px; background: transparent;
+  color: var(--rv2-muted); font: 500 13.5px/1.4 var(--rv2-sans); letter-spacing: -.008em;
+  text-align: left; cursor: pointer;
+}
+.rv2-toc button:hover { background: var(--rv2-hover); color: var(--rv2-ink); }
+.rv2-toc .n { font-family: var(--rv2-serif); font-size: 11.5px; color: var(--rv2-faint); min-width: 18px; }
+.rv2-toc button.on { color: var(--rv2-ink); font-weight: 600; }
+.rv2-toc button.on .n { color: var(--rv2-accent); }
+.rv2-toc .sub { padding-left: 42px; font-size: 12.5px; }
+
+/* Selection toolbar — the app's own #sel-bar, dressed for the reader. */
+html[data-theme] #sel-bar {
+  z-index: 1595;
+  padding: 4px;
+  border: 1px solid var(--rv2-line-strong);
+  border-radius: 10px;
+  background: var(--rv2-paper);
+  box-shadow: var(--rv2-shadow);
+}
+html[data-theme] #sel-bar::after { display: none; }
+html[data-theme] #sel-bar button {
+  padding: 6px 9px; border-radius: 6px;
+  background: transparent; color: var(--rv2-soft);
+  font: 500 11.5px/1.3 var(--rv2-sans);
+}
+html[data-theme] #sel-bar button:hover,
+html[data-theme] #sel-bar button:focus-visible { background: var(--rv2-hover); color: var(--rv2-ink); }
+
+/* ------------------------------------------------- assistant as a sheet */
+html.nzai-sheet #nz-ai {
+  top: auto; right: auto; bottom: 24px; left: 50%;
+  height: min(74vh, 780px); max-height: calc(100dvh - 96px);
+  width: min(var(--dock-w, 680px), calc(100vw - 28px));
+  transform: translateX(-50%);
+  border: 1px solid var(--rv2-line-strong);
+  border-radius: 18px;
+  box-shadow: 0 30px 80px -32px rgba(10, 20, 15, .55);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+html.nzai-sheet .app-shell { margin-right: 0 !important; }
+html.nzai-sheet #nzai-fab { display: none; }
+html.nzai-sheet .nzai-resizer { left: 0; }
+
+/* Mobile: a full-width bottom sheet. */
+@media (max-width: 760px) {
+  html.nzai-sheet #nz-ai {
+    left: 0; right: 0; bottom: 0; width: 100%;
+    height: 88dvh; max-height: 88dvh;
+    border-radius: 18px 18px 0 0;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------ responsive */
+/* With the sidebar on screen the column is narrower than the viewport, so the
+   margin numerals go inline earlier than the phone breakpoint. */
+@media (max-width: 1120px) {
+  #note-view #viewer-content > h2::before {
+    position: static; display: block; margin-bottom: 9px;
+    font: 650 10.5px/1.2 var(--rv2-sans); letter-spacing: .16em;
+    color: var(--rv2-accent);
+  }
+  #note-view #viewer-content h2 { margin-top: 2.2em; }
+}
+
+@media (max-width: 760px) {
+  #note-view { padding-bottom: 96px; }
+  .rv2-bar { height: 52px; }
+  .rv2-title { display: none; }
+  .rv2-bar-in { width: calc(100% - 20px); gap: 2px; }
+  .rv2-icon { min-width: 30px; height: 30px; padding: 0 5px; }
+  #note-view #reader-paper { width: calc(100% - 36px); padding-top: 24px; }
+  #note-view #reader-title { font-size: clamp(1.9rem, 8.4vw, 2.4rem); max-width: none; }
+  #note-view .article-kicker { font-size: 9.5px; letter-spacing: .13em; }
+  #note-view .article-kicker .reading-time { font-size: 11.5px; }
+  #note-view .reader-toolbar-row { gap: 14px; margin-top: 20px; padding-bottom: 18px; }
+  #note-view .reader-tools { gap: 14px; }
+  #note-view .reader-tool-label { display: none; }
+  #note-view #viewer-content,
+  #note-view .markdown-body { margin-top: 24px; }
+  #note-view #viewer-content table.markdown-table { font-size: .78em; }
+  .rv2-ask {
+    left: 12px; right: 12px; bottom: max(14px, env(safe-area-inset-bottom));
+    width: auto; transform: none;
+  }
+  .rv2-ask:hover { transform: translateY(-1px); }
+  html.nzai-open .rv2-ask,
+  body.rv2-reading.rv2-sheet-open .rv2-ask { transform: translateY(8px); }
+  .rv2-sheet {
+    left: 0; right: 0; bottom: 0; width: 100%;
+    max-height: 86dvh; border-radius: 18px 18px 0 0; border-bottom: 0;
+    transform: translateY(14px);
+  }
+  .rv2-sheet.open { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rv2-bar, .rv2-title, .rv2-ask, .rv2-sheet, .rv2-scrim,
+  .rv2-arc .fill, #note-view #viewer-content > h2::before { transition: none; }
+}

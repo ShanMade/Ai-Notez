@@ -13,6 +13,7 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Work with voice-note and transcription workflows, including configurable voice profiles.
 - Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
+- Read notes in an editorial reader: no card, one 46rem column, a display-serif title, section numbers in the margin, a hairline header with reading progress, and the assistant behind a bottom command bar (⌘J / Ctrl+J) that opens as a sheet over the note instead of shrinking it. Body type switches between serif and sans, with a saved reading size.
 - Read answers comfortably: the assistant panel is resizable (drag its left edge, arrow keys, or double-click to reset) and has its own text-size control, both remembered per device. LaTeX (`\( … \)`, `\[ … \]`, `$$ … $$`) is rendered with KaTeX in answers and notes.
 - Install the app as a PWA; the service worker caches the app shell for improved repeat-load/offline behavior.
 - Use a standalone FastAPI backend for AI requests, indexing, and search.
@@ -111,7 +112,7 @@ AI providers: Gemini (default) → Groq (rate limited or rejected) → Mistral (
 
 ### Main components
 
-- **Frontend:** `index.html`, `styles/app.css`, the ordered JavaScript modules in `app/`, and `vendor/katex/` (KaTeX for math rendering).
+- **Frontend:** `index.html`, `styles/app.css`, `styles/reader-v2.css` (the reader's editorial layer), the ordered JavaScript modules in `app/`, and `vendor/katex/` (KaTeX for math rendering).
 - **Identity and synced data:** Firebase Authentication and Firebase Realtime Database.
 - **Backend API:** FastAPI/Uvicorn under `backend/app/`. It verifies Firebase ID tokens for protected routes, exposes AI generation and retrieval endpoints, and applies request limits.
 - **AI providers:** Provider adapters and model selection live in `backend/app/providers.py`; credentials are configured through environment variables.
