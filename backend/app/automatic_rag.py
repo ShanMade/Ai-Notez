@@ -194,4 +194,10 @@ async def augment_prompt(
         return augmented, sources
     except Exception:
         logger.warning("Automatic semantic note retrieval failed.", exc_info=True)
-        return prompt, []
+        return (
+            prompt
+            + "\\n\\nNOTE RETRIEVAL STATUS: Searching current notes failed. "
+            "Do not fabricate note contents or claim that no matching notes exist. "
+            "Tell the user note retrieval is temporarily unavailable.",
+            [],
+        )
