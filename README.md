@@ -20,18 +20,21 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    U[Browser / Installed PWA] --> FE[Static HTML, CSS, JavaScript]
-    FE --> AUTH[Firebase Authentication]
-    FE <--> DB[Firebase Realtime Database]
-    FE -->|Authenticated API requests| API[FastAPI backend]
-    API -->|Verify ID token| AUTH
-    API --> AI[Gemini / Groq / optional Mistral]
-    API -->|RAG: embed query, gate on confidence| EMB[Embedding provider]
-    API --> IDX[USearch HNSW vector index, cosine]
-    API <--> META[SQLite: chunks, hashes, indexing queue]
-    FE --> SW[Service worker / app-shell cache]
+```text
+Browser / installed PWA  (index.html, styles/app.css, app/*.js)
+        │
+        ├─► Firebase Authentication — ID tokens, verified by the API
+        ├─► Firebase Realtime Database — notes and sync
+        ├─► Service worker — app-shell cache for offline reloads
+        │
+        └─► FastAPI backend  (backend/app/)
+                 │
+                 ├─► Gemini / Groq / optional Mistral — text generation
+                 │
+                 └─► RAG retrieval
+                          ├─► Embedding provider — 768 or 1024 dimensions
+                          ├─► USearch HNSW index — cosine, one per user
+                          └─► SQLite — chunk text, content hashes, queue
 ```
 
 ### Main components
