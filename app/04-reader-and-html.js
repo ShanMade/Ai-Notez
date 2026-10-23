@@ -647,7 +647,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           images
         }, 'POST', undefined, true);
         if (!result.text || !result.provider || !result.model) throw new Error('The Notez AI backend returned an incomplete response.');
-        return { text: String(result.text), provider: String(result.provider), model: String(result.model) };
+        return { text: String(result.text), provider: String(result.provider), model: String(result.model), sources: Array.isArray(result.sources) ? result.sources : [] };
       }
       // Groq retires models over time. The live list from the account is used as a fallback, filtered to chat models.
       if (provider === 'groq') {
@@ -1246,6 +1246,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const taskDef = task ? AI_TASKS[task] : null;
         const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : (hasNotes ? context : '')}` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
+        if (Array.isArray(answer.sources) && answer.sources.length) {
+          sources = answer.sources.map((source, index) => ({ n: index + 1, id: String(source.id || ''), title: String(source.title || 'Untitled') })).filter(source => source.id);
+        }
         // Add retrieval metadata to the response if available
         const messageData = {
           role: 'assistant',
