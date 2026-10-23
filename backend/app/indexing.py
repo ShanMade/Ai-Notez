@@ -321,7 +321,7 @@ class IndexingQueue:
         """
         owner_key = user_key(uid)
         now = time.time()
-        max_retries = 3
+        max_retries = 5
         
         with self._connect() as conn:
             # Check current retry count
@@ -334,8 +334,12 @@ class IndexingQueue:
                 return False
             
             current_retries = int(row["retry_count"])
-            if current_retries >= max_retries and not retry:
-                # Max retries exceeded, mark as permanently failed
+            
+            # Use exponential backoff for rate limits
+            is_rate_limit = "rate limit" in error_message.lower() or "429" in error_message
+            
+            if current_retries >= max_retries:
+                status = "failed"
                 status = "failed"
             else:
                 # Allow retry

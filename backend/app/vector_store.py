@@ -5,6 +5,7 @@ import hashlib
 import logging
 import math
 import os
+import re
 import sqlite3
 import threading
 from array import array
@@ -18,6 +19,51 @@ from fastapi import HTTPException
 from usearch.index import Index
 
 from .config import settings
+
+
+# =============================================================================
+# Keyword Search Utilities
+# =============================================================================
+
+def extract_keywords(text: str, query: str) -> float:
+    """
+    Extract keywords from query and check if they appear in text.
+    Returns a score based on keyword matches.
+    """
+    if not text or not query:
+        return 0.0
+    
+    query_lower = query.lower()
+    text_lower = text.lower()
+    
+    # Pattern for exact identifiers: u3 mcq4, section-1, etc.
+    identifier_pattern = r'\b[a-zA-Z]\d+\s+[a-zA-Z]\d+\b|\b[a-zA-Z]\d+\b|\b\d+[a-zA-Z]\d+\b|\b[a-zA-Z]{2,}\b'
+    
+    # Find all potential identifiers in query
+    query_identifiers = re.findall(identifier_pattern, query_lower)
+    
+    # Also check for exact phrase matches (quoted)
+    quoted_phrases = re.findall(r'"([^"]+)"', query_lower)
+    
+    score = 0.0
+    
+    # Check for exact identifier matches
+    for identifier in query_identifiers:
+        if identifier in text_lower:
+            score += 1.0
+    
+    # Check for quoted phrase matches
+    for phrase in quoted_phrases:
+        if phrase in text_lower:
+            score += 2.0
+    
+    # Check for substring matches of individual words
+    query_words = set(word for word in re.findall(r'\b\w+\b', query_lower) if len(word) > 2)
+    text_words = set(re.findall(r'\b\w+\b', text_lower))
+    word_matches = query_words & text_words
+    score += len(word_matches) * 0.1
+    
+    return score
 
 logger = logging.getLogger(__name__)
 
@@ -657,7 +703,7 @@ class HnswIndexManager:
             reverse=True,
         )[:limit]
 
-    async def search(self, uid: str, vector: list[float], limit: int) -> list[dict]:
+    async def search(self, uid: str, vector: list[float], limit: int, query_text: str = "") -> list[dict]:
         if (
             not isinstance(vector, (list, tuple))
             or len(vector) != settings.embedding_dimensions
@@ -669,7 +715,58 @@ class HnswIndexManager:
             raise HTTPException(status_code=502, detail="The query embedding has an incompatible vector dimension.")
         owner_key = user_key(uid)
         async with self._async_lock(owner_key):
-            return await asyncio.to_thread(self._search_sync, owner_key, vector, limit)
+            semantic_results = await asyncio.to_thread(self._search_sync, owner_key, vector, limit)
+            
+            # If we have query text, perform hybrid search with keyword matching
+            if query_text:
+                # Get all chunks for this user to perform keyword search
+                with self._connect() as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT id, note_id, content_hash, title, folder_path, chunk_text
+                        FROM note_chunks
+                        WHERE owner_key = ?
+                        LIMIT ?
+                        """,
+                        (owner_key, settings.max_chunks_per_user),
+                    ).fetchall()
+                
+                # Score each chunk by keyword relevance
+                keyword_results = []
+                for row in rows:
+                    keyword_score = extract_keywords(str(row["chunk_text"]), query_text)
+                    if keyword_score > 0:
+                        keyword_results.append({
+                            "id": str(row["note_id"]),
+                            "title": str(row["title"] or "Untitled note"),
+                            "folderPath": str(row["folder_path"] or ""),
+                            "text": str(row["chunk_text"]),
+                            "similarity": keyword_score,
+                            "contentHash": str(row["content_hash"]),
+                            "is_keyword_match": True,
+                        })
+                
+                # Sort keyword results by score
+                keyword_results.sort(key=lambda r: r["similarity"], reverse=True)
+                
+                # Merge semantic and keyword results
+                merged = semantic_results + keyword_results[:limit]
+                
+                # Deduplicate by note_id, keeping the best result
+                best_by_note: dict[str, dict] = {}
+                for result in merged:
+                    note_id = result["id"]
+                    current = best_by_note.get(note_id)
+                    if current is None or result["similarity"] > current["similarity"]:
+                        best_by_note[note_id] = result
+                
+                return sorted(
+                    best_by_note.values(),
+                    key=lambda r: r["similarity"],
+                    reverse=True,
+                )[:limit]
+            
+            return semantic_results
 
     def get_note_state(self, uid: str, note_id: str) -> dict[str, Any] | None:
         """

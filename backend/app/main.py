@@ -60,13 +60,22 @@ class RequestLimiter:
 
 limiter = RequestLimiter()
 
+# Separate rate limiter for embedding operations (higher limit, different window)
+embedding_limiter = RequestLimiter(limit=60, window_seconds=60)
+
 
 async def rate_limit(user: AuthenticatedUser) -> dict:
     await limiter.check(str(user["uid"]))
     return user
 
 
+async def embedding_rate_limit(user: AuthenticatedUser) -> dict:
+    await embedding_limiter.check(str(user["uid"]))
+    return user
+
+
 RateLimitedUser = Annotated[dict, Depends(rate_limit)]
+EmbeddingRateLimitedUser = Annotated[dict, Depends(embedding_rate_limit)]
 
 
 @app.middleware("http")
@@ -199,8 +208,8 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
     raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
 
 
-@app.post("/v1/index/notes/{note_id}", dependencies=[Depends(rate_limit)])
-async def index_note(note_id: str, user: RateLimitedUser):
+@app.post("/v1/index/notes/{note_id}", dependencies=[Depends(embedding_rate_limit)])
+async def index_note(note_id: str, user: EmbeddingRateLimitedUser):
     _validate_note_id(note_id)
     uid = str(user["uid"])
     try:
@@ -209,27 +218,43 @@ async def index_note(note_id: str, user: RateLimitedUser):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not note:
         raise HTTPException(status_code=404, detail="The note does not exist in this user's Realtime Database.")
-    changed = await index_manager.upsert(uid, note_id, note, embed_texts)
-    return {"indexed": changed, "noteId": note_id}
+    try:
+        changed = await index_manager.upsert(uid, note_id, note, embed_texts)
+        return {"indexed": changed, "noteId": note_id}
+    except HTTPException as e:
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Embedding rate limit reached. Note saved but indexing queued for retry."
+            )
+        raise
 
 
-@app.delete("/v1/index/notes/{note_id}", dependencies=[Depends(rate_limit)])
-async def delete_indexed_note(note_id: str, user: RateLimitedUser):
+@app.delete("/v1/index/notes/{note_id}", dependencies=[Depends(embedding_rate_limit)])
+async def delete_indexed_note(note_id: str, user: EmbeddingRateLimitedUser):
     _validate_note_id(note_id)
     deleted = await index_manager.delete(str(user["uid"]), note_id)
     return {"deleted": deleted, "noteId": note_id}
 
 
-@app.post("/v1/index/rebuild", dependencies=[Depends(rate_limit)])
-async def rebuild_index(user: RateLimitedUser):
+@app.post("/v1/index/rebuild", dependencies=[Depends(embedding_rate_limit)])
+async def rebuild_index(user: EmbeddingRateLimitedUser):
     uid = str(user["uid"])
     try:
         notes = await asyncio.to_thread(user_notes, uid)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     normalized = {str(note_id): note for note_id, note in notes.items() if isinstance(note, dict) and NOTE_ID.fullmatch(str(note_id))}
-    count = await index_manager.rebuild(uid, normalized, embed_texts)
-    return {"indexedChunks": count, "indexedNotes": len(normalized)}
+    try:
+        count = await index_manager.rebuild(uid, normalized, embed_texts)
+        return {"indexedChunks": count, "indexedNotes": len(normalized)}
+    except HTTPException as e:
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Embedding rate limit reached. Rebuild queued for retry."
+            )
+        raise
 
 
 # =============================================================================
@@ -257,7 +282,7 @@ class HybridSearchRequest(BaseModel):
 
 
 @app.get("/v1/index/status", dependencies=[Depends(rate_limit)])
-async def get_index_status(user: AuthenticatedUser):
+async def get_index_status(user: RateLimitedUser):
     """
     Get indexing status for the current user.
     Returns queue statistics, backfill status, and index information.
@@ -298,8 +323,8 @@ async def get_index_status(user: AuthenticatedUser):
     }
 
 
-@app.post("/v1/index/backfill", dependencies=[Depends(rate_limit)])
-async def trigger_backfill(body: BackfillRequest, user: RateLimitedUser):
+@app.post("/v1/index/backfill", dependencies=[Depends(embedding_rate_limit)])
+async def trigger_backfill(body: BackfillRequest, user: EmbeddingRateLimitedUser):
     """
     Trigger backfill of all notes for the current user.
     This is a long-running operation that processes notes in batches.
@@ -354,7 +379,7 @@ async def trigger_backfill(body: BackfillRequest, user: RateLimitedUser):
 
 
 @app.get("/v1/index/stats", dependencies=[Depends(rate_limit)])
-async def get_index_stats(user: AuthenticatedUser):
+async def get_index_stats(user: RateLimitedUser):
     """
     Get detailed index statistics for the current user.
     """
@@ -372,8 +397,8 @@ async def get_index_stats(user: AuthenticatedUser):
     }
 
 
-@app.post("/v1/index/search/hybrid", dependencies=[Depends(rate_limit)])
-async def hybrid_search(body: HybridSearchRequest, user: AuthenticatedUser):
+@app.post("/v1/index/search/hybrid", dependencies=[Depends(embedding_rate_limit)])
+async def hybrid_search(body: HybridSearchRequest, user: EmbeddingRateLimitedUser):
     """
     Perform hybrid search (semantic + keyword) on the user's knowledge index.
     
@@ -384,12 +409,20 @@ async def hybrid_search(body: HybridSearchRequest, user: AuthenticatedUser):
     start_time = time.time()
     
     # Generate query embedding for semantic search
-    query_embedding = await embed_query(body.query)
+    try:
+        query_embedding = await embed_query(body.query)
+    except HTTPException as e:
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Embedding rate limit reached. Search queued for retry."
+            )
+        raise
     
-    # Perform semantic search
+    # Perform semantic search with keyword matching
     semantic_results = []
     if body.use_hybrid or body.use_keyword:
-        semantic_results = await index_manager.search(uid, query_embedding, body.limit * 2)
+        semantic_results = await index_manager.search(uid, query_embedding, body.limit * 2, body.query)
     
     # For now, return semantic results
     # Keyword search would be added here in a full implementation
@@ -445,11 +478,19 @@ async def hybrid_search(body: HybridSearchRequest, user: AuthenticatedUser):
     }
 
 
-@app.post("/v1/index/search", dependencies=[Depends(rate_limit)])
-async def search_index(body: SearchRequest, user: AuthenticatedUser):
+@app.post("/v1/index/search", dependencies=[Depends(embedding_rate_limit)])
+async def search_index(body: SearchRequest, user: EmbeddingRateLimitedUser):
     uid = str(user["uid"])
-    vector = await embed_query(body.query)
-    results = await index_manager.search(uid, vector, body.limit)
+    try:
+        vector = await embed_query(body.query)
+    except HTTPException as e:
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Embedding rate limit reached. Search queued for retry."
+            )
+        raise
+    results = await index_manager.search(uid, vector, body.limit, body.query)
     verified = []
     for result in results:
         try:

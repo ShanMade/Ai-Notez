@@ -1,13 +1,47 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
+from collections import defaultdict, deque
 from typing import Any
 
 import httpx
 from fastapi import HTTPException
 
 from .config import settings
+
+
+# =============================================================================
+# Embedding Rate Limiter
+# =============================================================================
+
+class EmbeddingRateLimiter:
+    """
+    Rate limiter specifically for embedding API calls.
+    Prevents overwhelming the embedding provider with too many requests.
+    """
+    def __init__(self, limit: int = 100, window_seconds: int = 60):
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.calls: dict[str, deque[float]] = defaultdict(deque)
+        self.lock = asyncio.Lock()
+
+    async def check(self, provider: str) -> None:
+        now = time.monotonic()
+        async with self.lock:
+            queue = self.calls[provider]
+            while queue and queue[0] <= now - self.window_seconds:
+                queue.popleft()
+            if len(queue) >= self.limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Embedding rate limit reached for {provider}. Try again shortly."
+                )
+            queue.append(now)
+
+
+embedding_limiter = EmbeddingRateLimiter()
 
 MODEL_DEFAULTS = {
     "gemini": settings.gemini_models,
@@ -169,8 +203,11 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not key:
         raise HTTPException(status_code=503, detail="Semantic indexing is not configured with an embedding credential.")
     
-    # Determine which embedding provider to use
+    # Check embedding rate limit
     embed_provider = settings.embedding_provider
+    await embedding_limiter.check(embed_provider)
+    
+    # Determine which embedding provider to use
     embed_model = settings.embedding_model
     embed_dimensions = settings.embedding_dimensions
     
@@ -242,5 +279,7 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 async def embed_query(text: str) -> list[float]:
+    # Check embedding rate limit for query
+    await embedding_limiter.check(settings.embedding_provider)
     vectors = await embed_texts([text])
     return vectors[0]
