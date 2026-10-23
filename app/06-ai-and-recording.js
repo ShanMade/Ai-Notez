@@ -245,11 +245,15 @@ async function openWikiLink(title) {
     const REC_SEGMENT_MS = () => window.__REC_SEGMENT_MS || 30000;   // each part is transcribed as soon as it is recorded
     const REC_NOTES_EVERY = 2;                                        // refresh the AI notes every 2 parts
     const REC_MAX_MS = 50 * 60 * 1000;
+    // Segment status constants
+    const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
+    // Recording status constants (separate from transcription status)
+    const REC_STATUS = { IDLE: 'idle', RECORDING: 'recording', PAUSED: 'paused', FINALIZING: 'finishing', DONE: 'done' };
     const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0, segTimer: 0,
-      status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, chunks: [], segIdx: 0, segTexts: [], queue: Promise.resolve(),
-      noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0 };
+      status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, chunks: [], segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
+      noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
-    const recElapsed = () => Math.max(0, (REC.status === 'paused' ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
+    const recElapsed = () => Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
     const fmtClock = ms => { const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
     const recTransient = error => error?.status === 429 || error?.status >= 500 || error instanceof TypeError || error?.name === 'AbortError' || error?.code === 'cut';
     const recLabel = provider => provider === 'gemini' ? 'Gemini' : 'Groq';
@@ -277,7 +281,17 @@ async function openWikiLink(title) {
       }
       throw last || new Error('No AI provider is available.');
     }
-    const recProviders = () => ['gemini', 'groq'].filter(id => aiKey(id));
+    // Check if a provider supports audio transcription
+    const recAudioProviders = () => {
+      const providers = [];
+      if (aiKey('gemini')) providers.push('gemini'); // Gemini supports audio via generateContent with inline data
+      if (aiKey('groq')) providers.push('groq'); // Groq supports audio via Whisper API
+      return providers;
+    };
+    const recProviders = () => recAudioProviders(); // Alias for backward compatibility
+    
+    // Check if any provider supports audio transcription
+    const hasAudioProvider = () => recAudioProviders().length > 0;
     async function recTextCall(prompt, options = {}) {
       const steps = recProviders().map(name => ({ name, run: () => aiCall(name, prompt, { temperature: options.temperature ?? 0.3, json: Boolean(options.json) }) }));
       if (!steps.length) throw Object.assign(new Error('Add a Gemini or Groq key in NotezAi settings.'), { code: 'no-key' });
@@ -296,8 +310,15 @@ async function openWikiLink(title) {
         if (!raw) return '';
         return (await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 })).text.trim();
       } });
-      if (!steps.length) throw Object.assign(new Error('Add a Gemini or Groq key in NotezAi settings.'), { code: 'no-key' });
+      if (!steps.length) {
+        REC.segStatuses[index] = SEG_STATUS.FAILED;
+        REC.segBlobs[index] = blob;
+        throw Object.assign(new Error('Add a Gemini or Groq key in NotezAi settings.'), { code: 'no-key' });
+      }
+      REC.segStatuses[index] = SEG_STATUS.IN_PROGRESS;
+      updateRecLive();
       const { result } = await recFailover(steps, `on part ${index + 1}`);
+      REC.segStatuses[index] = SEG_STATUS.COMPLETED;
       return result;
     }
     const RECORD_TRANSCRIBE_GEMINI_PART = index => `Transcribe this short part (number ${index + 1}) of a classroom or meeting recording, completely and accurately.
@@ -310,7 +331,7 @@ Output only the transcript.`;
     function recNoteBody(transcript, notesText, finishing) {
       const when = new Date(REC.startedAt);
       const providerLine = REC.provider ? `${recLabel(REC.provider)}` : 'AI';
-      const state = finishing ? 'Recording finished' : REC.status === 'recording' || REC.status === 'paused' ? 'Recording in progress' : 'Recording';
+      const state = finishing ? 'Recording finished' : REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.PAUSED ? 'Recording in progress' : 'Recording';
       const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
@@ -353,13 +374,18 @@ Output only the transcript.`;
           const text = recCleanPart(await recTranscribePart(blob, index));
           if (!text) REC.notice = `Part ${index + 1} had no clear speech. Check the microphone and the room noise.`;
           REC.segTexts[index] = text;
+          REC.segBlobs[index] = null;
           REC.processed++;
-          const isLast = REC.status === 'finishing' && REC.processed >= REC.expectedParts;
+          const isLast = REC.status === REC_STATUS.FINALIZING && REC.processed >= REC.expectedParts;
           if (!isLast && REC.processed % REC_NOTES_EVERY === 0) await recRefreshNotes(false);
           recSaveNote(false);
         } catch (error) {
-          REC.errors++; REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}).`;
-          REC.segTexts[index] = ''; updateRecLive();
+          REC.errors++;
+          REC.segTexts[index] = '';
+          REC.segStatuses[index] = SEG_STATUS.FAILED;
+          REC.segBlobs[index] = blob;
+          REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}).`;
+          updateRecLive();
         }
         updateRecLive();
       });
@@ -383,21 +409,39 @@ Output only the transcript.`;
     function clearRecTimers() { clearInterval(REC.timer); REC.timer = 0; clearInterval(REC.segTimer); REC.segTimer = 0; }
     function recRunTimers() {
       clearRecTimers();
-      REC.timer = setInterval(() => { const clock = $('#rec-clock'); if (clock) clock.textContent = fmtClock(recElapsed()); if (REC.status === 'recording' && recElapsed() >= REC_MAX_MS) recStop(); }, 250);
-      REC.segTimer = setInterval(() => { if (REC.status === 'recording') { endPart(); startPart(); } }, REC_SEGMENT_MS());
+      REC.timer = setInterval(() => { const clock = $('#rec-clock'); if (clock) clock.textContent = fmtClock(recElapsed()); if (REC.status === REC_STATUS.RECORDING && recElapsed() >= REC_MAX_MS) recStop(); }, 250);
+      REC.segTimer = setInterval(() => { if (REC.status === REC_STATUS.RECORDING) { endPart(); startPart(); } }, REC_SEGMENT_MS());
     }
     function openRecorder() {
       if (!currentSession) return;
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('This browser cannot record audio. Use Chrome or Edge on https.', 'error', 6000); return; }
-      if (!recProviders().length) { toast('Add a Gemini or Groq key in NotezAi settings. Recording needs one to make notes.', 'error', 6000); return; }
-      if (REC.status === 'done') { REC.status = 'idle'; REC.segTexts = []; REC.segIdx = 0; REC.processed = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set(); REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); }
+      if (!hasAudioProvider()) { 
+        toast('Add a Gemini or Groq key in NotezAi settings. Recording needs one to transcribe audio.', 'error', 6000); 
+        return; 
+      }
+      if (REC.status === REC_STATUS.DONE) { 
+        REC.status = REC_STATUS.IDLE; 
+        REC.segTexts = []; 
+        REC.segBlobs = [];
+        REC.segStatuses = [];
+        REC.segIdx = 0; 
+        REC.processed = 0; 
+        REC.failovers = 0; 
+        REC.liveNotes = ''; 
+        REC.provider = ''; 
+        REC.failedOn = new Set(); 
+        REC.notice = ''; 
+        REC.errors = 0; 
+        REC.queue = Promise.resolve(); 
+        REC.audioSaved = false;
+      }
       REC.dialog = { set hidden(value) { if (value) nzaiClose(); else dockShow('voice'); }, get hidden() { return !nzai.open || nzai.dock !== 'voice'; } };
       dockShow('voice');
     }
     const REC_VOICE_CLASS = ['voice-a', 'voice-b', 'voice-c', 'voice-d'];
     function recTimeline() {
-      const parts = REC.segTexts.map((text, index) => ({ index, text: text || '' })).filter(part => part.text.trim());
-      if (!parts.length) return `<div class="rec-empty">${REC.status === 'idle' ? 'The live transcript appears here as you record.' : 'Listening… the first part appears within about 30 seconds.'}</div>`;
+      const parts = REC.segTexts.map((text, index) => ({ index, text: text || '', status: REC.segStatuses[index] || SEG_STATUS.PENDING })).filter(part => part.text.trim() || part.status === SEG_STATUS.FAILED || part.status === SEG_STATUS.NEEDS_RETRY);
+      if (!parts.length) return `<div class="rec-empty">${REC.status === REC_STATUS.IDLE ? 'The live transcript appears here as you record.' : 'Listening… the first part appears within about 30 seconds.'}</div>`;
       const lastIndex = parts[parts.length - 1].index;
       return parts.map(part => {
         const lines = part.text.split('\n').filter(line => line.trim()).map(line => {
@@ -406,24 +450,27 @@ Output only the transcript.`;
           const n = Number(m[3]) - 1;
           return `<p class="rec-line"><span class="rec-stamp">${esc(m[1] || '')}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">Voice ${m[3]}</span><span class="rec-text">${esc(m[4])}</span></p>`;
         }).join('');
-        return `<section class="rec-part${part.index === lastIndex && REC.status === 'recording' ? ' current' : ''}"><header><b>Part ${part.index + 1}</b><span>${(part.index + 1) * Math.round(REC_SEGMENT_MS() / 1000)}s</span></header>${lines}</section>`;
+        const statusClass = part.status === SEG_STATUS.FAILED ? ' failed' : part.status === SEG_STATUS.IN_PROGRESS ? ' in-progress' : part.status === SEG_STATUS.NEEDS_RETRY ? ' needs-retry' : '';
+        const statusLabel = part.status === SEG_STATUS.FAILED ? ' (Failed)' : part.status === SEG_STATUS.IN_PROGRESS ? ' (In progress)' : part.status === SEG_STATUS.NEEDS_RETRY ? ' (Needs retry)' : '';
+        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${(part.index + 1) * Math.round(REC_SEGMENT_MS() / 1000)}s</span></header>${lines}</section>`;
       }).join('');
     }
     function recProviderStrip() {
       const failed = REC.failedOn || new Set();
       return ['gemini', 'groq'].filter(id => aiKey(id)).map(id => {
-        const state = REC.provider === id && (REC.status === 'recording' || REC.status === 'finishing') ? 'active' : failed.has(id) && REC.provider !== id ? 'stopped' : REC.provider === id ? 'used' : 'standby';
+        const state = REC.provider === id && (REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.FINALIZING) ? 'active' : failed.has(id) && REC.provider !== id ? 'stopped' : REC.provider === id ? 'used' : 'standby';
         const label = { active: 'Working', used: 'Last used', stopped: 'Stopped, switched', standby: 'Standby' }[state];
         return `<span class="rec-prov ${state}"><i></i><b>${recLabel(id)}</b><small>${label}</small></span>`;
       }).join('') || '<span class="rec-prov standby"><b>No key</b></span>';
     }
     function recLiveHtml() {
       const pending = REC.expectedParts ? Math.max(0, REC.expectedParts - REC.processed) : 0;
-      const notes = REC.liveNotes ? markdownToHtml(REC.liveNotes) : `<p class="rec-muted">${REC.status === 'idle' ? 'Notes are written as the recording goes on. Each refresh adds to the last.' : 'Notes appear after the second part, then refresh about every minute.'}</p>`;
+      const failedCount = REC.segStatuses ? REC.segStatuses.filter(s => s === SEG_STATUS.FAILED || s === SEG_STATUS.NEEDS_RETRY).length : 0;
+      const notes = REC.liveNotes ? markdownToHtml(REC.liveNotes) : `<p class="rec-muted">${REC.status === REC_STATUS.IDLE ? 'Notes are written as the recording goes on. Each refresh adds to the last.' : 'Notes appear after the second part, then refresh about every minute.'}</p>`;
       const notice = REC.notice ? `<div class="ai-notice rec-notice" role="status">${esc(REC.notice)}</div>` : '';
-      if (REC.status === 'idle') return `<div class="rec-strip">${recProviderStrip()}</div>${notice}`;
+      if (REC.status === REC_STATUS.IDLE) return `<div class="rec-strip">${recProviderStrip()}</div>${notice}`;
       const tab = REC.tab === 'notes' ? 'notes' : 'transcript';
-      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
+      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}${failedCount ? `, ${failedCount} failed` : ''}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
       const pane = tab === 'transcript' ? `<div class="rec-scroll" id="rec-transcript">${recTimeline()}</div>` : `<div class="rec-scroll ai-md">${notes}</div>`;
       return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}<section class="rec-card">${pane}</section>`;
     }
@@ -433,19 +480,19 @@ Output only the transcript.`;
       const stateLabel = { idle: 'Ready', recording: 'Recording', paused: 'Paused', finishing: 'Finishing', done: 'Saved' }[status] || 'Ready';
       const ic = d => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</g></svg>`;
       const clock = `<span class="rec-clock" id="rec-clock">${fmtClock(recElapsed())}</span>`;
-      const modeSeg = status === 'idle' ? `<div class="ai-seg rec-mode" role="radiogroup" aria-label="Recording type">${[['class', 'Classroom'], ['meeting', 'Meeting']].map(([v, l]) => `<label class="rec-opt"><input type="radio" name="rec-mode" id="rec-mode-${v}" value="${v}" ${REC.mode === v ? 'checked' : ''}>${l}</label>`).join('')}</div>` : '';
-      const intro = status === 'idle' ? `<p class="rec-sub">Record a lecture or meeting. You get a live transcript with speakers, and notes written as you go.</p>${modeSeg}` : '';
+      const modeSeg = status === REC_STATUS.IDLE ? `<div class="ai-seg rec-mode" role="radiogroup" aria-label="Recording type">${[['class', 'Classroom'], ['meeting', 'Meeting']].map(([v, l]) => `<label class="rec-opt"><input type="radio" name="rec-mode" id="rec-mode-${v}" value="${v}" ${REC.mode === v ? 'checked' : ''}>${l}</label>`).join('')}</div>` : '';
+      const intro = status === REC_STATUS.IDLE ? `<p class="rec-sub">Record a lecture or meeting. You get a live transcript with speakers, and notes written as you go.</p>${modeSeg}` : '';
       const stage = (() => {
-        if (status === 'idle') return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording"><i></i></button><div class="rec-stage-t"><b>Start recording</b><small>Saved to your library from the first second</small></div></div>`;
-        const meter = status === 'recording' ? `<div class="rec-meter" aria-hidden="true"><i id="rec-level" style="width:0%"></i></div>` : '';
-        const mid = status === 'paused' ? `<button type="button" class="rec-ctl" data-rec="resume">${ic('<path d="M7 4l13 8-13 8Z"/>')}<span>Resume</span></button>` : status === 'recording' ? `<button type="button" class="rec-ctl" data-rec="pause">${ic('<path d="M8 5v14M16 5v14"/>')}<span>Pause</span></button>` : '';
-        const ctl = status === 'recording' || status === 'paused' ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop and finish</span></button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
-        return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === 'done' ? '' : clock}${meter}${ctl}</div>`;
+        if (status === REC_STATUS.IDLE) return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording"><i></i></button><div class="rec-stage-t"><b>Start recording</b><small>Saved to your library from the first second</small></div></div>`;
+        const meter = status === REC_STATUS.RECORDING ? `<div class="rec-meter" aria-hidden="true"><i id="rec-level" style="width:0%"></i></div>` : '';
+        const mid = status === REC_STATUS.PAUSED ? `<button type="button" class="rec-ctl" data-rec="resume">${ic('<path d="M7 4l13 8-13 8Z"/>')}<span>Resume</span></button>` : status === REC_STATUS.RECORDING ? `<button type="button" class="rec-ctl" data-rec="pause">${ic('<path d="M8 5v14M16 5v14"/>')}<span>Pause</span></button>` : '';
+        const ctl = status === REC_STATUS.RECORDING || status === REC_STATUS.PAUSED ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop and finish</span></button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
+        return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
-        if (status === 'idle') return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><p class="rec-muted">Tell everyone you are recording, and get their agreement first.</p>`;
-        if (status === 'finishing') return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
-        if (status === 'done') return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
+        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><p class="rec-muted">Tell everyone you are recording, and get their agreement first.</p>`;
+        if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
+        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
       return `${intro}${stage}<div id="rec-live" class="rec-live">${recLiveHtml()}</div>${tail}`;
@@ -473,19 +520,19 @@ Output only the transcript.`;
       navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(stream => {
         REC.stream = stream; REC.mime = recMime(); REC.choice = $('#rec-enhance')?.value || 'auto';
         REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
-        REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.status = 'recording';
+        REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.status = REC_STATUS.RECORDING;
         const when = new Date();
         const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
         REC.noteId = note.id; notes = [note, ...notes]; addFolderPath(note.folderPath); persistNote(note).catch(() => {}); renderEverything();
         startPart(); recRunTimers(); recStartMeter(stream); recRender();
       }).catch(error => { console.error('Recording could not start:', error); toast(error?.name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it in your browser settings.' : 'Could not open the microphone.', 'error', 6000); });
     }
-    function recPause() { if (REC.status !== 'recording') return; endPart(); REC.status = 'paused'; REC.pausedAt = Date.now(); clearInterval(REC.segTimer); REC.segTimer = 0; recRender(); }
-    function recResume() { if (REC.status !== 'paused') return; REC.pausedMs += Date.now() - REC.pausedAt; REC.pausedAt = 0; REC.status = 'recording'; startPart(); recRunTimers(); recRender(); }
+    function recPause() { if (REC.status !== REC_STATUS.RECORDING) return; endPart(); REC.status = 'paused'; REC.pausedAt = Date.now(); clearInterval(REC.segTimer); REC.segTimer = 0; recRender(); }
+    function recResume() { if (REC.status !== REC_STATUS.PAUSED) return; REC.pausedMs += Date.now() - REC.pausedAt; REC.pausedAt = 0; REC.status = REC_STATUS.RECORDING; startPart(); recRunTimers(); recRender(); }
     async function recStop() {
-      if (REC.status !== 'recording' && REC.status !== 'paused') return;
-      if (REC.status === 'recording') { REC.pausedAt = 0; }
-      REC.status = 'finishing'; clearRecTimers(); recRender();
+      if (REC.status !== REC_STATUS.RECORDING && REC.status !== REC_STATUS.PAUSED) return;
+      if (REC.status === REC_STATUS.RECORDING) { REC.pausedAt = 0; }
+      REC.status = REC_STATUS.FINALIZING; clearRecTimers(); recRender();
       await endPart();                                     // the last part is finalised before the microphone is released
       recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop());
       await Promise.race([REC.queue, recSleep(180000)]);  // parts are transcribed first; a stuck part cannot block the note for more than 3 minutes
@@ -496,7 +543,7 @@ Output only the transcript.`;
       const note = notes.find(item => item.id === REC.noteId);
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
       const voices = recDetectVoices(recLiveTranscript());
-      REC.status = 'done'; recRender(); renderEverything();
+      REC.status = REC_STATUS.DONE; recRender(); renderEverything();
       toast('Recording finished and saved to your library.', 'success', 4500);
       if (voices.length && note) recOfferNames(note.id, voices);
     }
@@ -504,7 +551,51 @@ Output only the transcript.`;
       const act = event.target.closest('[data-rec]')?.dataset.rec; if (!act) return;
       if (act === 'start') return recStart();
       if (act === 'tab') { REC.tab = event.target.closest('[data-rec]').dataset.tab; return updateRecLive(); }
-      if (act === 'pause') return recPause();
+      
+    // Retry failed segments after provider configuration
+    async function recRetryFailedSegments() {
+      const failedIndices = REC.segBlobs.map((blob, index) => blob ? index : -1).filter(idx => idx !== -1);
+      if (!failedIndices.length) { toast('No failed segments to retry.', 'info', 3000); return; }
+      
+      toast(`Retrying ${failedIndices.length} failed segment${failedIndices.length === 1 ? '' : 's'}...`, 'info', 4000);
+      REC.notice = `Retrying ${failedIndices.length} failed segment${failedIndices.length === 1 ? '' : 's'}...`;
+      updateRecLive();
+      
+      let retriedCount = 0;
+      for (const idx of failedIndices) {
+        if (!REC.segBlobs[idx]) continue;
+        
+        try {
+          REC.segStatuses[idx] = SEG_STATUS.IN_PROGRESS;
+          updateRecLive();
+          
+          const text = recCleanPart(await recTranscribePart(REC.segBlobs[idx], idx));
+          if (text) {
+            REC.segTexts[idx] = text;
+            REC.segBlobs[idx] = null;
+            REC.segStatuses[idx] = SEG_STATUS.COMPLETED;
+            retriedCount++;
+            recSaveNote(false);
+          } else {
+            REC.segStatuses[idx] = SEG_STATUS.NEEDS_RETRY;
+          }
+        } catch (error) {
+          REC.segStatuses[idx] = SEG_STATUS.FAILED;
+          console.warn(`Retry failed for segment ${idx + 1}:`, error);
+        }
+        updateRecLive();
+      }
+      
+      if (retriedCount > 0) {
+        toast(`Successfully retried ${retriedCount} segment${retriedCount === 1 ? '' : 's'}.`, 'success', 4000);
+        REC.notice = `Retried ${retriedCount} segment${retriedCount === 1 ? '' : 's'}.`;
+      } else {
+        toast('No segments could be retried. Check your provider configuration.', 'error', 5000);
+        REC.notice = 'No segments could be retried.';
+      }
+      updateRecLive();
+    }
+if (act === 'pause') return recPause();
       if (act === 'resume') return recResume();
       if (act === 'stop') return recStop();
       if (act === 'names') { const note = notes.find(item => item.id === REC.noteId); const voices = note ? recDetectVoices(note.body) : []; if (voices.length) recOfferNames(REC.noteId, voices); else toast('No speaker labels found in this note yet.'); return; }
@@ -512,6 +603,7 @@ Output only the transcript.`;
       if (act === 'close') {
         nzaiClose(); return;   // recording keeps running in the background
       }
+      if (act === 'retry') { recRetryFailedSegments(); return; }
     }
     // Recording keeps going if the dialog is hidden; reopen it from Import to see progress.
     function bytesToB64Safe(bytes) { let bin = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)); return btoa(bin); }
@@ -576,7 +668,7 @@ Output only the transcript.`;
       });
     }
     const recCss = document.createElement('style');
-    recCss.textContent = `.rec-opt{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;font:600 12px system-ui,sans-serif}.rec-opt input{accent-color:var(--nz-accent)}.rec-status{display:flex;align-items:center;gap:10px;margin:12px 0 6px}.rec-dot{width:10px;height:10px;border-radius:50%;background:rgba(128,148,170,.5)}.rec-dot.live{background:#d9534f;animation:nzPulse 1.2s infinite}.rec-dot.busy{background:var(--nz-accent);animation:nzPulse 1s infinite}@keyframes nzPulse{50%{opacity:.35}}.rec-clock{font:700 26px ui-monospace,monospace;font-variant-numeric:tabular-nums}.rec-state{font-size:12px;opacity:.7}.rec-meter{height:6px;border-radius:9px;background:rgba(128,148,170,.2);overflow:hidden;margin:8px 0 12px}.rec-meter i{display:block;height:100%;background:var(--nz-accent);transition:width .1s}.rec-small{font-size:11.5px;opacity:.7;margin:8px 0}.rec-name-row{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}.rec-live-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.rec-live-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6}.rec-live-box{margin-top:4px;min-height:120px;max-height:220px;overflow:auto;padding:9px 10px;border-radius:10px;border:1px solid rgba(128,148,170,.25);font-size:12px;line-height:1.5}.rec-live-box div{margin-bottom:4px}.rec-provider{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;opacity:.8;margin-top:4px}.rec-notice{margin-top:8px}@media(max-width:560px){.rec-live-grid{grid-template-columns:1fr}}`;
+    recCss.textContent = `.rec-opt{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;font:600 12px system-ui,sans-serif}.rec-opt input{accent-color:var(--nz-accent)}.rec-status{display:flex;align-items:center;gap:10px;margin:12px 0 6px}.rec-dot{width:10px;height:10px;border-radius:50%;background:rgba(128,148,170,.5)}.rec-dot.live{background:#d9534f;animation:nzPulse 1.2s infinite}.rec-dot.busy{background:var(--nz-accent);animation:nzPulse 1s infinite}@keyframes nzPulse{50%{opacity:.35}}.rec-clock{font:700 26px ui-monospace,monospace;font-variant-numeric:tabular-nums}.rec-state{font-size:12px;opacity:.7}.rec-meter{height:6px;border-radius:9px;background:rgba(128,148,170,.2);overflow:hidden;margin:8px 0 12px}.rec-meter i{display:block;height:100%;background:var(--nz-accent);transition:width .1s}.rec-small{font-size:11.5px;opacity:.7;margin:8px 0}.rec-name-row{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}.rec-live-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.rec-live-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6}.rec-live-box{margin-top:4px;min-height:120px;max-height:220px;overflow:auto;padding:9px 10px;border-radius:10px;border:1px solid rgba(128,148,170,.25);font-size:12px;line-height:1.5}.rec-live-box div{margin-bottom:4px}.rec-provider{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;opacity:.8;margin-top:4px}.rec-notice{margin-top:8px}.rec-part.failed{opacity:.6;background:rgba(217,83,79,.08);border-left:3px solid #d9534f}.rec-part.in-progress{background:rgba(139,195,74,.08);border-left:3px solid #8bc34a}.rec-part.needs-retry{background:rgba(255,193,7,.08);border-left:3px solid #ffc107}@media(max-width:560px){.rec-live-grid{grid-template-columns:1fr}}`;
     document.head.appendChild(recCss);
 
     // ================= Reliability: error log, friendly failures, diagnostics =================
@@ -603,9 +695,9 @@ Output only the transcript.`;
     recPill.addEventListener('click', () => dockShow('voice'));
     document.body.appendChild(recPill);
     setInterval(() => {
-      const live = REC.status === 'recording' || REC.status === 'paused' || REC.status === 'finishing';
+      const live = REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.PAUSED || REC.status === REC_STATUS.FINALIZING;
       recPill.hidden = !live;
-      if (live) { recPill.querySelector('b').textContent = REC.status === 'paused' ? 'Paused' : REC.status === 'finishing' ? 'Finishing' : 'Recording'; recPill.querySelector('#rec-pill-clock').textContent = fmtClock(recElapsed()); }
+      if (live) { recPill.querySelector('b').textContent = REC.status === REC_STATUS.PAUSED ? 'Paused' : REC.status === REC_STATUS.FINALIZING ? 'Finishing' : 'Recording'; recPill.querySelector('#rec-pill-clock').textContent = fmtClock(recElapsed()); }
       const badge = $('#dock-rec-badge'); if (badge) badge.hidden = !live;
     }, 500);
     // ================= Reading comfort (saved on this device) =================
