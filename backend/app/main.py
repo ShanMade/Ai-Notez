@@ -104,9 +104,10 @@ class ImagePayload(BaseModel):
 
     @field_validator("mime")
     @classmethod
-    def image_only(cls, value: str) -> str:
-        if not value.startswith("image/"):
-            raise ValueError("Only image inputs are supported.")
+    def image_or_audio_only(cls, value: str) -> str:
+        # Audio is accepted so Voice-to-Note can be transcribed by the managed Gemini provider.
+        if not value.startswith(("image/", "audio/")):
+            raise ValueError("Only image and audio inputs are supported.")
         return value
 
 
@@ -192,6 +193,9 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
         raise HTTPException(status_code=503, detail="Application-managed AI is not configured on this backend. Set AI_GEMINI_API_KEY or AI_GROQ_API_KEY in the backend environment.")
     ordered = [settings.default_provider, *[item for item in providers if item != settings.default_provider]]
     ordered = [item for item in ordered if item in providers and not provider_cooling_down(item) and provider_key(item)]
+    if body.images:
+        # Only Gemini accepts image/audio parts; Groq would fail with a 422 and block the fallback chain.
+        ordered = [item for item in ordered if item == "gemini"]
     if not ordered:
         raise HTTPException(status_code=503, detail="Configured AI providers are cooling down after rate limits or have no valid credentials. Try again shortly.")
     last_error: HTTPException | None = None
