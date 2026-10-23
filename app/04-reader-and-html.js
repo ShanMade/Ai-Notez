@@ -796,6 +796,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
       panel.querySelectorAll('[data-nav]').forEach(btn => { const on = btn.dataset.nav === screen; btn.classList.toggle('on', on); if (on) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current'); });
       panel.dataset.screen = screen;
+      const sub = panel.querySelector('#dock-sub');
+      if (sub) sub.textContent = screen === 'voice' ? 'Voice notes' : screen === 'history' ? 'Chat history' : screen === 'settings' ? 'Settings' : aiUsesManaged() ? 'Managed AI' : aiReady() ? `${AI_PROVIDERS[aiActive()]?.label || 'AI'} · your key` : 'Setup needed';
     }
     function nzaiEnsurePanel() {
       let panel = $('#nz-ai');
@@ -805,6 +807,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       panel.innerHTML = `<div class="dock-grab" aria-hidden="true"></div>
         <header class="dock-chrome">
           <button type="button" class="fl-btn fl-lead" id="dock-lead" data-nzai="close" aria-label="Close panel" title="Close (Esc)"><svg class="ic-x" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="ic-down" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="ic-back" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="dock-title"><span class="dock-title-mark" aria-hidden="true"></span><div><b>NotezAi</b><small id="dock-sub">Your study assistant</small></div></div>
           <div class="fl-bar" role="toolbar" aria-label="Panel actions">
             <button type="button" class="fl-btn fl-new" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button><button type="button" class="fl-btn" id="dock-scope" data-nzai="scope-toggle" aria-label="Switch note scope" title="Switch note scope" style="display:none"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v17H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v17h5.5A2.5 2.5 0 0 1 20 22z"/><path d="M7 7h2M15 7h2"/></g></svg></button>
             <button type="button" class="fl-btn" data-nzai="history" data-nav="history" aria-label="History" title="History"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></g></svg></button>
@@ -1180,7 +1183,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
-      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+notes\s+(?:do\s+i\s+have|are\s+in\s+(?:my|the)\s+library)\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
+      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+(?:notes|files)\b(?![^?.!]*\b(?:about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
 
