@@ -106,11 +106,17 @@
     }).join('');
   }
 
+  // Streaming re-renders the same formulas on every chunk; a tiny cache keeps
+  // that cheap without growing without bound.
+  const mathCache = new Map();
   function renderMath(tex, display) {
+    const key = `${display ? 'd' : 'i'}:${tex}`;
+    const cached = mathCache.get(key);
+    if (cached) return cached;
     const katex = typeof window !== 'undefined' ? window.katex : null;
     if (katex && typeof katex.renderToString === 'function') {
       try {
-        return katex.renderToString(tex, {
+        const rendered = katex.renderToString(tex, {
           displayMode: !!display,
           throwOnError: false,
           strict: 'ignore',
@@ -118,6 +124,9 @@
           maxSize: 12,
           maxExpand: 200
         });
+        if (mathCache.size > 400) mathCache.clear();
+        mathCache.set(key, rendered);
+        return rendered;
       } catch {}
     }
     // KaTeX missing or unhappy: show the source rather than a broken formula.
@@ -268,6 +277,13 @@
       
       if (inFencedCode) {
         codeLines.push(line);
+        continue;
+      }
+
+      // A blank line ends a table. Without this, two tables written one after
+      // the other were merged into one, and the second header became a row.
+      if (inTable && !line.trim()) {
+        flushTable();
         continue;
       }
 
