@@ -1025,12 +1025,11 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
       const chatBefore = nzaiChat();
-      let sources = [], context = '';
+      let sources = [], context = '', found = [];
       if (note) {
         const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
         context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
       } else {
-        let found;
         if (aiBackendSession()) {
           try {
             const result = await aiBackendRequest('/v1/index/search', { query: question, limit: 5 });

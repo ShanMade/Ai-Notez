@@ -155,14 +155,17 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
         for text in texts
     ]
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-        response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{settings.embedding_model}:batchEmbedContents",
-            params={"key": key},
-            json={"requests": requests},
-        )
-    if not response.is_success:
-        raise _provider_error(response)
-    data = response.json()
+        try:
+            response = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.embedding_model}:batchEmbedContents",
+                params={"key": key},
+                json={"requests": requests},
+            )
+            if not response.is_success:
+                raise _provider_error(response)
+            data = response.json()
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Embedding request timed out.")
     vectors = [item.get("values", []) for item in data.get("embeddings", [])]
     if len(vectors) != len(texts) or any(len(vector) != settings.embedding_dimensions for vector in vectors):
         raise HTTPException(status_code=502, detail="The embedding provider returned an incompatible vector dimension.")
