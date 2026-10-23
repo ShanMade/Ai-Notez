@@ -604,7 +604,11 @@ function openNotezAi(note = null, preset = '') {
         }
         seenVersions.set(note.id, { title: note.title, body });
       } catch {}
-      return original.call(this, note, ...rest);
+      const saved = await original.call(this, note, ...rest);
+      if (currentSession?.mode === 'cloud' && window.notezAiBackendConfigured?.() && typeof window.notezAiIndexNote === 'function') {
+        window.notezAiIndexNote(note.id).catch(error => console.warn('Note saved, but semantic indexing will retry on the next AI request:', error));
+      }
+      return saved;
     })(persistNote);
     function showHistory(note) {
       const list = readHistory(note.id);

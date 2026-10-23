@@ -2604,16 +2604,16 @@ html[data-theme="dark"] #nz-ai .ai-jump, html[data-theme="dark"] #nz-ai .ai-bubb
 #nz-ai .ai-thread { gap: 24px; padding-left: 18px; padding-right: 18px; }
 #nz-ai .ai-msg.user { gap: 6px; }
 #nz-ai .ai-bubble-user {
-  background: #f0efe8;
+  background: color-mix(in srgb, var(--nz-accent) 14%, #fffefa);
   color: #292923;
-  border: 1px solid #e9e6dd;
+  border: 1px solid color-mix(in srgb, var(--nz-accent) 26%, #e9e6dd);
   border-radius: 18px 18px 5px 18px;
   padding: 11px 15px;
-  font-size: 13.5px;
+  font-size: 13px;
   line-height: 1.65;
 }
 #nz-ai .ai-msg.ai { gap: 5px; }
-#nz-ai .ai-md { color: #34342e; font-size: 14px; line-height: 1.78; overflow-wrap: anywhere; }
+#nz-ai .ai-md { color: #34342e; font-size: 13px; line-height: 1.72; overflow-wrap: anywhere; }
 #nz-ai .ai-md p, #nz-ai .ai-md ul, #nz-ai .ai-md ol { margin-bottom: 11px; }
 #nz-ai .ai-md h1, #nz-ai .ai-md h2, #nz-ai .ai-md h3 {
   margin: 18px 0 7px;
@@ -2724,7 +2724,7 @@ html[data-theme="dark"] #nz-ai .ai-jump, html[data-theme="dark"] #nz-ai .ai-bubb
   #nz-ai .ai-thread { padding-left: 14px; padding-right: 14px; gap: 20px; }
   #nz-ai .ai-welcome { padding-top: 18px; }
   #nz-ai .ai-welcome h3 { font-size: 30px; }
-  #nz-ai .ai-md { font-size: 14.5px; line-height: 1.75; }
+  #nz-ai .ai-md { font-size: 13px; line-height: 1.72; }
   #nz-ai .ai-composer-wrap { padding: 8px 10px 0; }
   #nz-ai .ai-composer { border-radius: 19px; padding-left: 13px; }
   #nz-ai .ai-foot { color: #8b897f; }
@@ -2763,7 +2763,7 @@ html[data-theme="dark"] #nz-ai .ai-md h3,
 html[data-theme="dark"] #nz-ai .hist-open { color: #e8e6dd; }
 html[data-theme="dark"] #nz-ai .ai-welcome h3 em,
 html[data-theme="dark"] #nz-ai .ai-ctx-chip svg { color: #a9c8a7; }
-html[data-theme="dark"] #nz-ai .ai-bubble-user { background: #202920; border-color: rgba(226,224,211,.12); color: #e8e6dd; }
+html[data-theme="dark"] #nz-ai .ai-bubble-user { background: color-mix(in srgb, var(--nz-accent) 24%, #121914); border-color: color-mix(in srgb, var(--nz-accent) 38%, transparent); color: #e8e6dd; }
 html[data-theme="dark"] #nz-ai .ai-md code,
 html[data-theme="dark"] #nz-ai .ai-md pre { background: #1b261e; color: #d9e5d5; border-color: rgba(226,224,211,.13); }
 html[data-theme="dark"] #nz-ai .ai-src,
