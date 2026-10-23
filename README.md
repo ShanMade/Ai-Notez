@@ -133,12 +133,22 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
+| `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model used for Voice-to-Note fallback transcription |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
 Only set provider credentials for services you intend to use. Never commit real `.env` files, service-account JSON, or API keys.
 
 When `AI_EMBEDDING_PROVIDER` is `groq` or `mistral`, `AI_EMBEDDING_DIMENSIONS` must be `1024` (their fixed
 output size); the backend refuses to start with a mismatched value instead of failing at retrieval time.
+
+### Voice-to-Note transcription
+
+Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
+endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3-turbo`) when Gemini is rate limited or
+rejects its credential — the resulting transcript is then formatted by a Groq chat model so speaker labels
+and structure stay the same. A provider that is cooling down after a rate limit is tried last rather than
+skipped, so a single 429 never becomes "all providers failed". The browser keeps each failed part's audio
+and offers a retry instead of discarding it.
 
 ### Retrieval (RAG)
 

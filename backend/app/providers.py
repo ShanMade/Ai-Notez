@@ -198,6 +198,84 @@ async def generate(
     return {"text": text, "provider": provider, "model": model}
 
 
+async def transcribe_audio(
+    provider: str,
+    api_key: str,
+    audio: bytes,
+    mime: str,
+    instruction: str,
+    model: str = "",
+) -> dict[str, str]:
+    """Transcribe an audio part with a provider that is not Gemini.
+
+    Gemini accepts audio inline through `generate`. Groq needs its dedicated
+    Whisper endpoint, so the plain transcript is passed through a Groq chat model
+    afterwards to get the same speaker-labelled shape the Gemini path returns.
+    """
+    if provider != "groq":
+        raise HTTPException(status_code=422, detail="This provider cannot transcribe audio.")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="No credential is configured for Groq.")
+    if not audio:
+        raise HTTPException(status_code=422, detail="The audio part was empty.")
+
+    timeout = httpx.Timeout(settings.request_timeout_seconds)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"file": ("part.webm", audio, mime or "audio/webm")},
+            data={
+                "model": settings.groq_transcribe_model,
+                "response_format": "json",
+                "temperature": "0",
+            },
+        )
+        if not response.is_success:
+            raise _provider_error(response)
+        try:
+            raw = str(response.json().get("text") or "").strip()
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status_code=502, detail="The transcriber returned an unreadable reply.") from exc
+    if not raw:
+        raise HTTPException(status_code=502, detail="The transcriber returned an empty transcript.")
+
+    # The formatting pass is the only place a retired Groq chat model can bite,
+    # so walk the enabled models instead of failing the whole transcription.
+    candidates = [model] if model else list(MODEL_DEFAULTS["groq"])
+    last_error: HTTPException | None = None
+    for chat_model in candidates:
+        if not chat_model:
+            continue
+        try:
+            formatted = await generate(
+                "groq",
+                chat_model,
+                api_key,
+                (
+                    "Below is a raw transcript of one part of a classroom or meeting recording, "
+                    "with no speaker labels and no timestamps.\n\n"
+                    f"{instruction}\n\n<transcript>\n{raw}\n</transcript>"
+                ),
+                "You format transcripts. Keep every spoken word exactly; never add, correct or invent content.",
+                0.0,
+                False,
+                [],
+            )
+        except HTTPException as exc:
+            last_error = exc
+            # A rejected key or a rate limit will not improve on another model.
+            if exc.status_code in {401, 403, 429}:
+                raise
+            continue
+        return {
+            "text": formatted["text"],
+            "provider": "groq",
+            "model": f"{settings.groq_transcribe_model} + {formatted['model']}",
+        }
+    raise last_error or HTTPException(status_code=502, detail="Groq could not format the transcript.")
+
+
 async def _embed(texts: list[str], task_type: str) -> list[list[float]]:
     """Embed texts with the resolved provider/profile.
 

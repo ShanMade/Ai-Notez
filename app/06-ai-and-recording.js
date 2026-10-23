@@ -261,17 +261,23 @@ async function openWikiLink(title) {
     const recSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     // Runs the steps in order. A step that fails (network cut, rate limit, server error, cut-off reply) hands over to the next one.
+    // A step can return a plain string or { text, provider }. The provider the
+    // backend actually used wins: a managed request can be served by Groq even
+    // though the step is called "gemini".
+    const recStepResult = (result, step) => typeof result === 'string'
+      ? { text: result, provider: step.name }
+      : { text: String(result?.text || ''), provider: String(result?.provider || step.name) };
     async function recFailover(steps, tag) {
       let last = null;
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
-            const result = await step.run();
-            if (REC.provider && REC.provider !== step.name) { REC.notice = `${recLabel(step.name)} took over ${tag}.`; REC.failovers++; }
-            REC.provider = step.name;
+            const { text, provider } = recStepResult(await step.run(), step);
+            if (REC.provider && REC.provider !== provider) { REC.notice = `${recLabel(provider)} took over ${tag}.`; REC.failovers++; }
+            REC.provider = provider;
             updateRecLive();
-            return { result, provider: step.name };
+            return { text, provider };
           } catch (error) {
             last = error; console.warn(`${recLabel(step.name)} failed ${tag}:`, error); (REC.failedOn ||= new Set()).add(step.name);
             if (!recTransient(error)) break;
@@ -297,20 +303,21 @@ async function openWikiLink(title) {
     async function recTextCall(prompt, options = {}) {
       const steps = recProviders().map(name => ({ name, run: () => aiCall(name, prompt, { temperature: options.temperature ?? 0.3, json: Boolean(options.json) }) }));
       if (!steps.length) throw Object.assign(new Error('Add a Gemini or Groq key in NotezAi settings.'), { code: 'no-key' });
-      const { result } = await recFailover(steps, 'while writing notes');
-      return result.text;
+      const { text } = await recFailover(steps, 'while writing notes');
+      return text;
     }
     async function recTranscribePart(blob, index) {
       const steps = [];
       if (aiUsesManaged() || aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
         const bytes = new Uint8Array(await blob.arrayBuffer());
         const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index), { temperature: 0, images: [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }] });
-        return answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        return { text: answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim(), provider: answer.provider || 'gemini' };
       } });
       if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
         const raw = await recTranscribeGroq(blob);
         if (!raw) return '';
-        return (await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 })).text.trim();
+        const typed = await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
+        return { text: typed.text.trim(), provider: typed.provider || 'groq' };
       } });
       if (!steps.length) {
         REC.segStatuses[index] = SEG_STATUS.FAILED;
@@ -319,9 +326,9 @@ async function openWikiLink(title) {
       }
       REC.segStatuses[index] = SEG_STATUS.IN_PROGRESS;
       updateRecLive();
-      const { result } = await recFailover(steps, `on part ${index + 1}`);
+      const { text } = await recFailover(steps, `on part ${index + 1}`);
       REC.segStatuses[index] = SEG_STATUS.COMPLETED;
-      return result;
+      return text;
     }
     const RECORD_TRANSCRIBE_GEMINI_PART = index => `Transcribe this short part (number ${index + 1}) of a classroom or meeting recording, completely and accurately.
 Label every turn "Voice 1:", "Voice 2:" and so on. Keep the same numbers for the same people as in the earlier parts: ${recKnownVoices() || 'none yet, number them in order of first speaking'}.
@@ -334,7 +341,9 @@ Output only the transcript.`;
       const when = new Date(REC.startedAt);
       const providerLine = REC.provider ? `${recLabel(REC.provider)}` : 'AI';
       const state = finishing ? 'Recording finished' : REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.PAUSED ? 'Recording in progress' : 'Recording';
-      const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.`;
+      const missing = (REC.segStatuses || []).map((status, index) => status === SEG_STATUS.FAILED ? index + 1 : 0).filter(Boolean);
+      const gap = missing.length ? ` Part${missing.length === 1 ? '' : 's'} ${missing.join(', ')} could not be transcribed; the audio is kept in this session so you can retry.` : '';
+      const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.${gap}`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
     function recSaveNote(finishing = false, notesText = REC.liveNotes) {
@@ -386,7 +395,11 @@ Output only the transcript.`;
           REC.segTexts[index] = '';
           REC.segStatuses[index] = SEG_STATUS.FAILED;
           REC.segBlobs[index] = blob;
-          REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}).`;
+          const noSpare = !aiUsesManaged() && recAudioProviders().length < 2;
+          REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}). `
+            + (noSpare
+              ? 'Add a Groq key in NotezAi settings so a rate limit on one provider cannot stop the recording.'
+              : 'The audio is kept — retry the part when a provider is free.');
           updateRecLive();
         }
         updateRecLive();
@@ -459,7 +472,13 @@ Output only the transcript.`;
     }
     function recProviderStrip() {
       const failed = REC.failedOn || new Set();
-      return (aiUsesManaged() ? ['gemini'] : ['gemini', 'groq'].filter(id => aiKey(id))).map(id => {
+      // Managed AI hides the backend's provider chain behind one chip and shows
+      // which provider actually served the last part.
+      if (aiUsesManaged()) {
+        const via = REC.provider ? `via ${recLabel(REC.provider)}` : 'Managed AI';
+        return `<span class="rec-prov ${REC.provider ? 'used' : 'standby'}"><i></i><b>NotezAi</b><small>${via}</small></span>`;
+      }
+      return ['gemini', 'groq'].filter(id => aiKey(id)).map(id => {
         const state = REC.provider === id && (REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.FINALIZING) ? 'active' : failed.has(id) && REC.provider !== id ? 'stopped' : REC.provider === id ? 'used' : 'standby';
         const label = { active: 'Working', used: 'Last used', stopped: 'Stopped, switched', standby: 'Standby' }[state];
         return `<span class="rec-prov ${state}"><i></i><b>${recLabel(id)}</b><small>${label}</small></span>`;
@@ -474,7 +493,10 @@ Output only the transcript.`;
       const tab = REC.tab === 'notes' ? 'notes' : 'transcript';
       const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}${failedCount ? `, ${failedCount} failed` : ''}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
       const pane = tab === 'transcript' ? `<div class="rec-scroll" id="rec-transcript">${recTimeline()}</div>` : `<div class="rec-scroll ai-md">${notes}</div>`;
-      return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}<section class="rec-card">${pane}</section>`;
+      // Failed parts keep their audio, so they can be retried instead of telling
+      // the user the recording is lost.
+      const retry = failedCount ? `<div class="rec-actions"><button type="button" class="ai-action" data-rec="retry">Retry ${failedCount} failed part${failedCount === 1 ? '' : 's'}</button></div>` : '';
+      return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}${retry}<section class="rec-card">${pane}</section>`;
     }
     function updateRecLive() { const el = $('#rec-live'); if (el) el.innerHTML = recLiveHtml(); }
     function recBodyHtml() {
@@ -577,7 +599,8 @@ Output only the transcript.`;
             REC.segBlobs[idx] = null;
             REC.segStatuses[idx] = SEG_STATUS.COMPLETED;
             retriedCount++;
-            recSaveNote(false);
+            // Keep the "Recording finished" header when retrying after the stop.
+            recSaveNote(REC.status === REC_STATUS.DONE);
           } else {
             REC.segStatuses[idx] = SEG_STATUS.NEEDS_RETRY;
           }

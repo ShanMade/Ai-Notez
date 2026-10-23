@@ -5,6 +5,7 @@ import math
 import os
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth import current_user
@@ -203,31 +204,210 @@ def test_generation_routes_byok_through_shared_service(monkeypatch):
     assert captured["system_prompt"] == "You are NotezAi."
 
 
-def test_managed_generation_accepts_audio_and_only_uses_gemini(monkeypatch):
+def test_managed_audio_transcribes_with_gemini_when_it_is_healthy(monkeypatch):
     calls = []
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
         calls.append((provider, images[0]["mime"]))
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
+    async def fake_transcribe(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("Groq should only be used when Gemini fails")
+
     monkeypatch.setattr(main_module, "generate", fake_generate)
-    monkeypatch.setattr(main_module, "configured_providers", lambda: ["groq", "gemini"])
+    monkeypatch.setattr(main_module, "transcribe_audio", fake_transcribe)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini", "groq"])
     monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
     monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
-    original_default = settings.default_provider
-    object.__setattr__(settings, "default_provider", "groq")  # settings is frozen
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
     app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
     try:
         client = TestClient(app)
         audio = client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}]})
         bad = client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "video/mp4", "data": "AAAA"}]})
     finally:
-        object.__setattr__(settings, "default_provider", original_default)
         app.dependency_overrides.clear()
 
     assert audio.status_code == 200
-    assert calls == [("gemini", "audio/webm")]  # Groq cannot take audio parts, so media skips it
+    assert calls == [("gemini", "audio/webm")]
     assert bad.status_code == 422
+
+
+def test_managed_audio_falls_back_to_groq_when_gemini_is_rate_limited(monkeypatch):
+    # The screenshot case: Gemini rate-limited, the request was refused instead
+    # of being handed to the provider that can still transcribe.
+    transcribed = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        raise HTTPException(status_code=429, detail="The selected AI provider is rate limited.")
+
+    async def fake_transcribe(provider, api_key, audio, mime, instruction, model=""):
+        transcribed.append((provider, mime, len(audio)))
+        return {"text": "Voice 1: hello", "provider": provider, "model": "whisper-large-v3-turbo"}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "transcribe_audio", fake_transcribe)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini", "groq"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post(
+            "/v1/ai/generate",
+            json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == "groq"
+    assert transcribed == [("groq", "audio/webm", 3)]
+
+
+def test_a_cooling_provider_is_still_tried_instead_of_failing_everything(monkeypatch):
+    # Every provider cooling down used to return 503 before a single attempt.
+    attempts = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        attempts.append(provider)
+        return {"text": "ok", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: True)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post("/v1/ai/generate", json={"prompt": "Explain photosynthesis."})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert attempts == ["gemini"]
+
+
+def test_managed_generation_tries_the_next_provider_on_any_failure(monkeypatch):
+    attempts = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        attempts.append(provider)
+        if provider == "gemini":
+            raise HTTPException(status_code=502, detail="The selected AI provider rejected its configured credential.")
+        return {"text": "answer", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini", "groq"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post("/v1/ai/generate", json={"prompt": "Explain photosynthesis."})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == "groq"
+    assert attempts == ["gemini", "groq"]
+
+
+def test_groq_transcription_uses_the_whisper_endpoint(monkeypatch):
+    import app.providers as providers
+
+    captured = {}
+
+    class FakeResponse:
+        is_success = True
+
+        def json(self):
+            return {"text": "hello world"}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        captured["prompt"] = prompt
+        return {"text": "Voice 1: hello", "provider": "groq", "model": model}
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "generate", fake_generate)
+
+    result = asyncio.run(
+        providers.transcribe_audio("groq", "groq-key", b"audio-bytes", "audio/webm", "Transcribe this part.")
+    )
+
+    assert captured["url"].endswith("/openai/v1/audio/transcriptions")
+    assert captured["data"]["model"] == settings.groq_transcribe_model
+    assert captured["files"]["file"][2] == "audio/webm"
+    assert "hello world" in captured["prompt"]          # the raw transcript is formatted, not dropped
+    assert result["provider"] == "groq"
+    assert result["text"] == "Voice 1: hello"
+
+
+def test_groq_transcription_walks_the_enabled_chat_models(monkeypatch):
+    import app.providers as providers
+
+    tried = []
+    retired = providers.MODEL_DEFAULTS["groq"][0]
+
+    class FakeResponse:
+        is_success = True
+
+        def json(self):
+            return {"text": "hello world"}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            return FakeResponse()
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        tried.append(model)
+        if model == retired:
+            raise HTTPException(status_code=502, detail="The requested model is decommissioned.")
+        return {"text": "Voice 1: hello", "provider": "groq", "model": model}
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "generate", fake_generate)
+
+    result = asyncio.run(providers.transcribe_audio("groq", "key", b"audio", "audio/webm", "Transcribe."))
+
+    assert tried[0] == retired
+    assert len(tried) > 1            # a retired model does not fail the transcription
+    assert result["text"] == "Voice 1: hello"
+    assert result["model"].endswith(tried[1])
+
+
+def test_transcription_rejects_unsupported_providers_and_empty_audio(monkeypatch):
+    import app.providers as providers
+
+    with pytest.raises(HTTPException) as unsupported:
+        asyncio.run(providers.transcribe_audio("mistral", "key", b"audio", "audio/webm", "Transcribe."))
+    assert unsupported.value.status_code == 422
+
+    with pytest.raises(HTTPException) as empty:
+        asyncio.run(providers.transcribe_audio("groq", "key", b"", "audio/webm", "Transcribe."))
+    assert empty.value.status_code == 422
 
 
 def test_chunking_is_bounded_and_user_identifiers_are_opaque():

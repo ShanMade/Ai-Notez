@@ -62,6 +62,8 @@ class Settings:
     embedding_model: str = os.getenv("AI_EMBEDDING_MODEL", "gemini-embedding-001")
     embedding_dimensions: int = _integer("AI_EMBEDDING_DIMENSIONS", 768, 64, 3072)
     groq_embedding_model: str = os.getenv("AI_GROQ_EMBEDDING_MODEL", "text-embedding-3-small")
+    # Groq's Whisper endpoint transcribes audio when Gemini is rate limited or unavailable.
+    groq_transcribe_model: str = os.getenv("AI_GROQ_TRANSCRIBE_MODEL", "whisper-large-v3-turbo")
     request_timeout_seconds: int = _integer("AI_REQUEST_TIMEOUT_SECONDS", 60, 5, 180)
     max_prompt_chars: int = _integer("AI_MAX_PROMPT_CHARS", 60000, 1000, 200000)
     max_chunks_per_user: int = _integer("AI_MAX_CHUNKS_PER_USER", 20000, 100, 100000)
