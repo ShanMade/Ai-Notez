@@ -610,11 +610,10 @@ function openNotezAi(note = null, preset = '') {
         }
         seenVersions.set(note.id, { title: note.title, body });
       } catch {}
-      const saved = await original.call(this, note, ...rest);
-      if (currentSession?.mode === 'cloud' && window.notezAiBackendConfigured?.() && typeof window.notezAiIndexNote === 'function') {
-        window.notezAiIndexNote(note.id).catch(error => console.warn('Note saved, but semantic indexing will retry on the next AI request:', error));
-      }
-      return saved;
+      // The cloud save path already queues a semantic index update (debounced),
+      // so indexing here as well sent two embedding requests per save - and a
+      // demo workspace cannot be indexed at all.
+      return original.call(this, note, ...rest);
     })(persistNote);
     function showHistory(note) {
       const list = readHistory(note.id);

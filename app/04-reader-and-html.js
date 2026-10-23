@@ -867,6 +867,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const panel = nzaiEnsurePanel();
       nzai.open = true; nzai.dock = tab; panel.hidden = false;
       document.documentElement.classList.add('nzai-open');
+      nzaiApplyWidth(nzaiStoredWidth());
+      nzaiSyncSpace();
       panel.querySelectorAll('[data-dock]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.dock === tab)));
       panel.querySelector('#pane-ai').hidden = tab !== 'ai';
       panel.querySelector('#pane-voice').hidden = tab !== 'voice';
@@ -880,7 +882,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       dockShow('ai');
       if (preset && aiReady()) setTimeout(() => nzaiQuick(preset), 60);
     }
-    function nzaiClose() { const panel = $('#nz-ai'); if (panel) panel.hidden = true; nzai.open = false; document.documentElement.classList.remove('nzai-open'); }
+    function nzaiClose() { const panel = $('#nz-ai'); if (panel) panel.hidden = true; nzai.open = false; document.documentElement.classList.remove('nzai-open'); nzaiSyncSpace(); }
 
     // The dock can be scaled horizontally: drag its left edge, or focus the handle
     // and use the arrow keys. Answers get wider without shrinking text or zooming
@@ -890,22 +892,52 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     const NZAI_WIDTH_DEFAULT = 440;
     const NZAI_WIDTH_MIN = 340;
     const NZAI_WIDTH_MAX = 1180;
+    // The dock may never squeeze the notes column out of the window. Below these
+    // widths the top bar switches to its compact form instead of overflowing.
+    const NZAI_CONTENT_MIN = 520;
+    const NZAI_SIDEBAR_MIN = 250;
     // Display size scales the whole document with CSS zoom, so every geometry
     // value is converted back to layout pixels before it is compared.
     function nzaiZoom() {
       const zoom = parseFloat(getComputedStyle(document.documentElement).zoom);
       return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
     }
+    // Space the page itself needs: a readable column, plus the sidebar while it
+    // is a real column rather than an off-canvas drawer.
+    function nzaiContentFloor() {
+      // 1080px is where the sidebar becomes an off-canvas drawer.
+      return NZAI_CONTENT_MIN + (window.innerWidth <= 1080 ? 0 : NZAI_SIDEBAR_MIN);
+    }
     function nzaiWidthLimits() {
       const min = NZAI_WIDTH_MIN;
-      const available = Math.round(window.innerWidth / nzaiZoom() - 360);
+      const available = Math.round(window.innerWidth / nzaiZoom() - nzaiContentFloor());
       const max = Math.max(min, Math.min(NZAI_WIDTH_MAX, available));
       return [min, max];
+    }
+    // How much room the page has left next to the dock (layout pixels). The
+    // measurement is what the browser actually laid out, so the collapsed
+    // sidebar and a zoomed page are both accounted for.
+    function nzaiContentWidth() {
+      const column = document.querySelector('.main-column');
+      const measured = column ? Math.round(column.offsetWidth) : 0;
+      if (measured > 0) return measured;
+      const open = document.documentElement.classList.contains('nzai-open');
+      const dock = open ? nzaiReadWidth() : 0;
+      return Math.max(0, Math.round(window.innerWidth / nzaiZoom()) - dock);
+    }
+    // A squeezed page keeps its top bar usable: the subtitle, the shortcut hint
+    // and finally the search give way instead of overflowing off-screen.
+    function nzaiSyncSpace() {
+      const root = document.documentElement;
+      const width = nzaiContentWidth();
+      root.classList.toggle('nz-space-tight', width > 0 && width < 820);
+      root.classList.toggle('nz-space-cramped', width > 0 && width < 500);
     }
     function nzaiApplyWidth(px, persist = false) {
       const [min, max] = nzaiWidthLimits();
       const width = Math.round(Math.min(max, Math.max(min, Number(px) || NZAI_WIDTH_DEFAULT)));
       document.documentElement.style.setProperty('--dock-w', `${width}px`);
+      nzaiSyncSpace();
       const handle = $('#nzai-resizer');
       if (handle) {
         handle.setAttribute('aria-valuenow', String(width));
@@ -976,7 +1008,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       });
       // Re-clamp against the new window size, but keep returning to the width
       // the reader chose once there is room for it again.
-      window.addEventListener('resize', () => nzaiApplyWidth(nzaiStoredWidth()));
+      window.addEventListener('resize', () => { nzaiApplyWidth(nzaiStoredWidth()); nzaiSyncSpace(); });
     }
     // Reading size is a first-class setting, not a zoom trick: it changes the
     // assistant's type scale only, so the notes column and the rest of the app
