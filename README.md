@@ -20,22 +20,93 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 
 ## Architecture
 
-```text
-Browser / installed PWA  (index.html, styles/app.css, app/*.js)
-        │
-        ├─► Firebase Authentication — ID tokens, verified by the API
-        ├─► Firebase Realtime Database — notes and sync
-        ├─► Service worker — app-shell cache for offline reloads
-        │
-        └─► FastAPI backend  (backend/app/)
-                 │
-                 ├─► Gemini / Groq / optional Mistral — text generation
-                 │
-                 └─► RAG retrieval
-                          ├─► Embedding provider — 768 or 1024 dimensions
-                          ├─► USearch HNSW index — cosine, one per user
-                          └─► SQLite — chunk text, content hashes, queue
+```mermaid
+flowchart TD
+    subgraph CLIENT["Client — browser / installed PWA"]
+        UI["UI modules<br/>index.html · styles/app.css · app/*.js"]
+        SW["Service worker<br/>app-shell cache"]
+    end
+
+    subgraph FIREBASE["Firebase"]
+        AUTH["Authentication<br/>email · Google · anonymous guest"]
+        DB[("Realtime Database<br/>notes, folders, tags, review state")]
+    end
+
+    subgraph BACKEND["FastAPI backend — backend/app"]
+        EDGE["Auth + limits<br/>ID token verification<br/>30 chat/min · 60 embed/min"]
+        GEN["Generation<br/>provider failover chain"]
+        RAG["Automatic RAG<br/>automatic_rag.py"]
+    end
+
+    subgraph RETRIEVAL["Retrieval pipeline — per user"]
+        Q["1 Understand<br/>inventory · follow-up resolution"]
+        EMB["2 Embed query<br/>768 or 1024 dims"]
+        VDB[("3 USearch HNSW<br/>cosine · one index per user")]
+        GATE["4 Verify + gate<br/>content hash · min 0.32 cosine"]
+        CTX["5 Ground the prompt<br/>max 4 excerpts + attributes"]
+    end
+
+    subgraph PROVIDERS["AI providers"]
+        GEM["Gemini"]
+        GROQ["Groq"]
+        MIS["Mistral — optional"]
+    end
+
+    UI -->|HTTPS + ID token| EDGE
+    UI <-->|read / write| DB
+    UI -->|sign-in| AUTH
+    AUTH -->|verify token| EDGE
+    SW -.->|offline reload| UI
+    EDGE --> RAG
+    EDGE --> GEN
+    RAG --> Q --> EMB --> VDB --> GATE --> CTX
+    RAG -.->|no index or embedding down| DB
+    CTX -->|grounded prompt| GEN
+    GEN -->|default| GEM
+    GEN -.->|rate limited or rejected| GROQ
+    GEN -.->|opt-in| MIS
+    GEN -->|answer + sources| UI
+
+    classDef client fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b
+    classDef firebase fill:#fff7ed,stroke:#f59e0b,stroke-width:1.5px,color:#7c2d12
+    classDef backend fill:#ecfdf5,stroke:#10b981,stroke-width:1.5px,color:#064e3b
+    classDef retrieval fill:#eff6ff,stroke:#3b82f6,stroke-width:1.5px,color:#1e3a8a
+    classDef provider fill:#faf5ff,stroke:#a855f7,stroke-width:1.5px,color:#4c1d95
+
+    class UI,SW client
+    class AUTH,DB firebase
+    class EDGE,GEN,RAG backend
+    class Q,EMB,VDB,GATE,CTX retrieval
+    class GEM,GROQ,MIS provider
 ```
+
+Solid arrows are the request path; dashed arrows are fallbacks and background paths. The numbered nodes are
+the retrieval pipeline described in [How a question is answered](#how-a-question-is-answered).
+
+<details>
+<summary>Diagram as text (screen readers, or if the diagram does not load)</summary>
+
+```text
+Client — browser / installed PWA
+├── UI modules            index.html · styles/app.css · app/*.js
+├── Service worker        app-shell cache
+│
+├──► Firebase Authentication   email · Google · anonymous guest
+├──► Firebase Realtime Database  notes, folders, tags, review state
+└──► FastAPI backend  (backend/app)
+     ├── Auth + limits       ID token verification · 30 chat/min · 60 embed/min
+     ├── Generation          provider failover chain
+     └── Automatic RAG       automatic_rag.py
+          ├── 1 Understand   inventory · follow-up resolution
+          ├── 2 Embed query  768 or 1024 dims
+          ├── 3 USearch HNSW cosine · one index per user
+          ├── 4 Verify + gate content hash · min 0.32 cosine
+          └── 5 Ground prompt max 4 excerpts + attributes
+
+AI providers: Gemini (default) → Groq (rate limited or rejected) → Mistral (opt-in)
+```
+
+</details>
 
 ### Main components
 
