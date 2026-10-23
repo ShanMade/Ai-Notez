@@ -146,9 +146,13 @@ async def augment_prompt(
     try:
         raw_notes = await asyncio.to_thread(load_notes, uid)
         notes = _valid_notes(raw_notes)
-    except Exception:
-        # Log only the exception type/message; never log note content, prompts, or credentials.
-        logger.warning("Automatic RAG could not load current Firebase notes (%s).", "inventory query" if inventory_query else "content query", exc_info=True)
+    except Exception as exc:
+        # Avoid logging exception text, which can contain URLs or other deployment details.
+        logger.warning(
+            "Automatic RAG could not load current Firebase notes (%s; %s).",
+            "inventory query" if inventory_query else "content query",
+            type(exc).__name__,
+        )
         if inventory_query:
             return (
                 prompt
@@ -209,8 +213,8 @@ async def augment_prompt(
             if excerpts else ""
         )
         return augmented, sources
-    except Exception:
-        logger.warning("Automatic semantic note retrieval failed.", exc_info=True)
+    except Exception as exc:
+        logger.warning("Automatic semantic note retrieval failed (%s).", type(exc).__name__)
         return (
             prompt
             + "\n\nNOTE RETRIEVAL STATUS: Searching current notes failed. "
