@@ -1,7 +1,7 @@
 
     // Firebase web config - direct configuration for production
     const firebaseConfig = {
-      apiKey: "AIzaSyDKPWj_3wOxhffuzMx5DQqln2d0WmH038A",
+      apiKey: "AIzaSyAsyIrC2sPwtJcqg8x3_i-NgTEKvggGuUQ",
       authDomain: "ai-notez.firebaseapp.com",
       databaseURL: "https://ai-notez-default-rtdb.firebaseio.com",
       projectId: "ai-notez",
