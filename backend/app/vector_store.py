@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import math
 import os
@@ -9,6 +10,7 @@ import re
 import sqlite3
 import threading
 from array import array
+from html.parser import HTMLParser
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -76,13 +78,76 @@ def user_key(uid: str) -> str:
     return hashlib.sha256(uid.encode("utf-8")).hexdigest()
 
 
+class _ReadableHTML(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() in {"script", "style", "noscript", "svg", "head"}:
+            self.skip += 1
+        elif not self.skip and tag.lower() in {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
+            self.parts.append("\\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"script", "style", "noscript", "svg", "head"} and self.skip:
+            self.skip -= 1
+        elif not self.skip and tag.lower() in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4", "section"}:
+            self.parts.append("\\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip and data.strip():
+            self.parts.append(data.strip())
+
+
+def _readable_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    if not value:
+        return ""
+    if value[:1] in {"{", "["}:
+        try:
+            parsed = json.loads(value)
+            values: list[str] = []
+            def collect(item: object) -> None:
+                if isinstance(item, dict):
+                    for key, child in item.items():
+                        if isinstance(child, (str, int, float, bool)):
+                            values.append(f"{key}: {child}")
+                        else:
+                            collect(child)
+                elif isinstance(item, list):
+                    for child in item:
+                        collect(child)
+            collect(parsed)
+            if values:
+                return "\\n".join(values)
+        except (ValueError, TypeError):
+            pass
+    if "<" in value and ">" in value:
+        parser = _ReadableHTML()
+        try:
+            parser.feed(value)
+            extracted = " ".join(" ".join(parser.parts).split())
+            if extracted:
+                return extracted
+        except (ValueError, TypeError):
+            pass
+    return value
+
+
 def note_text(note: dict) -> str:
-    body = note.get("body", "")
-    if not isinstance(body, str):
-        body = ""
-    readable = note.get("htmlReadableText", "")
-    if isinstance(readable, str) and readable:
-        body = f"{body}\n{readable}"
+    body = _readable_text(note.get("body", ""))
+    readable = _readable_text(note.get("htmlReadableText", ""))
+    extra_text = []
+    for key in ("plainText", "extractedText", "fileText", "transcript", "markdown", "content"):
+        extra = _readable_text(note.get(key, ""))
+        if extra and extra not in {body, readable}:
+            extra_text.append(extra)
+    if readable:
+        body = f"{body}\\n{readable}".strip()
     tags = note.get("tags", [])
     if not isinstance(tags, (list, tuple)):
         tags = []
@@ -92,8 +157,9 @@ def note_text(note: dict) -> str:
         str(note.get("folderPath") or ""),
         " ".join(str(tag) for tag in tags if isinstance(tag, (str, int, float))),
         body,
+        *extra_text,
     ]
-    return "\n".join(part for part in fields if part).strip()[:200_000]
+    return "\\n".join(part for part in fields if part).strip()[:200_000]
 
 
 def split_chunks(text: str) -> list[str]:
