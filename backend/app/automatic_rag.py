@@ -28,8 +28,21 @@ def is_inventory_query(query: str) -> bool:
 
 
 def _extract_user_query(prompt: str) -> str:
-    match = re.search(r"(?:^|\n)USER:\s*([\s\S]*)$", prompt)
-    return (match.group(1) if match else prompt).strip()[-1200:]
+    # The prompt can contain prior turns; only the last USER block determines intent.
+    matches = list(re.finditer(r"(?:^|\n)USER:\s*", prompt))
+    if not matches:
+        return prompt.strip()[-1200:]
+    start = matches[-1].end()
+    tail = prompt[start:]
+    boundary = re.search(r"\n(?:ASSISTANT|SYSTEM|USER):", tail)
+    if boundary:
+        tail = tail[:boundary.start()]
+    return tail.strip()[-1200:]
+
+
+def _compact(value: object, limit: int) -> str:
+    # Prevent user-controlled metadata from injecting fake inventory lines.
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 
 def _valid_notes(value: object) -> dict[str, dict[str, Any]]:
@@ -56,7 +69,7 @@ def _inventory_prompt(notes: dict[str, dict[str, Any]]) -> tuple[str, list[dict[
     ordered = sorted(
         notes.items(),
         key=lambda pair: (
-            str(pair[1].get("title") or pair[1].get("name") or "Untitled").casefold(),
+            _compact(pair[1].get("title") or pair[1].get("name") or "Untitled", 180).casefold(),
             pair[0],
         ),
     )
@@ -69,15 +82,15 @@ def _inventory_prompt(notes: dict[str, dict[str, Any]]) -> tuple[str, list[dict[
     ]
     sources: list[dict[str, object]] = []
     for number, (note_id, note) in enumerate(shown, 1):
-        title = str(note.get("title") or note.get("name") or "Untitled note").strip()[:180]
-        folder = str(note.get("folderPath") or note.get("folder") or "").strip()[:160]
-        subject = str(note.get("subject") or "").strip()[:120]
+        title = _compact(note.get("title") or note.get("name") or "Untitled note", 180)
+        folder = _compact(note.get("folderPath") or note.get("folder") or "", 160)
+        subject = _compact(note.get("subject"), 120)
         tags = note.get("tags", [])
         if isinstance(tags, str):
             tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
         if not isinstance(tags, (list, tuple)):
             tags = []
-        clean_tags = [str(tag).strip()[:60] for tag in tags if isinstance(tag, (str, int, float)) and str(tag).strip()][:12]
+        clean_tags = [_compact(tag, 60) for tag in tags if isinstance(tag, (str, int, float)) and str(tag).strip()][:12]
         date = _date_value(note)
         metadata = []
         if folder:
@@ -196,7 +209,7 @@ async def augment_prompt(
         logger.warning("Automatic semantic note retrieval failed.", exc_info=True)
         return (
             prompt
-            + "\\n\\nNOTE RETRIEVAL STATUS: Searching current notes failed. "
+            + "\n\nNOTE RETRIEVAL STATUS: Searching current notes failed. "
             "Do not fabricate note contents or claim that no matching notes exist. "
             "Tell the user note retrieval is temporarily unavailable.",
             [],
