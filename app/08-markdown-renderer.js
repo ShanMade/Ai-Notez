@@ -64,6 +64,75 @@
     }
   }
 
+  // ---- Math ---------------------------------------------------------------
+  // Study notes and answers are full of LaTeX: \(T(K)=t°C+273.15\),
+  // \[E=mc^2\], \begin{aligned}...\end{aligned}. Markdown would eat the
+  // backslashes, underscores and asterisks inside it, so math is lifted out of
+  // the source first, rendered with KaTeX once the HTML exists, and swapped
+  // back in. Code spans are left alone.
+  function looksLikeMath(tex) {
+    const body = String(tex == null ? '' : tex);
+    if (!body || body.length > 240) return false;
+    if (/^\s|\s$/.test(body)) return false;              // "$ 5 $" is not math
+    if (/^\d+(?:[.,]\d+)?$/.test(body)) return false;     // "$5$" is a price
+    return /[\\^_={}]/.test(body) || /^[A-Za-z]$/.test(body);
+  }
+
+  function protectMath(source, bag, seed) {
+    if (!source) return source;
+    // Fenced blocks and inline code stay literal, math inside them included.
+    const segments = [];
+    const codeRe = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
+    let last = 0;
+    let match;
+    while ((match = codeRe.exec(source))) {
+      segments.push({ text: source.slice(last, match.index), code: false });
+      segments.push({ text: match[0], code: true });
+      last = codeRe.lastIndex;
+    }
+    segments.push({ text: source.slice(last), code: false });
+    const stash = tex => `${seed}m${bag.push(tex) - 1}z`;
+    return segments.map(segment => {
+      if (segment.code) return segment.text;
+      let text = segment.text;
+      const display = tex => stash({ tex: tex.trim(), display: true });
+      const inline = tex => stash({ tex: tex.trim(), display: false });
+      text = text.replace(/\$\$([\s\S]{1,4000}?)\$\$/g, (_, tex) => display(tex));
+      text = text.replace(/\\\[([\s\S]{1,4000}?)\\\]/g, (_, tex) => display(tex));
+      text = text.replace(/\\\(([\s\S]{1,4000}?)\\\)/g, (_, tex) => inline(tex));
+      text = text.replace(/\\begin\{([A-Za-z*]+)\}([\s\S]{1,4000}?)\\end\{\1\}/g, full => display(full));
+      text = text.replace(/\$([^$\n]{1,240}?)\$/g, (full, tex) => (looksLikeMath(tex) ? inline(tex) : full));
+      return text;
+    }).join('');
+  }
+
+  function renderMath(tex, display) {
+    const katex = typeof window !== 'undefined' ? window.katex : null;
+    if (katex && typeof katex.renderToString === 'function') {
+      try {
+        return katex.renderToString(tex, {
+          displayMode: !!display,
+          throwOnError: false,
+          strict: 'ignore',
+          trust: false,
+          maxSize: 12,
+          maxExpand: 200
+        });
+      } catch {}
+    }
+    // KaTeX missing or unhappy: show the source rather than a broken formula.
+    return `<code class="nz-math-src">${esc(tex)}</code>`;
+  }
+
+  function restoreMath(html, bag, seed) {
+    if (!bag.length || !html) return html;
+    const pattern = new RegExp(`${seed}m(\\d+)z`, 'g');
+    return html.replace(pattern, (full, index) => {
+      const item = bag[Number(index)];
+      return item ? renderMath(item.tex, item.display) : full;
+    });
+  }
+
   // Main markdown to HTML function
   window.markdownToHtmlSafe = function markdownToHtmlSafe(markdown) {
     const inline = source => {
@@ -96,7 +165,10 @@
       return text;
     };
 
-    const lines = String(markdown || '').replace(/\r/g, '').split('\n');
+    const math = [];
+    const mathSeed = `nzm${Math.random().toString(36).slice(2, 8)}`;
+    const source = protectMath(String(markdown || ''), math, mathSeed);
+    const lines = source.replace(/\r/g, '').split('\n');
     const output = [];
     let paragraph = [];
     let listType = '';
@@ -340,7 +412,7 @@
     flushQuote(); 
     flushTable();
 
-    const result = output.join('\n');
+    const result = restoreMath(output.join('\n'), math, mathSeed);
     return result || '<p class="subtle">There is no content in this note yet. Select <strong>Edit</strong> to add your first thought.</p>';
   };
 
