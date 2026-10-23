@@ -10,9 +10,9 @@ async def augment_prompt(uid: str, prompt: str, has_images: bool, *,
                          embed_texts: Callable[[list[str]], Awaitable[list[list[float]]]],
                          embed_query: Callable[[str], Awaitable[list[float]]],
                          note_text: Callable, max_notes: int, max_results: int) -> str:
-    if has_images or not prompt.strip() or re.search(r"NUMBERED NOTES FROM THE USER|<note>|\\bPassage:", prompt, re.I):
+    if has_images or not prompt.strip() or re.search(r"NUMBERED NOTES FROM THE USER|<note>|\bPassage:", prompt, re.I):
         return prompt
-    match = re.search(r"(?:^|\\n)USER:\\s*([\\s\\S]*)$", prompt)
+    match = re.search(r"(?:^|\n)USER:\s*([\s\S]*)$", prompt)
     query = (match.group(1) if match else prompt).strip()[-1200:]
     if len(query) < 3:
         return prompt
@@ -38,7 +38,7 @@ async def augment_prompt(uid: str, prompt: str, has_images: bool, *,
                 continue
             excerpt = str(item.get("text") or "").strip()[:1600]
             if excerpt:
-                excerpts.append(f"[{len(excerpts)+1}] {item.get('title') or 'Untitled'}\\n{excerpt}")
-        return prompt + ("\\n\\nRelevant notes (cite bracketed numbers):\\n" + "\\n\\n".join(excerpts) if excerpts else "")
+                excerpts.append(f"[{len(excerpts)+1}] {item.get('title') or 'Untitled'}\n{excerpt}")
+        return prompt + ("\n\nRelevant notes (cite bracketed numbers):\n" + "\n\n".join(excerpts) if excerpts else "")
     except Exception:
         return prompt
