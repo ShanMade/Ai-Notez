@@ -1096,6 +1096,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const provider = nzai.tab, info = AI_PROVIDERS[provider], key = aiKey(provider), pref = aiModelPref(provider);
       const models = [...new Set([...aiKnownModels(provider), ...info.models, pref].filter(Boolean))];
       const tabs = Object.entries(AI_PROVIDERS).map(([id, item]) => `<button type="button" class="nzai-chip ${id === provider ? 'on' : ''}" data-nzai="tab" data-p="${id}">${item.label}${aiKey(id) ? ' ✓' : ''}</button>`).join('');
+      const sourceBlock = managedAvailable
+        ? `<div class="nzai-source" role="radiogroup" aria-label="AI source"><button type="button" role="radio" aria-checked="${!byok}" class="nzai-src ${!byok ? 'on' : ''}" data-nzai="source" data-v="managed"><b>NotezAi (default)</b><small>Included. Chat, note tools and Voice-to-Note. Works as a guest or signed in.</small></button><button type="button" role="radio" aria-checked="${byok}" class="nzai-src ${byok ? 'on' : ''}" data-nzai="source" data-v="byok"><b>My own key (BYOK)</b><small>Gemini or Groq. Requests go straight to your provider, including Voice-to-Note.</small></button></div>`
+        : '';
       const managedBlock = !byok
         ? `<div class="nzai-keybox"><b>Using NotezAi</b><small>No API key is needed.${aiBackendSession() ? '' : ' You are using it as a guest; sign in to also sync notes and build the semantic index.'}</small>${aiBackendSession() ? '<div class="nzai-actions"><button type="button" data-nzai="check-backend">Check service</button><button type="button" data-nzai="rebuild-index">Build / refresh semantic index</button></div>' : ''}</div>`
         : '';
