@@ -849,7 +849,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         if (nzai.stick) nzai.unread = false;
         nzaiSyncJump();
       }, true);
-      panel.addEventListener('mousedown', event => { const item = event.target.closest('[data-slash]'); if (item) { event.preventDefault(); const key = item.dataset.slash; const cmd = NZAI_COMMANDS.find(c => c[2] === key); const input = $('#nzai-input'); if (input) { input.value = ''; } $('#ai-slash').hidden = true; nzaiRunKey(key); } });
+      panel.addEventListener('mousedown', event => { const item = event.target.closest('[data-slash]'); if (item) { event.preventDefault(); const key = item.dataset.slash; const input = $('#nzai-input'); if (input) { input.value = ''; } $('#ai-slash').hidden = true; nzaiRunKey(key); } });
       panel.addEventListener('keydown', event => {
         const menu = $('#ai-slash');
         if (menu && !menu.hidden && event.target.id === 'nzai-input') {
@@ -1017,16 +1017,71 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzaiRenderChat(body);
     }
     const nzaiScopeNote = () => notes.find(note => note.id === nzai.noteId) || null;
-    const NZAI_SUGGEST = {
-      note: [['summarize', 'Summarize', 'The five ideas that matter'], ['keypoints', 'Key points', 'What to remember for a test'], ['quiz', 'Quiz me', 'Practice one question at a time'], ['mcq', 'Make MCQs', 'Exam-style questions with answers']],
-      library: [['plan', 'Plan my day', 'A time-blocked study plan'], ['due', 'What is due today?', 'Reviews waiting for you'], ['record', 'Record a lecture', 'Live transcript with speakers'], ['ask', 'Ask my library', 'Answers cite the notes they use']]
+    // ---- Quick commands -------------------------------------------------
+    // One registry drives the welcome cards, the quick bar, the slash menu and
+    // the router, so a command cannot exist in one place and be dead in another.
+    const NZAI_ICON = {
+      list: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+      check: '<path d="M5 12l4 4 10-10"/>',
+      quiz: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.01"/>',
+      mcq: '<path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/>',
+      cards: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M8 10h8M8 14h5"/>',
+      bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.3 1 2.1h5c0-.8.4-1.6 1-2.1A6 6 0 0 0 12 3Z"/>',
+      pen: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+      spell: '<path d="M4 19 9 5l5 14M5.6 14h6.8"/><path d="M17 19h3"/>',
+      title: '<path d="M5 6h14M12 6v13"/><path d="M9 19h6"/>',
+      tag: '<path d="M4 12V5a1 1 0 0 1 1-1h7l8 8-8 8-8-8Z"/><circle cx="8.5" cy="8.5" r="1.3"/>',
+      globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 6 3.8 9S14.5 18.3 12 21c-2.5-2.7-3.8-6-3.8-9S9.5 5.7 12 3Z"/>',
+      plan: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+      due: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      record: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+      ask: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+      more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>'
     };
+    const nzaiIcon = (name, size = 16) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${NZAI_ICON[name] || NZAI_ICON.bulb}</g></svg>`;
+    const NZAI_GROUPS = { note: 'This note', study: 'Study', library: 'Library' };
     const NZAI_COMMANDS = [
-      ['/summarize', 'Summarize this note', 'summarize', 'note'], ['/keypoints', 'Key points', 'keypoints', 'note'], ['/quiz', 'Quiz me one question at a time', 'quiz', 'note'],
-      ['/mcq', 'Multiple-choice questions', 'mcq', 'note'], ['/flashcards', 'Flashcards from this note', 'flashcards', 'note'], ['/explain', 'Explain simply', 'explain', 'note'],
-      ['/improve', 'Rewrite for clarity', 'improve', 'note'], ['/titles', 'Suggest titles', 'title', 'note'], ['/tags', 'Suggest tags', 'tags', 'note'],
-      ['/plan', 'Plan my day', 'plan', 'library'], ['/due', 'What is due today?', 'due', 'library'], ['/record', 'Record a lecture', 'record', 'library'], ['/ask', 'Ask my library', 'ask', 'library']
+      { id: 'summarize', slash: '/summarize', label: 'Summarize', hint: 'The ideas that matter', group: 'note', icon: 'list', needsNote: true, pin: true },
+      { id: 'keypoints', slash: '/keypoints', label: 'Key points', hint: 'What to remember for a test', group: 'note', icon: 'check', needsNote: true, pin: true },
+      { id: 'mcq', slash: '/mcq', label: 'Make MCQs', hint: 'Exam-style questions with answers', group: 'note', icon: 'mcq', needsNote: true, pin: true },
+      { id: 'flashcards', slash: '/flashcards', label: 'Flashcards', hint: 'Q/A cards for quick recall', group: 'note', icon: 'cards', needsNote: true },
+      { id: 'explain', slash: '/explain', label: 'Explain simply', hint: 'Plain language, one example', group: 'note', icon: 'bulb', needsNote: true },
+      { id: 'improve', slash: '/improve', label: 'Improve writing', hint: 'Clearer, same facts', group: 'note', icon: 'pen', needsNote: true },
+      { id: 'grammar', slash: '/grammar', label: 'Fix grammar', hint: 'Spelling and grammar only', group: 'note', icon: 'spell', needsNote: true },
+      { id: 'title', slash: '/titles', label: 'Suggest titles', hint: 'Five options you can apply', group: 'note', icon: 'title', needsNote: true },
+      { id: 'tags', slash: '/tags', label: 'Suggest tags', hint: 'Add searchable tags', group: 'note', icon: 'tag', needsNote: true },
+      { id: 'english', slash: '/english', label: 'To English', hint: 'Translate the note', group: 'note', icon: 'globe', needsNote: true },
+      { id: 'urdu', slash: '/urdu', label: 'To Urdu', hint: 'Translate the note', group: 'note', icon: 'globe', needsNote: true },
+      { id: 'quiz', slash: '/quiz', label: 'Quiz me', hint: 'One question at a time', group: 'study', icon: 'quiz', needsNote: true, kind: 'quiz', pin: true },
+      { id: 'plan', slash: '/plan', label: 'Plan my day', hint: 'A time-blocked study plan', group: 'library', icon: 'plan', kind: 'plan', pin: true },
+      { id: 'due', slash: '/due', label: 'What is due', hint: 'Your review queue, from the app', group: 'library', icon: 'due', kind: 'due', pin: true },
+      { id: 'ask', slash: '/ask', label: 'Ask my library', hint: 'Answers cite the notes they use', group: 'library', icon: 'ask', kind: 'ask', pin: true },
+      { id: 'record', slash: '/record', label: 'Record a lecture', hint: 'Live transcript with speakers', group: 'library', icon: 'record', kind: 'record', pin: true }
     ];
+    const NZAI_COMMAND_MAP = Object.fromEntries(NZAI_COMMANDS.map(cmd => [cmd.id, cmd]));
+    // The note a command should act on: the one the assistant is scoped to,
+    // otherwise the note open in the reader. Without this, "Summarize" on a
+    // library-scoped panel used to send an empty prompt.
+    const nzaiCommandNote = () => (nzai.scope === 'note' ? nzaiScopeNote() : null) || notes.find(note => note.id === activeId) || null;
+    function nzaiCommandNotice(text) { nzai.notice = text; nzai.view = 'chat'; nzaiRender(); }
+    function nzaiRunCommand(id) {
+      const cmd = NZAI_COMMAND_MAP[id];
+      if (!cmd || nzai.busy) return;
+      if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to run quick actions.'; nzaiRender(); return; }
+      if (cmd.kind === 'record') return openRecorder();
+      if (cmd.kind === 'ask') { const input = $('#nzai-input'); if (input) { input.focus(); input.setSelectionRange?.(input.value.length, input.value.length); } return; }
+      if (cmd.kind === 'plan') return nzaiAskPlan();
+      if (cmd.kind === 'due') return nzaiAnswerDue('What is due today?', notes.filter(note => isReviewDue(note)));
+      const note = nzaiCommandNote();
+      if (cmd.needsNote && !note) return nzaiCommandNotice('Open a note first. This action works on the note you are reading.');
+      if (cmd.kind === 'quiz') {
+        nzai.scope = 'note'; nzai.noteId = note.id; nzai.quiz = note.id;
+        return nzaiAsk('Start the quiz. Ask me the first question.', { note });
+      }
+      if (!AI_TASKS[id]) return nzaiCommandNotice('That action is not available yet.');
+      nzai.scope = 'note'; nzai.noteId = note.id;
+      return nzaiAsk(AI_TASKS[id].label, { task: id, note });
+    }
     const nzaiDayLabel = t => {
       const d = new Date(t), today = new Date(), yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
       const same = (a, b) => a.toDateString() === b.toDateString();
@@ -1052,7 +1107,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const provider = aiUsesManaged() ? 'NotezAi' : aiReady() ? `${AI_PROVIDERS[aiActive()]?.label || 'AI'} · ${aiModelPref(aiActive()) || 'auto model'}` : 'No key yet';
       const scope = '';
       const sugIcons = { summarize: '<path d="M4 6h16M4 12h16M4 18h10"/>', keypoints: '<path d="M5 12l4 4 10-10"/>', quiz: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.01"/>', mcq: '<path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/>', plan: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', due: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', record: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', ask: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>' };
-      const welcome = `<div class="ai-welcome"><h3>${inNote ? 'What would you like<br><em>to understand?</em>' : 'What would you like<br><em>to know?</em>'}</h3><p>${inNote ? `Reading <b>${esc(note.title)}</b>. Answers come only from this note, or swap to your library above.` : 'Answers come from your notes, and every answer cites the notes it used.'}</p><div class="ai-suggest">${NZAI_SUGGEST[inNote ? 'note' : 'library'].map(([key, title, hint]) => `<button type="button" class="ai-card" data-nzai="suggest" data-key="${key}" ${disabled} aria-label="${esc(title)}" title="${esc(title)}"><span class="ai-card-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${sugIcons[key] || ''}</g></svg></span><span class="ai-card-tx"><b>${esc(title)}</b><small>${esc(hint)}</small></span></button>`).join('')}</div><p class="ai-hint">Type <kbd>/</kbd> in the box for quick commands.</p></div>`;
+      const suggestIds = inNote ? ['summarize', 'keypoints', 'quiz', 'mcq'] : ['plan', 'due', 'record', 'ask'];
+      const suggestCards = suggestIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd => `<button type="button" class="ai-card" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)}"><span class="ai-card-ic" aria-hidden="true">${nzaiIcon(cmd.icon, 17)}</span><span class="ai-card-tx"><b>${esc(cmd.label)}</b><small>${esc(cmd.hint)}</small></span><span class="ai-card-go" aria-hidden="true">→</span></button>`).join('');
+      const welcome = `<div class="ai-welcome"><div class="ai-welcome-head"><h3>${inNote ? 'What would you like<br><em>to understand?</em>' : 'What would you like<br><em>to know?</em>'}</h3><p>${inNote ? `Reading <b>${esc(note.title)}</b>. Answers come only from this note, or swap to your library above.` : 'Answers come from your notes, and every answer cites the notes it used.'}</p></div><div class="ai-suggest">${suggestCards}</div><p class="ai-hint">Type <kbd>/</kbd> for every command, or press <kbd>⌘</kbd><kbd>K</kbd> to find a note.</p></div>`;
       let thread = '';
       if (!messages.length) thread = welcome;
       else {
@@ -1062,7 +1119,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const quizStop = nzai.quiz && inNote ? '<button type="button" class="ai-action danger" data-nzai="stop-quiz">Stop quiz</button>' : '';
       const notice = nzai.notice ? `<div class="ai-notice" role="status">${esc(nzai.notice)}</div>` : '';
       const editing = nzai.editAt != null ? `<div class="ai-editing"><span>Editing a question. Sending replaces it and everything after it.</span><button type="button" class="ai-action" data-nzai="cancel-edit">Cancel</button></div>` : '';
-      const quick = messages.length ? `<div class="ai-quickbar" aria-label="Quick actions" role="toolbar">${(inNote ? [['summarize', 'Summarize'], ['keypoints', 'Key points'], ['quiz', 'Quiz me'], ['mcq', 'MCQs'], ['flashcards', 'Flashcards'], ['explain', 'Explain']] : [['plan', 'Plan my day'], ['due', 'Due today'], ['record', 'Record a lecture']]).map(([key, label]) => `<button type="button" class="ai-qchip" data-nzai="suggest" data-key="${key}" ${disabled} aria-label="${esc(label)}" title="${esc(label)}">${esc(label)}</button>`).join('')}</div>` : '';
+      const quickIds = inNote ? ['summarize', 'keypoints', 'mcq', 'flashcards', 'explain', 'improve'] : ['plan', 'due', 'record'];
+      const quick = `<div class="ai-quickbar" aria-label="Quick actions" role="toolbar">${quickIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd => `<button type="button" class="ai-qchip" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)} · ${esc(cmd.hint)}">${nzaiIcon(cmd.icon, 14)}<span>${esc(cmd.label)}</span></button>`).join('')}<button type="button" class="ai-qchip ai-qchip-more" data-nzai="slash-open" ${disabled} aria-label="All commands" title="All commands"><b>/</b><span>All</span></button></div>`;
       const footLine = `${aiUsesManaged() ? 'NotezAi' : (AI_PROVIDERS[aiActive()]?.label || 'AI') + ' (your key)'} can make mistakes. Check important facts.`;
       const slash = `<div class="ai-slash" id="ai-slash" role="listbox" aria-label="Commands" hidden></div>`;
       const sendIcon = busy
@@ -1071,6 +1129,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       body.innerHTML = `${scope}${quizStop ? `<div class="ai-quizbar">Quiz in progress${quizStop}</div>` : ''}${notice}
         <div class="ai-thread-wrap"><div class="ai-thread" id="nzai-messages" aria-live="polite" role="region">${thread}${thinking}</div><button type="button" class="ai-jump" id="ai-jump" hidden data-nzai="jump" aria-label="Scroll to latest"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="ai-jump-t">Latest</span></button></div>
         ${editing}
+        ${quick}
         <div class="ai-composer-wrap">${slash}<div class="ai-composer"><textarea id="nzai-input" rows="1" placeholder="${inNote ? 'Ask about this note, or type /' : 'Ask your notes, or type /'}" aria-label="Message NotezAi" ${disabled} style="height: auto; min-height: 42px; max-height: 160px;"></textarea><button type="button" class="ai-ibtn" data-nzai="slash-open" aria-label="Slash commands" title="Commands" ${disabled}>/</button><button type="button" class="ai-ibtn" data-nzai="record" aria-label="Record a voice note" title="Record a voice note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></button><button type="button" class="ai-send${busy ? ' stop' : ''}" data-nzai="${busy ? 'stop' : 'send'}" ${!busy && false ? 'disabled' : ''} aria-label="${busy ? 'Stop generating' : 'Send message'}" title="${busy ? 'Stop' : 'Send (Enter)'}">${sendIcon}</button></div></div>
         ${messages.length ? '' : `<p class="ai-foot">${esc(footLine)}</p>`}`;
       const threadEl = $('#nzai-messages', body); if (threadEl) { threadEl.scrollTop = (nzai.stick || prevTop === null) ? threadEl.scrollHeight : prevTop; nzaiSyncJump(); }
@@ -1113,6 +1172,24 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         : '';
       return `<div class="ai-sources" data-open="${open}" role="group" aria-label="Source notes used in this answer"><div class="ai-sources-head"><span class="ai-sources-title">Sources</span><span class="ai-sources-count" aria-hidden="true">${list.length}</span>${toggle}</div><div class="ai-src-grid" id="${gridId}">${chips}</div></div>`;
     }
+    // Quick-command results get their own controls: title and tag suggestions
+    // become chips you can apply, and rewrites get a one-click apply with undo.
+    const NZAI_APPLY_TASKS = new Set(['improve', 'grammar', 'english', 'urdu']);
+    function nzaiTaskCard(msg, index) {
+      const note = nzaiScopeNote();
+      if (!note || nzai.reveal) return '';
+      const suggestions = Array.isArray(msg.suggestions) ? msg.suggestions : null;
+      if (suggestions && suggestions.length) {
+        const action = msg.task === 'title' ? 'apply-title' : 'apply-tags';
+        const applied = Array.isArray(msg.appliedValues) ? msg.appliedValues : [];
+        const chips = suggestions.map(value => `<button type="button" class="ai-suggest-chip${applied.includes(value) ? ' on' : ''}" data-nzai="${action}" data-i="${index}" data-value="${esc(value)}" title="${msg.task === 'title' ? 'Use this title' : 'Add this tag'}" aria-pressed="${applied.includes(value)}">${esc(value)}</button>`).join('');
+        return `<div class="ai-task-card"><div class="ai-task-head"><b>${msg.task === 'title' ? 'Apply a title' : 'Add tags'}</b><span>${applied.length ? 'Applied' : 'Tap to apply'}</span></div><div class="ai-task-chips">${chips}</div></div>`;
+      }
+      if (NZAI_APPLY_TASKS.has(msg.task)) {
+        return `<div class="ai-task-card"><div class="ai-task-head"><b>${msg.task === 'improve' ? 'Rewritten note' : msg.task === 'grammar' ? 'Corrected note' : 'Translated note'}</b><span>The attached file is never changed</span></div><div class="ai-task-actions"><button type="button" class="ai-action primary" data-nzai="apply-body" data-i="${index}">Apply to note</button><button type="button" class="ai-action" data-nzai="replace" data-i="${index}">Replace without undo</button></div></div>`;
+      }
+      return '';
+    }
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
@@ -1126,7 +1203,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
       const tools = msg.text && !msg.error && !revealing ? `<div class="ai-actions-row"><button type="button" class="ai-action ai-ic" data-nzai="copy" data-i="${index}" aria-label="Copy answer" title="Copy"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="save" data-i="${index}" aria-label="Save answer as note" title="Save as note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M12 11v6M9 14h6"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="regen" data-i="${index}" aria-label="Regenerate answer" title="Regenerate"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></g></svg></button><span class="ai-fb" role="group" aria-label="Rate this answer"><button type="button" class="ai-action ai-ic${msg.fb === 'up' ? ' on' : ''}" data-nzai="fb" data-fb="up" data-i="${index}" aria-pressed="${msg.fb === 'up'}" aria-label="Helpful" title="Helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10Z"/><path d="M7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7"/></g></svg></button><button type="button" class="ai-action ai-ic${msg.fb === 'down' ? ' on' : ''}" data-nzai="fb" data-fb="down" data-i="${index}" aria-pressed="${msg.fb === 'down'}" aria-label="Not helpful" title="Not helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h4v11Z"/><path d="M17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17"/></g></svg></button></span>${note && nzai.scope === 'note' ? `<button type="button" class="ai-action ai-txt" data-nzai="replace" data-i="${index}" title="Replace this note's text with this answer">Use as note text</button>` : ''}</div>` : '';
       const retryBtn = msg.error ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="retry" data-i="${index}" aria-label="Retry this request">Retry</button></div>` : '';
-      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-body"><div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
+      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-body"><div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${nzaiTaskCard(msg, index)}${folderAction}${tools}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
     }
     // Typing reveal: new answers appear word by word; Stop shows the full text at once.
     function nzaiStartReveal() {
@@ -1155,18 +1232,19 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     function nzaiSlash(query) {
       const menu = $('#ai-slash'); if (!menu) return;
-      const note = !!nzaiScopeNote() && nzai.scope === 'note';
-      const items = NZAI_COMMANDS.filter(([cmd, , , scope]) => cmd.startsWith(query) && (scope === 'library' || note));
+      const note = nzaiCommandNote();
+      const q = String(query || '').replace(/^\//, '').toLowerCase();
+      const items = NZAI_COMMANDS.filter(cmd => (!cmd.needsNote || note) && (!q || cmd.id.startsWith(q) || cmd.slash.slice(1).startsWith(q) || cmd.label.toLowerCase().includes(q)));
       if (!items.length) { menu.hidden = true; return; }
-      menu.innerHTML = items.map(([cmd, label, key], i) => `<button type="button" role="option" class="ai-slash-item${i === 0 ? ' on' : ''}" data-slash="${key}"><b>${esc(cmd)}</b><span>${esc(label)}</span></button>`).join('');
+      let lastGroup = '', html = '<div class="ai-slash-hint"><span>Commands</span><span>↑↓ to move · Enter to run · Esc to close</span></div>';
+      items.forEach((cmd, i) => {
+        if (cmd.group !== lastGroup) { html += `<div class="ai-slash-group">${esc(NZAI_GROUPS[cmd.group] || cmd.group)}</div>`; lastGroup = cmd.group; }
+        html += `<button type="button" role="option" class="ai-slash-item${i === 0 ? ' on' : ''}" data-slash="${cmd.id}"><span class="ai-slash-ic">${nzaiIcon(cmd.icon, 15)}</span><b>${esc(cmd.slash)}</b><span>${esc(cmd.hint)}</span></button>`;
+      });
+      menu.innerHTML = html;
       menu.hidden = false;
     }
-    function nzaiRunKey(key) {
-      if (key === 'record') return openRecorder();
-      if (key === 'ask') return $('#nzai-input')?.focus();
-      if (key === 'quiz') { const note = nzaiScopeNote(); if (note) { nzai.quiz = note.id; return nzaiAsk('Start the quiz. Ask me the first question.'); } return; }
-      return nzaiQuick(key);
-    }
+    function nzaiRunKey(key) { return nzaiRunCommand(key); }
     function nzaiRenderHistory(body) {
       const chats = nzaiReadChats();
       let lastDay = '', rows = '';
@@ -1255,13 +1333,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       el.textContent = messages[index];
     }
 
-    async function nzaiAsk(question, { task = '', editAt = null } = {}) {
+    async function nzaiAsk(question, { task = '', editAt = null, note: forcedNote = null } = {}) {
       if (nzai.busy) return;
       nzaiStopReveal();
       const run = nzai.run = (nzai.run || 0) + 1;
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
-      const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
+      const note = forcedNote || (nzai.scope === 'note' ? nzaiScopeNote() : null);
       const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+(?:notes|files)\b(?![^?.!]*\b(?:about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
@@ -1375,17 +1453,42 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         chat.messages.push({ role: 'user', text: task ? (AI_TASKS[task]?.label || 'Quick action') + (note ? ` · ${note.title}` : '') : question, t: Date.now() });
       });
       nzaiRender();
+      const taskDef = task ? AI_TASKS[task] : null;
+      let taskText = '';
+      if (taskDef) {
+        // The old task path read `note.body` directly, so summaries of PDF and
+        // PPTX notes were sent with an empty <note> block.
+        taskText = String(await notesTextForAi(note) || '').trim();
+        if (note && !taskText) {
+          nzai.busy = false;
+          if (nzai.thinkingInterval) { clearInterval(nzai.thinkingInterval); nzai.thinkingInterval = null; }
+          nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', t: Date.now(), text: `**${note.title}** has no readable text yet.\n\nScanned PDFs and images have no text layer, and an empty note has nothing to work on. Try a text PDF, a .pptx, or type the text into the note first.` }));
+          nzaiRender();
+          return;
+        }
+      }
       try {
-        const taskDef = task ? AI_TASKS[task] : null;
-        const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : (hasNotes ? context : '')}` : prompt, { json: Boolean(taskDef?.json) });
+        const taskLimit = aiActive() === 'groq' ? 9000 : 40000;
+        const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\nNote title: ${note.title}\n<note>\n${taskText.slice(0, taskLimit)}\n</note>` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
         if (Array.isArray(answer.sources) && answer.sources.length) {
           sources = answer.sources.map((source, index) => ({ n: index + 1, id: String(source.id || ''), title: String(source.title || 'Untitled'), folderPath: String(source.folderPath || '') })).filter(source => source.id);
         }
         // Add retrieval metadata to the response if available
+        let bodyText = answer.text;
+        let suggestions = null;
+        if (task === 'title' || task === 'tags') {
+          try {
+            const list = parseJsonArray(answer.text).map(item => String(item || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+            const unique = [...new Set(list)].slice(0, task === 'title' ? 5 : 8);
+            if (unique.length) { suggestions = unique; bodyText = unique.map((item, i) => `${i + 1}. ${item}`).join('\n'); }
+          } catch { /* a plain list is still readable */ }
+        }
         const messageData = {
           role: 'assistant',
-          text: answer.text,
+          text: bodyText,
+          task: taskDef ? task : '',
+          suggestions,
           model: `${AI_PROVIDERS[answer.provider]?.label || ''} \u00b7 ${answer.model}`,
           sources,
           replace: Boolean(taskDef?.replace),
@@ -1424,13 +1527,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       nzaiAsk(text);
     }
-    async function nzaiQuick(taskKey) {
-      if (taskKey === 'plan') return nzaiAskPlan();
-      if (taskKey === 'due') return nzaiAnswerDue('What is due today?', notes.filter(note => isReviewDue(note)));
-      if (!AI_TASKS[taskKey]) return;
-      if (!nzaiScopeNote()) { nzai.scope = 'library'; }
-      return nzaiAsk(AI_TASKS[taskKey].label, { task: taskKey });
-    }
+    async function nzaiQuick(taskKey) { return nzaiRunCommand(taskKey); }
     function nzaiAskPlan() { nzai.scope = 'library'; return nzaiAsk(planPrompt()); }
     // The review queue lives on this device, so it is answered from `notes` here
     // instead of being left to the model, which can only guess (and used to
@@ -1574,6 +1671,37 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const created = normalizeNote({ id: uid(), title: `${note ? note.title + ' — ' : ''}NotezAi`, subject: note?.subject || 'NotezAi', folderPath: note?.folderPath || 'NotezAi', tags: ['notezai'], kind: 'markdown', body: msg.text, createdAt: stamp, updatedAt: stamp, lastViewedAt: 0 });
         notes = [created, ...notes]; addFolderPath(created.folderPath);
         persistNote(created).catch(() => toast('Saved locally; sync is queued.', 'error')); renderEverything(); toast('Saved as a new note.'); return;
+      }
+      if (act === 'apply-title' || act === 'apply-tags') {
+        const chat = nzaiChat(), idx = Number(el.dataset.i), msg = chat?.messages[idx], note = nzaiScopeNote();
+        const value = String(el.dataset.value || '').trim();
+        if (!msg || !note || !value) return;
+        const before = JSON.parse(JSON.stringify(note));
+        if (act === 'apply-title') { note.title = value.slice(0, 180); }
+        else { note.tags = [...new Set([...(Array.isArray(note.tags) ? note.tags : []), value.slice(0, 40)])].slice(0, 30); }
+        note.updatedAt = Date.now();
+        const applied = Array.isArray(msg.appliedValues) ? msg.appliedValues : [];
+        nzaiUpdateChat(c => { const m = c.messages[idx]; if (m) m.appliedValues = [...new Set([...applied, value])]; });
+        try { offerUndo(await snapshotNotesForUndo([before]), act === 'apply-title' ? 'Title changed' : 'Tags updated'); } catch {}
+        try { await persistNote(note); } catch { toast('Saved on this device; sync is queued.', 'error'); }
+        renderEverything(); if (currentPage === 'reader') openNote(note.id);
+        toast(act === 'apply-title' ? 'Title updated.' : `Tag “${value}” added.`);
+        nzaiRender();
+        return;
+      }
+      if (act === 'apply-body') {
+        const chat = nzaiChat(), idx = Number(el.dataset.i), msg = chat?.messages[idx], note = nzaiScopeNote();
+        if (!msg || !note || !String(msg.text || '').trim()) return;
+        if (!(await uiConfirm({ title: 'Apply this text to the note?', message: 'The note’s readable text is replaced with this answer. An attached file is never changed, and you can undo for ten seconds.', confirmLabel: 'Apply text' }))) return;
+        const before = JSON.parse(JSON.stringify(note));
+        note.body = msg.text; note.updatedAt = Date.now();
+        try { offerUndo(await snapshotNotesForUndo([before]), 'Note text replaced'); } catch {}
+        try { await persistNote(note); } catch { toast('Saved on this device; sync is queued.', 'error'); }
+        nzaiUpdateChat(c => { const m = c.messages[idx]; if (m) m.appliedBody = true; });
+        renderEverything(); if (currentPage === 'reader') openNote(note.id);
+        toast('Note updated.');
+        nzaiRender();
+        return;
       }
       if (act === 'replace') {
         const msg = nzaiChat()?.messages[Number(el.dataset.i)], note = nzaiScopeNote(); if (!msg || !note) return;
