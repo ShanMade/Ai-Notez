@@ -28,13 +28,13 @@ def is_inventory_query(query: str) -> bool:
 
 
 def _extract_user_query(prompt: str) -> str:
-    # The prompt can contain prior turns; only the last USER block determines intent.
-    matches = list(re.finditer(r"(?:^|\n)USER:\s*", prompt))
+    # The prompt can contain prior turns; only the last user/student block determines intent.
+    matches = list(re.finditer(r"(?:^|\n)(?:USER|STUDENT):\s*", prompt))
     if not matches:
         return prompt.strip()[-1200:]
     start = matches[-1].end()
     tail = prompt[start:]
-    boundary = re.search(r"\n(?:ASSISTANT|SYSTEM|USER):", tail)
+    boundary = re.search(r"\n(?:ASSISTANT|SYSTEM|USER|STUDENT):", tail)
     if boundary:
         tail = tail[:boundary.start()]
     return tail.strip()[-1200:]
@@ -129,9 +129,7 @@ async def augment_prompt(
     max_notes: int,
     max_results: int,
 ) -> tuple[str, list[dict[str, object]]]:
-    if has_images or not prompt.strip() or re.search(
-        r"NUMBERED NOTES FROM THE USER|<note>|\bPassage:", prompt, re.I
-    ):
+    if has_images or not prompt.strip():
         return prompt, []
 
     query = _extract_user_query(prompt)
@@ -139,6 +137,12 @@ async def augment_prompt(
         return prompt, []
 
     inventory_query = is_inventory_query(query)
+    # Inventory questions override the normal skip for prompts that already contain
+    # selected note context: a few semantically similar notes are not a full inventory.
+    if not inventory_query and re.search(
+        r"NUMBERED NOTES FROM THE USER|<note>|\bPassage:", prompt, re.I
+    ):
+        return prompt, []
     try:
         raw_notes = await asyncio.to_thread(load_notes, uid)
         notes = _valid_notes(raw_notes)
