@@ -211,3 +211,23 @@ def test_topic_qualified_note_questions_use_semantic_retrieval():
     assert not is_inventory_query("Show notes about biology")
     assert not is_inventory_query("What notes do I have about biology?")
     assert not is_inventory_query("How many notes do I have about biology?")
+
+
+def test_count_questions_with_present_wording_use_inventory():
+    # Regression: "are present in my library" used to miss the inventory pattern,
+    # so the count question went to semantic search and surfaced a retrieval error.
+    assert is_inventory_query("How many notes are present in my library?")
+    assert is_inventory_query("how many notes are in the library")
+    assert is_inventory_query("How many files do I have?")
+    assert not is_inventory_query("How many notes mention photosynthesis?")
+    assert not is_inventory_query("How many notes about physics do I have?")
+    index = FakeIndex(fail_search=True)
+    prompt, sources = call(
+        "USER: how many notes are present in my library",
+        {"a1": {"title": "Only note"}},
+        index,
+    )
+    assert "Exact total note count: 1" in prompt
+    assert "retrieval is temporarily unavailable" not in prompt.lower()
+    assert index.search_calls == 0
+    assert sources == [{"id": "a1", "title": "Only note", "folderPath": ""}]
