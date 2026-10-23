@@ -13,6 +13,7 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Work with voice-note and transcription workflows, including configurable voice profiles.
 - Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
+- Read answers comfortably: the assistant panel is resizable (drag its left edge, arrow keys, or double-click to reset) and has its own text-size control, both remembered per device.
 - Install the app as a PWA; the service worker caches the app shell for improved repeat-load/offline behavior.
 - Use a standalone FastAPI backend for AI requests, indexing, and search.
 
