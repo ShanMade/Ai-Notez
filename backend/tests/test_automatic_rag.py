@@ -88,7 +88,10 @@ def test_semantic_question_retrieves_relevant_current_excerpt():
     }])
     prompt, sources = call("USER: Explain mitochondria from my notes.", {"bio-1": note}, index)
     assert "Mitochondria generate cellular energy." in prompt
-    assert sources == [{"id": "bio-1", "title": "Cell Biology", "folderPath": "Science"}]
+    assert [(source["id"], source["title"], source["folderPath"]) for source in sources] == [
+        ("bio-1", "Cell Biology", "Science")
+    ]
+    assert sources[0]["snippet"]  # the card shows what matched, not just a title
     assert index.search_calls == 1
 
 
@@ -163,14 +166,30 @@ def test_source_metadata_matches_only_current_notes_used_in_answer():
     prompt, sources = call("USER: Explain Newton's laws.", {"p1": note}, index)
     assert "Newton's laws" in prompt
     assert "should not leak" not in prompt
-    assert sources == [{"id": "p1", "title": "Physics", "folderPath": "School"}]
+    assert [(source["id"], source["title"], source["folderPath"]) for source in sources] == [
+        ("p1", "Physics", "School")
+    ]
 
 
-def test_semantic_retrieval_failure_is_reported_without_fabrication():
+def test_semantic_failure_falls_back_to_keyword_evidence():
+    # A failed vector search must not throw away the live notes: keyword
+    # matching over the same Firebase notes is still real evidence.
     index = FakeIndex(fail_search=True)
     prompt, sources = call(
         "USER: What did I write about photosynthesis?",
         {"n1": {"title": "Biology", "body": "Photosynthesis converts light energy."}},
+        index,
+    )
+    assert "Photosynthesis converts light energy." in prompt
+    assert [source["id"] for source in sources] == ["n1"]
+    assert "temporarily unavailable" not in prompt.lower()
+
+
+def test_semantic_failure_without_any_match_is_reported_without_fabrication():
+    index = FakeIndex(fail_search=True)
+    prompt, sources = call(
+        "USER: What did I write about photosynthesis?",
+        {"n1": {"title": "Budget", "body": "Rent and equipment costs."}},
         index,
     )
     assert "retrieval is temporarily unavailable" in prompt.lower()

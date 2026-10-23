@@ -51,6 +51,30 @@ The index is a cache; Firebase is authoritative.
 and `/v1/index/notes` posted without the note id). It is documented as legacy in place. The supported
 retrieval path is the backend `/v1/index/*` API plus automatic retrieval in `/v1/ai/generate`.
 
+## Answer quality: attributes, confidence gating, and follow-ups
+
+A screenshot of the deployed app showed the failure clearly: asking `largest?` in the reader returned
+*"You have **three** notes in your lab (the Pakistan culture note, the quantum-physics note, and the
+mathematics note)"* with three sources titled "Ch5 Culture of Pakistan", "Notes" and "Notes".
+
+Cause: a one-word fragment was embedded as-is, three weakly related chunks cleared the global
+`AI_MIN_SIMILARITY=0.18`, and the prompt rule "answer ONLY from the numbered notes" forced the model to
+answer from them — so it described the retrieved set instead of answering the question.
+
+Fixes in `backend/app/automatic_rag.py`:
+
+| Problem | Fix |
+|---|---|
+| Fragments ("largest?", "and the second one?") were embedded with no subject | `_is_vague` + `_contextual_query`: short follow-ups are resolved against the previous user turn before embedding, and are flagged to the model as follow-ups |
+| Weak matches were quoted anyway | Confidence gate: a note must reach `AI_RAG_MIN_CONFIDENCE` (default 0.32) and stay within 0.15 of the best hit. Below that no excerpt is injected; the model is told not to invent notes or counts and to ask one clarifying question |
+| The model could not reason about notes beyond a few chunks | Every excerpt now carries computed attributes — word count, character count, folder, subject, last update, cosine `match` — and the stored metadata prefix is stripped so note text is not duplicated |
+| Comparative questions ("largest", "shortest", "most recent", "oldest") cannot be answered by similarity | `_attribute_report` ranks the live Firebase notes deterministically by content size or timestamp and hands the model exact figures plus the interpretation used |
+| The model described the retrieved set ("you have three notes…") | `RETRIEVAL_RULES` forbid reporting retrieval counts or saying "in your library/lab" unless a count was asked, require stating the interpretation for fragments, and ask for a structured answer rather than pasted excerpts |
+| The UI showed three identical "Notes" chips | Sources now include `snippet` (matched excerpt, or the computed attributes for attribute answers), surfaced in the chip tooltip |
+
+Tuning: raise `AI_RAG_MIN_CONFIDENCE` for stricter, more conservative answers; lower it to retrieve more
+loosely related notes. `AI_RAG_MAX_EXCERPTS` caps how many notes are quoted per turn.
+
 ## Operator notes
 
 * **Rebuild recommended once** after deploying: existing vectors were embedded without task types.
