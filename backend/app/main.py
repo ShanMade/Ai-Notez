@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import time
 from collections import defaultdict, deque
@@ -13,21 +14,20 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from .auth import AuthenticatedUser
-from .config import settings
+from .config import EMBEDDING, settings
 from .firebase import user_note, user_notes
 from .automatic_rag import augment_prompt
-from .vector_store import HnswIndexManager, note_text
+from .vector_store import note_text
 from .providers import MODEL_DEFAULTS, configured_providers, cool_down, embed_query, embed_texts, generate, provider_cooling_down, provider_key
 from .indexing import (
+    index_manager,
     indexing_queue,
     backfill_orchestrator,
     retrieval_logger,
-    IndexingStats,
     RetrievalMetadata,
 )
-import hashlib
 
-index_manager = HnswIndexManager()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Notez AI API", version="1.0.0")
 app.add_middleware(
@@ -148,11 +148,11 @@ async def public_config(user: AuthenticatedUser):
     return {
         "defaultProvider": settings.default_provider,
         "managedProviders": configured_providers(),
-        "embeddingEnabled": bool(settings.embedding_key or settings.gemini_key),
+        "embeddingEnabled": EMBEDDING.enabled,
         "capabilities": {
             "generate": True,
             "images": True,
-            "semanticSearch": bool(settings.embedding_key or settings.gemini_key),
+            "semanticSearch": EMBEDDING.enabled,
         },
     }
 
@@ -334,9 +334,10 @@ async def get_index_status(user: RateLimitedUser):
         },
         "backfill": backfill_status,
         "embedding": {
-            "model": settings.embedding_model,
-            "provider": settings.embedding_provider,
-            "dimensions": settings.embedding_dimensions,
+            "model": EMBEDDING.model,
+            "provider": EMBEDDING.provider,
+            "dimensions": EMBEDDING.dimensions,
+            "enabled": EMBEDDING.enabled,
         },
     }
 
@@ -415,18 +416,58 @@ async def get_index_stats(user: RateLimitedUser):
     }
 
 
+async def _verified_results(uid: str, results: list[dict], scope_label: str = "search") -> list[dict]:
+    """Drop index hits whose note was deleted or edited since it was embedded.
+
+    The index is a cache; Firebase is authoritative. Verification used to run
+    one request at a time and only on /v1/index/search, so the hybrid endpoint
+    could cite removed note text.
+    """
+    if not results:
+        return []
+
+    async def check(result: dict) -> dict | None:
+        note_id = str(result.get("id") or "")
+        if not note_id:
+            return None
+        try:
+            source = await asyncio.to_thread(user_note, uid, note_id)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.warning("%s verification failed for one note (%s).", scope_label, type(exc).__name__)
+            return None
+        if not isinstance(source, dict):
+            return None
+        digest = hashlib.sha256(note_text(source).encode("utf-8")).hexdigest()
+        if digest != str(result.get("contentHash") or ""):
+            return None
+        verified = {key: value for key, value in result.items() if key != "contentHash"}
+        verified["title"] = str(source.get("title") or result.get("title") or "Untitled note")
+        verified["folderPath"] = str(source.get("folderPath") or "")
+        return verified
+
+    checked = await asyncio.gather(*(check(result) for result in results))
+    return [item for item in checked if item is not None]
+
+
 @app.post("/v1/index/search/hybrid", dependencies=[Depends(embedding_rate_limit)])
 async def hybrid_search(body: HybridSearchRequest, user: EmbeddingRateLimitedUser):
     """
     Perform hybrid search (semantic + keyword) on the user's knowledge index.
-    
-    This endpoint combines vector similarity search with keyword matching
-    for improved retrieval quality.
+
+    Honors the requested scope (note/folder) and returns only results whose
+    current Firebase content still matches the indexed version.
     """
     uid = str(user["uid"])
     start_time = time.time()
-    
-    # Generate query embedding for semantic search
+
+    note_id = body.note_id if body.scope == "note" else None
+    folder_path = body.folder_path if body.scope == "folder" else None
+    # Hybrid blends semantic and keyword signals; turning either flag off
+    # leaves a pure semantic search.
+    query_text = body.query if (body.use_hybrid and body.use_keyword) else ""
+
     try:
         query_embedding = await embed_query(body.query)
     except HTTPException as e:
@@ -436,61 +477,71 @@ async def hybrid_search(body: HybridSearchRequest, user: EmbeddingRateLimitedUse
                 detail="Embedding rate limit reached. Search queued for retry."
             )
         raise
-    
-    # Perform semantic search with keyword matching
-    semantic_results = []
-    if body.use_hybrid or body.use_keyword:
-        semantic_results = await index_manager.search(uid, query_embedding, body.limit * 2, body.query)
-    
-    # For now, return semantic results
-    # Keyword search would be added here in a full implementation
-    
-    # Log retrieval metadata
+
+    candidates = await index_manager.search(
+        uid, query_embedding, body.limit * 2, query_text,
+        note_id=note_id, folder_path=folder_path,
+    )
+    try:
+        results = await _verified_results(uid, candidates, scope_label="hybrid search") if candidates else []
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    results = results[:body.limit]
+
+    try:
+        index_stats = index_manager.get_index_stats(uid)
+    except Exception:
+        index_stats = {"note_count": 0}
+    index_complete = int(index_stats.get("revision", 0)) <= int(index_stats.get("indexed_revision", 0))
+
     retrieval_metadata = RetrievalMetadata(
         query=body.query,
         query_hash=hashlib.sha256(body.query.encode()).hexdigest(),
-        retrieval_method="semantic" if not body.use_hybrid else "hybrid",
+        retrieval_method="semantic" if not query_text else "hybrid",
         search_scope=body.scope,
-        authorized_source_count=0,  # Would be set based on user's note count
-        candidates_retrieved=len(semantic_results),
-        final_chunks_used=len(semantic_results),
+        authorized_source_count=int(index_stats.get("note_count") or 0),
+        candidates_retrieved=len(candidates),
+        final_chunks_used=len(results),
         sources_used=[
             {
                 "noteId": r["id"],
                 "title": r["title"],
-                "folderPath": r["folderPath"],
-                "similarity": r["similarity"],
+                "folderPath": r.get("folderPath", ""),
+                "similarity": r.get("similarity", 0.0),
+                "score": r.get("score", r.get("similarity", 0.0)),
             }
-            for r in semantic_results
+            for r in results
         ],
-        embedding_model=settings.embedding_model,
-        embedding_dimensions=settings.embedding_dimensions,
+        embedding_model=EMBEDDING.model,
+        embedding_dimensions=EMBEDDING.dimensions,
         index_version="1.0.0",
-        indexing_status="complete",
-        used_retrieved_context=True,
-        context_window_used=sum(len(r["text"].split()) for r in semantic_results),
+        indexing_status="complete" if index_complete else "partial",
+        used_retrieved_context=bool(results),
+        context_window_used=sum(len(r["text"].split()) for r in results),
         retrieval_time_ms=(time.time() - start_time) * 1000,
         total_time_ms=(time.time() - start_time) * 1000,
         timestamp=time.time(),
         user_id=uid,
     )
-    
-    # Log the retrieval (non-blocking)
+
     try:
-        retrieval_logger.log(retrieval_metadata)
-    except Exception as e:
-        logger.warning(f"Failed to log retrieval: {e}")
-    
+        await asyncio.to_thread(retrieval_logger.log, retrieval_metadata)
+    except Exception as exc:
+        logger.warning("Failed to log retrieval (%s).", type(exc).__name__)
+
     return {
         "query": body.query,
-        "results": semantic_results,
+        "results": results,
         "retrievalMetadata": {
             "retrievalMethod": retrieval_metadata.retrieval_method,
+            "scope": body.scope,
+            "authorizedSourceCount": retrieval_metadata.authorized_source_count,
             "candidatesRetrieved": retrieval_metadata.candidates_retrieved,
             "finalChunksUsed": retrieval_metadata.final_chunks_used,
             "sourcesUsed": retrieval_metadata.sources_used,
             "embeddingModel": retrieval_metadata.embedding_model,
             "indexVersion": retrieval_metadata.index_version,
+            "indexingStatus": retrieval_metadata.indexing_status,
             "retrievalTimeMs": retrieval_metadata.retrieval_time_ms,
         },
     }
@@ -509,16 +560,8 @@ async def search_index(body: SearchRequest, user: EmbeddingRateLimitedUser):
             )
         raise
     results = await index_manager.search(uid, vector, body.limit, body.query)
-    verified = []
-    for result in results:
-        try:
-            source = await asyncio.to_thread(user_note, uid, result["id"])
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        if not source:
-            continue
-        digest = hashlib.sha256(note_text(source).encode("utf-8")).hexdigest()
-        if digest != result.pop("contentHash"):
-            continue
-        verified.append(result)
+    try:
+        verified = await _verified_results(uid, results, scope_label="search")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"results": verified}

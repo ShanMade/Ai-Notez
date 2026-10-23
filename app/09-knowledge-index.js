@@ -1,4 +1,17 @@
 /**
+ * LEGACY / NOT LOADED - not part of the shipped retrieval path.
+ *
+ * index.html does not include this file. The supported RAG flow is:
+ *   frontend -> POST /v1/ai/generate -> backend/app/automatic_rag.py
+ *
+ * This module was written against an older app shell and assumes globals that
+ * no longer exist (a script-scope `currentSession`, `window.notezAiApiBaseUrl`)
+ * plus a Firebase `accessToken` property that does not exist. It also posted to
+ * /v1/index/notes without the note id in the path. Do not add it to index.html
+ * without rewriting those parts; the backend /v1/index/* routes below are the
+ * supported interface.
+ */
+/**
  * NoteZ Knowledge Index - Frontend Service
  * 
  * This module provides the central indexing service for the NoteZ frontend.

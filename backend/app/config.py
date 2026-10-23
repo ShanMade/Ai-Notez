@@ -68,8 +68,68 @@ class Settings:
     max_indexed_notes: int = _integer("AI_MAX_INDEXED_NOTES", 5000, 1, 50000)
     max_search_results: int = _integer("AI_MAX_SEARCH_RESULTS", 8, 1, 25)
     min_similarity: float = float(os.getenv("AI_MIN_SIMILARITY", "0.18"))
+    rag_max_index_updates: int = _integer("AI_RAG_MAX_INDEX_UPDATES", 24, 0, 500)
 
 settings = Settings()
+
+
+@dataclass(frozen=True)
+class EmbeddingProfile:
+    """The embedding configuration actually used at runtime.
+
+    The vector index is created with ``dimensions`` and every stored/query vector
+    must use ``model`` and the same provider key, so this profile is the single
+    source of truth. Resolving it once prevents the previous failure mode where
+    the index was built with the configured dimensions but the provider silently
+    switched to a model with a different output size.
+    """
+
+    provider: str
+    model: str
+    dimensions: int
+    key: str
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.key)
+
+
+# Providers with a fixed embedding size; Gemini accepts a configurable one.
+FIXED_EMBEDDING_DIMENSIONS = {"groq": 1024, "mistral": 1024}
+
+
+def _provider_key(provider: str) -> str:
+    return {
+        "gemini": settings.gemini_key,
+        "groq": settings.groq_key,
+        "mistral": settings.mistral_key,
+    }.get(provider, "")
+
+
+def resolve_embedding_profile() -> EmbeddingProfile:
+    provider = settings.embedding_provider
+    key = settings.embedding_key or _provider_key(provider)
+    if provider == "gemini" and not key:
+        # No Gemini embedding credential: fall back once, at startup, so the
+        # index dimensions always match the provider that will be called.
+        if settings.groq_key:
+            return EmbeddingProfile("groq", settings.groq_embedding_model, 1024, settings.groq_key)
+        if settings.mistral_key:
+            return EmbeddingProfile("mistral", "mistral-embed", 1024, settings.mistral_key)
+        return EmbeddingProfile("gemini", settings.embedding_model, settings.embedding_dimensions, "")
+    if provider in FIXED_EMBEDDING_DIMENSIONS:
+        dimensions = FIXED_EMBEDDING_DIMENSIONS[provider]
+        if settings.embedding_dimensions != dimensions:
+            raise ValueError(
+                f"AI_EMBEDDING_DIMENSIONS must be {dimensions} when AI_EMBEDDING_PROVIDER={provider}; "
+                "change the value and rebuild the semantic index."
+            )
+        model = settings.groq_embedding_model if provider == "groq" else "mistral-embed"
+        return EmbeddingProfile(provider, model, dimensions, key)
+    return EmbeddingProfile("gemini", settings.embedding_model, settings.embedding_dimensions, key)
+
+
+EMBEDDING = resolve_embedding_profile()
 
 if settings.default_provider not in {"gemini", "groq", "mistral"}:
     raise ValueError("AI_DEFAULT_PROVIDER must be 'gemini', 'groq', or 'mistral'.")

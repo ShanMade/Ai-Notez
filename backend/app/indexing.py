@@ -26,11 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from fastapi import HTTPException
-
-from .config import settings
-from .vector_store import HnswIndexManager, note_text, split_chunks, user_key
+from .config import EMBEDDING, settings
+from .vector_store import HnswIndexManager, has_indexable_content, user_key
 
 logger = logging.getLogger(__name__)
 
@@ -204,9 +201,7 @@ class IndexingQueue:
                 ),
             )
         
-        # Update stats
-        await self._update_stats(owner_key, pending_change=1)
-        
+        await self._ensure_stats(owner_key)
         return job
 
     async def dequeue(self, uid: str, limit: int = 10) -> list[IndexingJob]:
@@ -247,9 +242,6 @@ class IndexingQueue:
                 """.format(",".join("?" * len(job_ids))),
                 (now, *job_ids),
             )
-        
-        # Update stats
-        await self._update_stats(owner_key, pending_change=-len(rows))
         
         jobs = []
         for row in rows:
@@ -296,7 +288,7 @@ class IndexingQueue:
             updated = cursor.rowcount > 0
         
         if updated:
-            await self._update_stats(owner_key, indexed_change=1, pending_change=-1)
+            await self._mark_indexed(owner_key)
         
         return updated
 
@@ -334,16 +326,12 @@ class IndexingQueue:
                 return False
             
             current_retries = int(row["retry_count"])
-            
-            # Use exponential backoff for rate limits
-            is_rate_limit = "rate limit" in error_message.lower() or "429" in error_message
-            
-            if current_retries >= max_retries:
-                status = "failed"
+
+            if current_retries >= max_retries or not retry:
                 status = "failed"
             else:
                 # Allow retry
-                status = "pending" if retry else "failed"
+                status = "pending"
             
             conn.execute(
                 """
@@ -354,82 +342,92 @@ class IndexingQueue:
                 (status, now, error_message[:500], job_id, owner_key),
             )
         
-        if status == "failed":
-            await self._update_stats(owner_key, failed_change=1, pending_change=-1)
-        
+        await self._ensure_stats(owner_key)
         return True
 
     async def get_status(self, uid: str) -> IndexingStats:
-        """
-        Get indexing statistics for a user.
-        
-        Args:
-            uid: User ID
-            
-        Returns:
-            IndexingStats for the user
+        """Return live queue statistics.
+
+        Counters used to be incremented and decremented in place, which drifted
+        (negative pending counts, totals that never reset). The queue table is
+        now the source of truth, with one status per note (its newest job).
         """
         owner_key = user_key(uid)
-        
+
         with self._connect() as conn:
-            # Get or create stats
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS total FROM (
+                    SELECT note_id, status,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY note_id ORDER BY created_at DESC, id DESC
+                           ) AS position
+                    FROM indexing_queue
+                    WHERE owner_key = ?
+                )
+                WHERE position = 1
+                GROUP BY status
+                """,
+                (owner_key,),
+            ).fetchall()
+            counts = {str(row["status"]): int(row["total"]) for row in rows}
+            record = conn.execute(
+                "SELECT * FROM indexing_stats WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchone()
+
+        total_notes = sum(counts.values())
+        return IndexingStats(
+            owner_key=owner_key,
+            total_notes=total_notes,
+            indexed_notes=counts.get("completed", 0),
+            pending_notes=counts.get("pending", 0),
+            failed_notes=counts.get("failed", 0),
+            total_chunks=int(record["total_chunks"]) if record else 0,
+            last_backfill_at=float(record["last_backfill_at"]) if record and record["last_backfill_at"] else None,
+            last_indexed_at=float(record["last_indexed_at"]) if record and record["last_indexed_at"] else None,
+            backfill_completed=bool(record["backfill_completed"]) if record else False,
+            embedding_model=str(record["embedding_model"]) if record else "",
+            index_version=str(record["index_version"]) if record else "1.0.0",
+        )
+
+    async def get_backfill_record(self, uid: str) -> dict[str, Any]:
+        """Return the stored result of the last backfill run."""
+        owner_key = user_key(uid)
+        with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM indexing_stats WHERE owner_key = ?",
                 (owner_key,),
             ).fetchone()
-            
-            if row:
-                return IndexingStats(
-                    owner_key=owner_key,
-                    total_notes=int(row["total_notes"]),
-                    indexed_notes=int(row["indexed_notes"]),
-                    pending_notes=int(row["pending_notes"]),
-                    failed_notes=int(row["failed_notes"]),
-                    total_chunks=int(row["total_chunks"]),
-                    last_backfill_at=float(row["last_backfill_at"]) if row["last_backfill_at"] else None,
-                    last_indexed_at=float(row["last_indexed_at"]) if row["last_indexed_at"] else None,
-                    backfill_completed=bool(row["backfill_completed"]),
-                    embedding_model=str(row["embedding_model"]),
-                    index_version=str(row["index_version"]),
-                )
-            else:
-                return IndexingStats(owner_key=owner_key)
+        if not row:
+            return {}
+        return {
+            "total_notes": int(row["total_notes"]),
+            "indexed_notes": int(row["indexed_notes"]),
+            "pending_notes": int(row["pending_notes"]),
+            "failed_notes": int(row["failed_notes"]),
+            "last_backfill_at": float(row["last_backfill_at"]) if row["last_backfill_at"] else None,
+            "backfill_completed": bool(row["backfill_completed"]),
+            "embedding_model": str(row["embedding_model"]),
+            "index_version": str(row["index_version"]),
+        }
 
-    async def _update_stats(
-        self,
-        owner_key: str,
-        indexed_change: int = 0,
-        pending_change: int = 0,
-        failed_change: int = 0,
-        total_change: int = 0,
-        chunks_change: int = 0,
-    ) -> None:
-        """Update indexing statistics for a user."""
+    async def _ensure_stats(self, owner_key: str) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO indexing_stats (
-                    owner_key, total_notes, indexed_notes, pending_notes,
-                    failed_notes, total_chunks, last_backfill_at, last_indexed_at,
-                    backfill_completed, embedding_model, index_version
-                ) VALUES (?, 0, 0, 0, 0, 0, NULL, NULL, FALSE, '', '1.0.0')
-                ON CONFLICT(owner_key) DO UPDATE SET
-                    total_notes = total_notes + ?,
-                    indexed_notes = indexed_notes + ?,
-                    pending_notes = pending_notes + ?,
-                    failed_notes = failed_notes + ?,
-                    total_chunks = total_chunks + ?,
-                    last_indexed_at = CASE WHEN indexed_notes + ? > 0 THEN strftime('%s', 'now') ELSE last_indexed_at END
+                INSERT INTO indexing_stats (owner_key) VALUES (?)
+                ON CONFLICT(owner_key) DO NOTHING
                 """,
-                (
-                    owner_key,
-                    total_change,
-                    indexed_change,
-                    pending_change,
-                    failed_change,
-                    chunks_change,
-                    indexed_change,
-                ),
+                (owner_key,),
+            )
+
+    async def _mark_indexed(self, owner_key: str) -> None:
+        await self._ensure_stats(owner_key)
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE indexing_stats SET last_indexed_at = ? WHERE owner_key = ?",
+                (time.time(), owner_key),
             )
 
     async def get_pending_count(self, uid: str) -> int:
@@ -459,7 +457,7 @@ class IndexingQueue:
             )
             count = cursor.rowcount
         
-        await self._update_stats(owner_key, pending_change=-count)
+        await self._ensure_stats(owner_key)
         return count
 
 
@@ -480,11 +478,12 @@ class BackfillOrchestrator:
         self.index_manager = index_manager
         self.queue = queue
         self._backfill_locks: dict[str, asyncio.Lock] = {}
-        self._lock_guard = asyncio.Lock()
 
-    async def _get_lock(self, owner_key: str) -> asyncio.Lock:
-        with self._lock_guard:
-            return self._backfill_locks.setdefault(owner_key, asyncio.Lock())
+    def _get_lock(self, owner_key: str) -> asyncio.Lock:
+        # Runs on the single application event loop, so a plain setdefault is
+        # atomic enough. The previous coroutine was used with ``async with``
+        # directly, which raised TypeError and broke every backfill request.
+        return self._backfill_locks.setdefault(owner_key, asyncio.Lock())
 
     async def backfill_user(
         self,
@@ -496,90 +495,80 @@ class BackfillOrchestrator:
     ) -> dict[str, Any]:
         """
         Backfill all notes for a user.
-        
+
         Args:
             uid: User ID
             notes: Dictionary of note_id -> note data
             embed: Function to generate embeddings
             batch_size: Number of notes to process in each batch
             force: Force re-indexing even if already indexed
-            
+
         Returns:
             Dictionary with backfill statistics
         """
         owner_key = user_key(uid)
-        
-        # Check if backfill is already running
+
+        # Serialize concurrent backfills for the same user.
         async with self._get_lock(owner_key):
-            # Check current stats
-            stats = await self.queue.get_status(uid)
-            
-            if stats.backfill_completed and not force:
+            record = await self.queue.get_backfill_record(uid)
+            if record.get("backfill_completed") and not force:
                 return {
                     "status": "already_completed",
-                    "total_notes": stats.total_notes,
-                    "indexed_notes": stats.indexed_notes,
+                    "total_notes": record.get("total_notes", len(notes)),
+                    "indexed_notes": record.get("indexed_notes", 0),
+                    "processed": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "elapsed_seconds": 0.0,
+                    "completed_at": None,
                     "message": "Backfill already completed for this user.",
                 }
-            
-            # Start backfill
+
             total_notes = len(notes)
             processed = 0
             failed = 0
             skipped = 0
-            errors = []
+            errors: list[dict[str, str]] = []
             start_time = time.time()
-            
-            # Process in batches
+
             note_items = list(notes.items())
-            for i in range(0, len(note_items), batch_size):
-                batch = note_items[i:i + batch_size]
-                
+            for offset in range(0, len(note_items), max(1, batch_size)):
+                batch = note_items[offset:offset + max(1, batch_size)]
+
                 for note_id, note in batch:
+                    if not has_indexable_content(note):
+                        skipped += 1
+                        continue
                     try:
-                        # Check if already indexed
-                        text = note_text(note)
-                        if not text:
-                            skipped += 1
-                            continue
-                        
-                        # Check current state
-                        try:
-                            state = await self.index_manager.get_note_state(uid, note_id)
-                            if state and not force:
-                                # Check if content matches
-                                current_hash = hashlib.sha256(text.encode()).hexdigest()
-                                if state.get("content_hash") == current_hash:
-                                    skipped += 1
-                                    continue
-                        except Exception:
-                            pass  # State check failed, proceed with indexing
-                        
-                        # Index the note
+                        # upsert already compares the stored content hash and
+                        # embedding model, so the duplicate state check (and its
+                        # swallowed exceptions) is gone.
+                        if force:
+                            # A forced backfill must re-embed even unchanged
+                            # notes; upsert is idempotent by content hash.
+                            await self.index_manager.delete(uid, note_id)
                         changed = await self.index_manager.upsert(uid, note_id, note, embed)
                         if changed:
                             processed += 1
                         else:
                             skipped += 1
-                        
-                    except Exception as e:
+                    except Exception as exc:
                         failed += 1
-                        errors.append({
-                            "note_id": note_id,
-                            "error": str(e)[:200],
-                        })
-                        logger.error(f"Failed to index note {note_id}: {e}")
-                
-                # Update progress
+                        if len(errors) < 10:
+                            errors.append({"note_id": note_id, "error": str(exc)[:200]})
+                        logger.error("Failed to index note %s: %s", note_id, type(exc).__name__)
+
+                done = processed + skipped + failed
                 elapsed = time.time() - start_time
                 logger.info(
-                    f"Backfill progress for {owner_key}: "
-                    f"{processed + skipped + failed}/{total_notes} "
-                    f"({(processed + skipped + failed) / total_notes * 100:.1f}%) "
-                    f"in {elapsed:.1f}s"
+                    "Backfill progress for %s: %s/%s (%.1f%%) in %.1fs",
+                    owner_key,
+                    done,
+                    total_notes,
+                    (done / total_notes * 100) if total_notes else 100.0,
+                    elapsed,
                 )
-            
-            # Update stats
+
             now = time.time()
             with self.queue._connect() as conn:
                 conn.execute(
@@ -588,41 +577,35 @@ class BackfillOrchestrator:
                         owner_key, total_notes, indexed_notes, pending_notes,
                         failed_notes, last_backfill_at, backfill_completed,
                         embedding_model, index_version
-                    ) VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, ?)
+                    ) VALUES (?, ?, ?, 0, ?, ?, TRUE, ?, ?)
                     ON CONFLICT(owner_key) DO UPDATE SET
-                        total_notes = ?,
-                        indexed_notes = indexed_notes + ?,
-                        failed_notes = failed_notes + ?,
-                        last_backfill_at = ?,
+                        total_notes = excluded.total_notes,
+                        indexed_notes = excluded.indexed_notes,
+                        pending_notes = 0,
+                        failed_notes = excluded.failed_notes,
+                        last_backfill_at = excluded.last_backfill_at,
                         backfill_completed = TRUE,
-                        embedding_model = ?,
-                        index_version = ?
+                        embedding_model = excluded.embedding_model,
+                        index_version = excluded.index_version
                     """,
                     (
                         owner_key,
                         total_notes,
                         processed,
-                        0,  # pending
                         failed,
                         now,
-                        settings.embedding_model,
-                        "1.0.0",
-                        total_notes,
-                        processed,
-                        failed,
-                        now,
-                        settings.embedding_model,
+                        EMBEDDING.model,
                         "1.0.0",
                     ),
                 )
-            
+
             return {
                 "status": "completed",
                 "total_notes": total_notes,
                 "processed": processed,
                 "skipped": skipped,
                 "failed": failed,
-                "errors": errors[:10],  # Return first 10 errors
+                "errors": errors,
                 "elapsed_seconds": time.time() - start_time,
                 "completed_at": datetime.fromtimestamp(now).isoformat(),
             }
@@ -630,24 +613,24 @@ class BackfillOrchestrator:
     async def get_backfill_status(self, uid: str) -> dict[str, Any]:
         """
         Get the current backfill status for a user.
-        
+
         Args:
             uid: User ID
-            
+
         Returns:
             Dictionary with backfill status
         """
-        stats = await self.queue.get_status(uid)
-        
+        record = await self.queue.get_backfill_record(uid)
+        last_backfill_at = record.get("last_backfill_at")
         return {
-            "backfill_completed": stats.backfill_completed,
-            "last_backfill_at": datetime.fromtimestamp(stats.last_backfill_at).isoformat() if stats.last_backfill_at else None,
-            "total_notes": stats.total_notes,
-            "indexed_notes": stats.indexed_notes,
-            "pending_notes": stats.pending_notes,
-            "failed_notes": stats.failed_notes,
-            "embedding_model": stats.embedding_model,
-            "index_version": stats.index_version,
+            "backfill_completed": bool(record.get("backfill_completed")),
+            "last_backfill_at": datetime.fromtimestamp(last_backfill_at).isoformat() if last_backfill_at else None,
+            "total_notes": int(record.get("total_notes") or 0),
+            "indexed_notes": int(record.get("indexed_notes") or 0),
+            "pending_notes": int(record.get("pending_notes") or 0),
+            "failed_notes": int(record.get("failed_notes") or 0),
+            "embedding_model": str(record.get("embedding_model") or ""),
+            "index_version": str(record.get("index_version") or "1.0.0"),
         }
 
 
@@ -759,7 +742,7 @@ class RetrievalLogger:
                     sources_used_json, embedding_model, embedding_dimensions,
                     index_version, indexing_status, used_retrieved_context,
                     context_window_used, retrieval_time_ms, total_time_ms, timestamp
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     metadata.query_hash,
@@ -815,6 +798,7 @@ class RetrievalLogger:
         for row in rows:
             logs.append({
                 "id": int(row["id"]),
+                "user_id": str(row["user_id"]),
                 "query_hash": str(row["query_hash"]),
                 "retrieval_method": str(row["retrieval_method"]),
                 "search_scope": str(row["search_scope"]),
@@ -853,25 +837,34 @@ def sanitize_for_indexing(text: str) -> str:
     if not text:
         return text
     
-    # Patterns for sensitive data
+    # Specific credential formats must run before the generic catch-all,
+    # otherwise every key is reported as the same unhelpful [REDACTED_KEY].
     secret_patterns = [
-        # API keys and tokens
-        (r'(?:api[_-]?|secret[_-]?|password[_-]?|token[_-]?|key[_-]?|credential[s]?)[_:\s-]*(?:["\']?)([A-Za-z0-9\-_.]{20,})', '[REDACTED_KEY]'),
-        (r'Bearer\s+[A-Za-z0-9\-_]+', '[REDACTED_TOKEN]'),
-        
         # Private keys
-        (r'-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----', '[REDACTED_PRIVATE_KEY]'),
-        
-        # Specific key formats
-        (r'sk-[a-zA-Z0-9]{40,}', '[REDACTED_OPENAI_KEY]'),
-        (r'xox[baprs]-[a-zA-Z0-9]{10,}', '[REDACTED_SLACK_TOKEN]'),
-        (r'AKIA[0-9A-Z]{16}', '[REDACTED_AWS_KEY]'),
-        (r'pkey-[a-zA-Z0-9]{20,}', '[REDACTED_PKEY]'),
-        
-        # Generic long alphanumeric strings (potential secrets)
-        (r'(?<![\w\-])[A-Za-z0-9\-_]{32,}(?![\w\-])', '[REDACTED]'),
+        (r"-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----", "[REDACTED_PRIVATE_KEY]"),
+
+        # Known provider formats
+        (r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_OPENAI_KEY]"),
+        (r"xox[baprs]-[a-zA-Z0-9]{10,}", "[REDACTED_SLACK_TOKEN]"),
+        (r"AKIA[0-9A-Z]{16}", "[REDACTED_AWS_KEY]"),
+        (r"pkey-[a-zA-Z0-9]{20,}", "[REDACTED_PKEY]"),
+        (r"Bearer\s+[A-Za-z0-9\-_]+", "[REDACTED_TOKEN]"),
+
+        # Labelled secrets: keep the label and quotes, replace only the value.
+        (
+            r"(?P<label>(?:api[_-]?key|secret[_-]?key|password|token|client[_-]?secret)(?:\s*[:=]\s*))"
+            r"(?P<quote>[\"']?)[A-Za-z0-9\-_.]{16,}(?P=quote)",
+            r"\g<label>\g<quote>[REDACTED_KEY]\g<quote>",
+        ),
+
+        # Generic long tokens: require both letters and digits so ordinary
+        # long words, URLs, and hashes of prose are not destroyed.
+        (
+            r"(?<![\w-])(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{32,}(?![\w-])",
+            "[REDACTED]",
+        ),
     ]
-    
+
     clean = text
     for pattern, replacement in secret_patterns:
         clean = re.sub(pattern, replacement, clean, flags=re.IGNORECASE)

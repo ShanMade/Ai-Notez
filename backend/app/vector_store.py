@@ -14,58 +14,82 @@ from html.parser import HTMLParser
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import numpy as np
 from fastapi import HTTPException
 from usearch.index import Index
 
-from .config import settings
+from .config import EMBEDDING, settings
 
 
 # =============================================================================
 # Keyword Search Utilities
 # =============================================================================
 
-def extract_keywords(text: str, query: str) -> float:
+# Task words and function words carry no retrieval signal. Dropping them keeps
+# keyword scores comparable between notes instead of rewarding generic text.
+_KEYWORD_STOPWORDS = frozenset(
     """
-    Extract keywords from query and check if they appear in text.
-    Returns a score based on keyword matches.
+    a about above after again against all also am an and any are as at be because been before
+    being below between both but by can cannot could did do does doing down during each few for
+    from further had has have having he her here hers herself him himself his how i if in into is
+    it its itself just me more most my myself no nor not now of off on once only or other our ours
+    ourselves out over own same she should so some such than that the their theirs them themselves
+    then there these they this those through to too under until up very was we were what when where
+    which while who whom why will with would you your yours yourself yourselves
+    answer brief briefly concise contain contains describe detail elaborate explain give list
+    mention mentioned note notes please provide question say show summarize summary tell topic write
+    wrote anything something everything thing things library
+    """.split()
+)
+
+# Fraction of the query's meaningful terms that must appear in a note before it
+# is eligible as a keyword-only retrieval candidate.
+KEYWORD_ONLY_THRESHOLD = 0.5
+# How much a keyword match can add on top of a cosine similarity. Keeping it
+# below 1 keeps fused scores interpretable while still letting an exact
+# identifier match outrank a weak semantic match.
+KEYWORD_WEIGHT = 0.35
+_IDENTIFIER = re.compile(r"\b[a-z]+[-_]?\d+[a-z0-9_-]*\b", re.I)
+
+
+def _terms(text: str) -> set[str]:
+    return {
+        term
+        for term in re.findall(r"[a-z0-9]+", text.lower())
+        if len(term) > 2 and term not in _KEYWORD_STOPWORDS
+    }
+
+
+def keyword_relevance(text: str, query: str) -> float:
+    """Score keyword relevance in a bounded [0, 1] range.
+
+    The previous implementation returned unbounded scores (one point per
+    matching word) and was merged with cosine similarities of at most 1, so
+    ordinary keyword hits always outranked strong semantic matches. Coverage of
+    the query's meaningful terms keeps the two signals comparable.
     """
     if not text or not query:
         return 0.0
-    
-    query_lower = query.lower()
+    query_terms = _terms(query)
+    if not query_terms:
+        return 0.0
     text_lower = text.lower()
-    
-    # Pattern for exact identifiers: u3 mcq4, section-1, etc.
-    identifier_pattern = r'\b[a-zA-Z]\d+\s+[a-zA-Z]\d+\b|\b[a-zA-Z]\d+\b|\b\d+[a-zA-Z]\d+\b|\b[a-zA-Z]{2,}\b'
-    
-    # Find all potential identifiers in query
-    query_identifiers = re.findall(identifier_pattern, query_lower)
-    
-    # Also check for exact phrase matches (quoted)
-    quoted_phrases = re.findall(r'"([^"]+)"', query_lower)
-    
-    score = 0.0
-    
-    # Check for exact identifier matches
-    for identifier in query_identifiers:
-        if identifier in text_lower:
-            score += 1.0
-    
-    # Check for quoted phrase matches
-    for phrase in quoted_phrases:
-        if phrase in text_lower:
-            score += 2.0
-    
-    # Check for substring matches of individual words
-    query_words = set(word for word in re.findall(r'\b\w+\b', query_lower) if len(word) > 2)
-    text_words = set(re.findall(r'\b\w+\b', text_lower))
-    word_matches = query_words & text_words
-    score += len(word_matches) * 0.1
-    
-    return score
+    text_terms = _terms(text)
+    if not text_terms:
+        return 0.0
+
+    coverage = len(query_terms & text_terms) / len(query_terms)
+    bonus = 0.0
+    for phrase in re.findall(r'"([^"]+)"', query):
+        phrase = phrase.strip().lower()
+        if phrase and phrase in text_lower:
+            bonus += 0.25
+    for identifier in set(_IDENTIFIER.findall(query)):
+        if identifier.lower() in text_lower:
+            bonus += 0.25
+    return min(1.0, coverage + bonus)
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +162,38 @@ def _readable_text(value: object) -> str:
     return value
 
 
+EXTRA_TEXT_KEYS = ("plainText", "extractedText", "fileText", "transcript", "markdown", "content")
+
+
+def note_body(note: dict) -> str:
+    """Return only the readable content of a note (never its metadata).
+
+    Metadata-only notes used to be embedded as a single chunk containing just a
+    title and folder. Those chunks cannot answer content questions but can be
+    returned as if they were note text, so indexing now requires real content.
+    """
+    body = _readable_text(note.get("body", ""))
+    readable = _readable_text(note.get("htmlReadableText", ""))
+    parts = [part for part in (body, readable) if part]
+    if readable and body and readable in body:
+        parts = [body]
+    for key in EXTRA_TEXT_KEYS:
+        extra = _readable_text(note.get(key, ""))
+        if extra and extra not in parts:
+            parts.append(extra)
+    return "\n".join(parts).strip()[:200_000]
+
+
+def has_indexable_content(note: dict) -> bool:
+    return bool(note_body(note).strip())
+
+
 def note_text(note: dict) -> str:
+    """Full searchable text (metadata header plus content) used for chunks."""
     body = _readable_text(note.get("body", ""))
     readable = _readable_text(note.get("htmlReadableText", ""))
     extra_text = []
-    for key in ("plainText", "extractedText", "fileText", "transcript", "markdown", "content"):
+    for key in EXTRA_TEXT_KEYS:
         extra = _readable_text(note.get(key, ""))
         if extra and extra not in {body, readable}:
             extra_text.append(extra)
@@ -255,7 +306,44 @@ class HnswIndexManager:
         return self.index_dir / f"{owner_key}.usearch"
 
     def _new_index(self) -> Index:
-        return Index(ndim=settings.embedding_dimensions, metric="cos", dtype="f32")
+        return Index(ndim=EMBEDDING.dimensions, metric="cos", dtype="f32")
+
+    def _reset_owner_index(self, owner_key: str) -> bool:
+        """Drop a user's index when it was built with another embedding model.
+
+        Without this, changing the embedding provider/model (which changes the
+        vector size) left every stored vector unusable: the persisted HNSW file
+        could not be restored and the SQLite blobs could not be re-added. The
+        index now heals itself and is rebuilt by the next upsert/rebuild.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT states.embedding_model, length(chunks.embedding) AS size
+                FROM note_chunks AS chunks
+                JOIN note_states AS states
+                  ON states.owner_key = chunks.owner_key AND states.note_id = chunks.note_id
+                WHERE chunks.owner_key = ?
+                LIMIT 1
+                """,
+                (owner_key,),
+            ).fetchone()
+            if row is None:
+                return False
+            if row["embedding_model"] == EMBEDDING.model and int(row["size"] or 0) == EMBEDDING.dimensions * 4:
+                return False
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM note_chunks WHERE owner_key = ?", (owner_key,))
+            connection.execute("DELETE FROM note_states WHERE owner_key = ?", (owner_key,))
+            connection.execute("DELETE FROM index_revisions WHERE owner_key = ?", (owner_key,))
+            connection.commit()
+        self._indexes.pop(owner_key, None)
+        try:
+            self._index_path(owner_key).unlink(missing_ok=True)
+        except OSError:
+            pass
+        logger.info("Reset semantic index %s after an embedding model or dimension change.", owner_key)
+        return True
 
     @staticmethod
     def _encode_vector(vector: Sequence[float]) -> bytes:
@@ -372,7 +460,7 @@ class HnswIndexManager:
             for vector in batch_vectors:
                 if (
                     not isinstance(vector, (list, tuple))
-                    or len(vector) != settings.embedding_dimensions
+                    or len(vector) != EMBEDDING.dimensions
                     or any(
                         not isinstance(value, (int, float)) or not math.isfinite(value)
                         for value in vector
@@ -432,7 +520,7 @@ class HnswIndexManager:
                     embedding_model = excluded.embedding_model,
                     chunk_count = excluded.chunk_count
                 """,
-                (owner_key, note_id, digest, settings.embedding_model, len(chunks)),
+                (owner_key, note_id, digest, EMBEDDING.model, len(chunks)),
             )
             added_ids: list[int] = []
             for position, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True)):
@@ -475,9 +563,11 @@ class HnswIndexManager:
         note: dict,
         embed: Callable[[list[str]], Awaitable[list[list[float]]]],
     ) -> bool:
-        text = note_text(note)
-        if not text:
+        if not has_indexable_content(note):
+            # Metadata-only notes (title/folder/tags but no text) are not
+            # searchable content: they must not create chunks.
             return await self.delete(uid, note_id)
+        text = note_text(note)
         digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         chunks = split_chunks(text)
         if len(chunks) > settings.max_chunks_per_user:
@@ -485,6 +575,7 @@ class HnswIndexManager:
 
         owner_key = user_key(uid)
         async with self._async_lock(owner_key):
+            self._reset_owner_index(owner_key)
             with self._connect() as connection:
                 state = connection.execute(
                     """
@@ -496,7 +587,7 @@ class HnswIndexManager:
             if (
                 state
                 and state["content_hash"] == digest
-                and state["embedding_model"] == settings.embedding_model
+                and state["embedding_model"] == EMBEDDING.model
                 and state["chunk_count"] == len(chunks)
             ):
                 return False
@@ -590,7 +681,7 @@ class HnswIndexManager:
                 if (
                     state
                     and state["content_hash"] == digest
-                    and state["embedding_model"] == settings.embedding_model
+                    and state["embedding_model"] == EMBEDDING.model
                     and state["chunk_count"] == len(chunks)
                 ):
                     continue
@@ -629,7 +720,7 @@ class HnswIndexManager:
                         embedding_model = excluded.embedding_model,
                         chunk_count = excluded.chunk_count
                     """,
-                    (owner_key, note_id, digest, settings.embedding_model, len(chunks)),
+                    (owner_key, note_id, digest, EMBEDDING.model, len(chunks)),
                 )
                 for position, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True)):
                     cursor = connection.execute(
@@ -675,6 +766,8 @@ class HnswIndexManager:
         prepared: dict[str, tuple[dict, str, list[str], list[list[float]]]] = {}
         total_chunks = 0
         for note_id, note in notes.items():
+            if not has_indexable_content(note):
+                continue
             text = note_text(note)
             chunks = split_chunks(text)
             total_chunks += len(chunks)
@@ -686,6 +779,7 @@ class HnswIndexManager:
 
         owner_key = user_key(uid)
         async with self._async_lock(owner_key):
+            self._reset_owner_index(owner_key)
             with self._connect() as connection:
                 existing = {
                     str(row["note_id"]): row
@@ -704,7 +798,7 @@ class HnswIndexManager:
                 if not (
                     state
                     and state["content_hash"] == digest
-                    and state["embedding_model"] == settings.embedding_model
+                    and state["embedding_model"] == EMBEDDING.model
                     and state["chunk_count"] == len(chunks)
                 ):
                     changed_notes.append(note_id)
@@ -723,7 +817,82 @@ class HnswIndexManager:
             await asyncio.to_thread(self._rebuild_sync, owner_key, prepared)
         return total_chunks
 
-    def _search_sync(self, owner_key: str, vector: list[float], limit: int) -> list[dict]:
+    @staticmethod
+    def _scope_clause(note_id: str | None, folder_path: str | None) -> tuple[str, list[str]]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if note_id:
+            clauses.append("note_id = ?")
+            params.append(note_id)
+        if folder_path:
+            clauses.append("folder_path = ?")
+            params.append(folder_path)
+        return (" AND " + " AND ".join(clauses) if clauses else ""), params
+
+    def _scoped_search_sync(
+        self,
+        owner_key: str,
+        vector: list[float],
+        limit: int,
+        note_id: str | None = None,
+        folder_path: str | None = None,
+    ) -> list[dict]:
+        """Exact cosine search inside one note or folder.
+
+        A global HNSW query oversampled only ``limit * 8`` chunks, so a
+        note-scoped question ("chat with this note") could miss the open note
+        entirely. Scoped searches are small, so they are scored directly.
+        """
+        scope, params = self._scope_clause(note_id, folder_path)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, note_id, content_hash, title, folder_path, chunk_text, embedding
+                FROM note_chunks
+                WHERE owner_key = ?{scope}
+                LIMIT ?
+                """,
+                (owner_key, *params, settings.max_chunks_per_user),
+            ).fetchall()
+        if not rows:
+            return []
+        query = np.asarray(vector, dtype=np.float32)
+        norm = float(np.linalg.norm(query))
+        if norm == 0 or not math.isfinite(norm):
+            return []
+        query = query / norm
+        matrix = np.stack([self._decode_vector(row["embedding"]) for row in rows]).astype(np.float32)
+        norms = np.linalg.norm(matrix, axis=1)
+        norms[norms == 0] = 1.0
+        similarities = (matrix / norms[:, None]) @ query
+        best_by_note: dict[str, dict] = {}
+        for row, similarity in zip(rows, similarities.tolist(), strict=True):
+            if not math.isfinite(similarity) or similarity < settings.min_similarity:
+                continue
+            note_key = str(row["note_id"])
+            current = best_by_note.get(note_key)
+            if current is None or similarity > current["similarity"]:
+                best_by_note[note_key] = {
+                    "id": note_key,
+                    "title": str(row["title"] or "Untitled note"),
+                    "folderPath": str(row["folder_path"] or ""),
+                    "text": str(row["chunk_text"]),
+                    "similarity": similarity,
+                    "contentHash": str(row["content_hash"]),
+                }
+        return sorted(best_by_note.values(), key=lambda result: result["similarity"], reverse=True)[:limit]
+
+    def _search_sync(
+        self,
+        owner_key: str,
+        vector: list[float],
+        limit: int,
+        note_id: str | None = None,
+        folder_path: str | None = None,
+    ) -> list[dict]:
+        self._reset_owner_index(owner_key)
+        if note_id or folder_path:
+            return self._scoped_search_sync(owner_key, vector, limit, note_id, folder_path)
         index, _ = self._current_index(owner_key)
         if index.size == 0:
             return []
@@ -751,28 +920,100 @@ class HnswIndexManager:
             similarity = 1 - distance
             if not math.isfinite(similarity) or similarity < settings.min_similarity:
                 continue
-            note_id = str(row["note_id"])
+            note_key = str(row["note_id"])
             result = {
-                "id": note_id,
+                "id": note_key,
                 "title": str(row["title"] or "Untitled note"),
                 "folderPath": str(row["folder_path"] or ""),
                 "text": str(row["chunk_text"]),
                 "similarity": similarity,
                 "contentHash": str(row["content_hash"]),
             }
-            current = best_by_note.get(note_id)
+            current = best_by_note.get(note_key)
             if current is None or similarity > current["similarity"]:
-                best_by_note[note_id] = result
+                best_by_note[note_key] = result
         return sorted(
             best_by_note.values(),
             key=lambda result: result["similarity"],
             reverse=True,
         )[:limit]
 
-    async def search(self, uid: str, vector: list[float], limit: int, query_text: str = "") -> list[dict]:
+    def _keyword_sync(
+        self,
+        owner_key: str,
+        query_text: str,
+        limit: int,
+        note_id: str | None = None,
+        folder_path: str | None = None,
+    ) -> list[dict]:
+        scope, params = self._scope_clause(note_id, folder_path)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT id, note_id, content_hash, title, folder_path, chunk_text
+                FROM note_chunks
+                WHERE owner_key = ?{scope}
+                LIMIT ?
+                """,
+                (owner_key, *params, settings.max_chunks_per_user),
+            ).fetchall()
+        best_by_note: dict[str, dict] = {}
+        for row in rows:
+            score = keyword_relevance(str(row["chunk_text"]), query_text)
+            if score < KEYWORD_ONLY_THRESHOLD:
+                continue
+            note_key = str(row["note_id"])
+            current = best_by_note.get(note_key)
+            if current is None or score > current["keywordScore"]:
+                best_by_note[note_key] = {
+                    "id": note_key,
+                    "title": str(row["title"] or "Untitled note"),
+                    "folderPath": str(row["folder_path"] or ""),
+                    "text": str(row["chunk_text"]),
+                    "keywordScore": score,
+                    "contentHash": str(row["content_hash"]),
+                    "is_keyword_match": True,
+                }
+        return sorted(best_by_note.values(), key=lambda result: result["keywordScore"], reverse=True)[:limit]
+
+    @staticmethod
+    def _fuse(semantic: list[dict], keyword: list[dict], limit: int) -> list[dict]:
+        """Merge semantic and keyword hits on one comparable score scale."""
+        best: dict[str, dict] = {}
+        for result in semantic:
+            item = dict(result)
+            item["keywordScore"] = 0.0
+            item["score"] = item["similarity"]
+            best[item["id"]] = item
+        for result in keyword:
+            note_key = result["id"]
+            existing = best.get(note_key)
+            if existing is None:
+                item = dict(result)
+                item["similarity"] = 0.0
+                item["score"] = KEYWORD_WEIGHT * item["keywordScore"]
+                best[note_key] = item
+            else:
+                existing["keywordScore"] = max(existing["keywordScore"], result["keywordScore"])
+                # Prefer the keyword chunk only when it is better evidence than
+                # the semantically matched chunk for this note.
+                if result["keywordScore"] > existing["similarity"]:
+                    existing["text"] = result["text"]
+                existing["score"] = existing["similarity"] + KEYWORD_WEIGHT * existing["keywordScore"]
+        return sorted(best.values(), key=lambda item: item["score"], reverse=True)[:limit]
+
+    async def search(
+        self,
+        uid: str,
+        vector: list[float],
+        limit: int,
+        query_text: str = "",
+        note_id: str | None = None,
+        folder_path: str | None = None,
+    ) -> list[dict]:
         if (
             not isinstance(vector, (list, tuple))
-            or len(vector) != settings.embedding_dimensions
+            or len(vector) != EMBEDDING.dimensions
             or any(
                 not isinstance(value, (int, float)) or not math.isfinite(value)
                 for value in vector
@@ -781,58 +1022,17 @@ class HnswIndexManager:
             raise HTTPException(status_code=502, detail="The query embedding has an incompatible vector dimension.")
         owner_key = user_key(uid)
         async with self._async_lock(owner_key):
-            semantic_results = await asyncio.to_thread(self._search_sync, owner_key, vector, limit)
-            
-            # If we have query text, perform hybrid search with keyword matching
-            if query_text:
-                # Get all chunks for this user to perform keyword search
-                with self._connect() as connection:
-                    rows = connection.execute(
-                        """
-                        SELECT id, note_id, content_hash, title, folder_path, chunk_text
-                        FROM note_chunks
-                        WHERE owner_key = ?
-                        LIMIT ?
-                        """,
-                        (owner_key, settings.max_chunks_per_user),
-                    ).fetchall()
-                
-                # Score each chunk by keyword relevance
-                keyword_results = []
-                for row in rows:
-                    keyword_score = extract_keywords(str(row["chunk_text"]), query_text)
-                    if keyword_score > 0:
-                        keyword_results.append({
-                            "id": str(row["note_id"]),
-                            "title": str(row["title"] or "Untitled note"),
-                            "folderPath": str(row["folder_path"] or ""),
-                            "text": str(row["chunk_text"]),
-                            "similarity": keyword_score,
-                            "contentHash": str(row["content_hash"]),
-                            "is_keyword_match": True,
-                        })
-                
-                # Sort keyword results by score
-                keyword_results.sort(key=lambda r: r["similarity"], reverse=True)
-                
-                # Merge semantic and keyword results
-                merged = semantic_results + keyword_results[:limit]
-                
-                # Deduplicate by note_id, keeping the best result
-                best_by_note: dict[str, dict] = {}
-                for result in merged:
-                    note_id = result["id"]
-                    current = best_by_note.get(note_id)
-                    if current is None or result["similarity"] > current["similarity"]:
-                        best_by_note[note_id] = result
-                
-                return sorted(
-                    best_by_note.values(),
-                    key=lambda r: r["similarity"],
-                    reverse=True,
-                )[:limit]
-            
-            return semantic_results
+            # SQLite scans stay off the event loop; the previous keyword pass
+            # read up to max_chunks_per_user rows synchronously.
+            semantic = await asyncio.to_thread(
+                self._search_sync, owner_key, vector, limit, note_id, folder_path
+            )
+            if not query_text:
+                return semantic
+            keyword = await asyncio.to_thread(
+                self._keyword_sync, owner_key, query_text, limit, note_id, folder_path
+            )
+            return self._fuse(semantic, keyword, limit)
 
     def get_note_state(self, uid: str, note_id: str) -> dict[str, Any] | None:
         """

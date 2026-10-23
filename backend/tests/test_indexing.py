@@ -106,10 +106,11 @@ class TestIndexingQueue:
         """Test enqueuing a job."""
         async def run():
             job = await queue.enqueue("user1", "note1", "index")
-            assert job.noteId == "note1"
+            assert job.note_id == "note1"
             assert job.operation == "index"
             assert job.status == "pending"
-            assert job.uid == "user1"
+            # Jobs persist the opaque owner key, never the raw Firebase uid.
+            assert job.owner_key == user_key("user1")
         
         asyncio.run(run())
 
@@ -121,7 +122,7 @@ class TestIndexingQueue:
             
             jobs = await queue.dequeue("user1", limit=1)
             assert len(jobs) == 1
-            assert jobs[0].noteId == "note1"
+            assert jobs[0].note_id == "note1"
             assert jobs[0].status == "processing"
         
         asyncio.run(run())

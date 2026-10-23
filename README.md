@@ -133,9 +133,20 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
-| `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY` | Backend timeouts, limits, and retrieval tuning |
+| `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES` | Backend timeouts, limits, and retrieval tuning |
 
 Only set provider credentials for services you intend to use. Never commit real `.env` files, service-account JSON, or API keys.
+
+When `AI_EMBEDDING_PROVIDER` is `groq` or `mistral`, `AI_EMBEDDING_DIMENSIONS` must be `1024` (their fixed
+output size); the backend refuses to start with a mismatched value instead of failing at retrieval time.
+
+### Retrieval (RAG)
+
+`POST /v1/ai/generate` retrieves current notes before generation. The backend keeps a per-user vector index
+in `NOTEZ_DATA_DIR`, refreshes at most `AI_RAG_MAX_INDEX_UPDATES` changed notes per chat request, and falls
+back to keyword matching over the live Firebase notes when embeddings are unavailable. Retrieval never uses
+notes from another account, and index hits are dropped when the note was deleted or edited since indexing.
+See [`backend/RAG_AUDIT.md`](backend/RAG_AUDIT.md) for the audit notes and tuning guidance.
 
 ## Tests
 
