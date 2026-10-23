@@ -1,3 +1,8 @@
+// Ensure nzai object exists (defined in app/04-reader-and-html.js)
+if (typeof nzai === 'undefined') {
+  nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [], rendering: false };
+}
+
 function openNotezAi(note = null, preset = '') {
       if (note) nzai.noteId = note.id;
       nzaiOpen(note, preset);

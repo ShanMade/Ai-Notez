@@ -74,7 +74,7 @@
       text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
       
       // Wiki links (internal note links)
-      text = text.replace(/\[\\[([^\\\\[\\\]\\n]{1,120})\\\]\\\]/g, (_, title) => 
+      text = text.replace(/\[\[([^\]]+)\]\]/g, (_, title) => 
         `<a href="#" class="nz-wiki" data-wiki="${esc(title.trim())}">${esc(title.trim())}</a>`);
       
       // Bold
