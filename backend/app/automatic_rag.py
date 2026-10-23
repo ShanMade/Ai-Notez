@@ -27,6 +27,8 @@ async def augment_prompt(uid: str, prompt: str, has_images: bool, *,
             note_id = str(item.get("note_id") or item.get("id") or "")
             if note_id and note_id not in notes:
                 await index_manager.delete(uid, note_id)
+        if not notes or index_manager.get_index_stats(uid)["note_count"] == 0:
+            return prompt
         vector = await embed_query(query)
         results = await index_manager.search(uid, vector, min(5, max_results), query)
         excerpts = []
