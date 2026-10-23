@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from .auth import AuthenticatedUser
 from .config import settings
 from .firebase import user_note, user_notes
+from .automatic_rag import augment_prompt
 from .vector_store import HnswIndexManager, note_text
 from .providers import MODEL_DEFAULTS, configured_providers, cool_down, embed_query, embed_texts, generate, provider_cooling_down, provider_key
 from .indexing import (
@@ -175,13 +176,19 @@ async def firebase_config():
 
 @app.post("/v1/ai/generate", dependencies=[Depends(rate_limit)])
 async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
+    prompt = await augment_prompt(
+        str(user["uid"]), body.prompt, bool(body.images),
+        load_notes=user_notes, index_manager=index_manager, embed_texts=embed_texts,
+        embed_query=embed_query, note_text=note_text,
+        max_notes=settings.max_indexed_notes, max_results=settings.max_search_results,
+    )
     byok = body.api_key.get_secret_value().strip() if body.api_key else ""
     if byok:
         return await generate(
             body.provider,
             body.model or MODEL_DEFAULTS.get(body.provider, ("",))[0],
             byok,
-            body.prompt,
+            prompt,
             body.system_prompt,
             body.temperature,
             body.json_mode,
@@ -202,7 +209,7 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
     for index, provider in enumerate(ordered):
         model = body.model if provider == body.provider and body.model else MODEL_DEFAULTS[provider][0]
         try:
-            return await generate(provider, model, provider_key(provider), body.prompt, body.system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
+            return await generate(provider, model, provider_key(provider), prompt, body.system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
         except HTTPException as exc:
             last_error = exc
             if exc.status_code in {429, 503}:
