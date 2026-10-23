@@ -764,7 +764,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     // ================= NotezAi docked panel with chat history =================
     const NZAI_CHAT_KEY = () => 'notez-ai-chats-v2-' + (currentSession?.mode === 'cloud' ? currentSession.user.uid : 'demo');
-    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [], rendering: false };
+    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [], rendering: false, sourcesOpen: new Set() };
     function nzaiReadChats() { try { const list = JSON.parse(localStorage.getItem(NZAI_CHAT_KEY())); return Array.isArray(list) ? list : []; } catch { return []; } }
     function nzaiWriteChats(list) {
       const trimmed = list.slice(0, 50).map(chat => ({ ...chat, messages: (chat.messages || []).slice(-100) }));
@@ -951,6 +951,26 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     function nzaiFormat(text) { return markdownToHtml(String(text || '')); }
     function nzaiCodeBlocks(html) { return html.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, inner) => `<div class="ai-code"><button type="button" class="ai-copy-code" data-nzai="copy-code" aria-label="Copy code" title="Copy code">Copy</button><pre>${inner}</pre></div>`); }
+    // Sources are rendered as a compact card instead of one pill per note: an
+    // inventory answer can cite 40+ notes, and a flat wrap of full-width pills
+    // buried the answer. Four are shown collapsed, the rest open in a scroll area.
+    const NZAI_SOURCE_PREVIEW = 4;
+    function nzaiSourceList(msg, index) {
+      const list = (Array.isArray(msg.sources) ? msg.sources : []).filter(src => src && src.id);
+      if (!list.length) return '';
+      const open = nzai.sourcesOpen.has(`${nzai.chatId}:${index}`);
+      const gridId = `nzai-src-${index}`;
+      const chips = list.map(src => {
+        const title = String(src.title || 'Untitled note');
+        const folder = String(src.folderPath || '').trim();
+        const label = folder && folder !== title ? `${title} — ${folder}` : title;
+        return `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" title="Open: ${esc(label)}" aria-label="Open source note: ${esc(label)}"><span class="ai-src-n" aria-hidden="true">${Number(src.n) || ''}</span><span class="ai-src-t">${esc(title)}</span></button>`;
+      }).join('');
+      const toggle = list.length > NZAI_SOURCE_PREVIEW
+        ? `<button type="button" class="ai-sources-toggle" data-nzai="toggle-sources" data-i="${index}" aria-expanded="${open}" aria-controls="${gridId}">${open ? 'Show less' : `Show all ${list.length}`}</button>`
+        : '';
+      return `<div class="ai-sources" data-open="${open}" role="group" aria-label="Source notes used in this answer"><div class="ai-sources-head"><span class="ai-sources-title">Sources</span><span class="ai-sources-count" aria-hidden="true">${list.length}</span>${toggle}</div><div class="ai-src-grid" id="${gridId}">${chips}</div></div>`;
+    }
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
@@ -960,7 +980,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       return `<div class="ai-msg user"><div class="ai-bubble-user">${renderedText}</div><div class="ai-user-tools"><button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
       }
       const note = nzaiScopeNote();
-      const sources = (msg.sources || []).length ? `<div class="ai-sources" role="list" aria-label="Source notes used in this answer"><span>→ Sources:</span>${msg.sources.map(src => `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" aria-label="Open source note: ${esc(src.title)}" title="Open: ${esc(src.title)}">[${src.n}] ${esc(src.title)}</button>`).join('')}</div>` : '';
+      const sources = nzaiSourceList(msg, index);
       const folderAction = msg.action === 'clean-folders' ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="clean-folders">Review empty folders</button></div>` : '';
       const revealing = nzai.reveal && nzai.reveal.chatId === nzai.chatId && nzai.reveal.index === index;
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
@@ -1186,7 +1206,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           total > inventory.length ? (total - inventory.length) + ' additional notes are omitted from this compact inventory.' : '',
           'Use these metadata records for library questions. Do not infer note contents from titles or invent omitted records.'
         ].filter(Boolean).join('\n');
-        sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180) })).filter(item => item.id);
+        sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180), folderPath: compact(item.folderPath || '').slice(0, 120) })).filter(item => item.id);
       }
 
       // Topic questions can use semantic retrieval; inventory questions must not.
@@ -1278,7 +1298,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : (hasNotes ? context : '')}` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
         if (Array.isArray(answer.sources) && answer.sources.length) {
-          sources = answer.sources.map((source, index) => ({ n: index + 1, id: String(source.id || ''), title: String(source.title || 'Untitled') })).filter(source => source.id);
+          sources = answer.sources.map((source, index) => ({ n: index + 1, id: String(source.id || ''), title: String(source.title || 'Untitled'), folderPath: String(source.folderPath || '') })).filter(source => source.id);
         }
         // Add retrieval metadata to the response if available
         const messageData = {
@@ -1376,6 +1396,16 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'delete-chat') { if (!(await uiConfirm({ title: 'Delete this chat?', message: 'The conversation is removed from this device.', confirmLabel: 'Delete chat', danger: true }))) return; nzaiWriteChats(nzaiReadChats().filter(chat => chat.id !== el.dataset.id)); if (nzai.chatId === el.dataset.id) nzai.chatId = ''; return nzaiRender(); }
       if (act === 'chat-search') { nzaiSearchChat(); return; }
       if (act === 'chat-search-clear') { nzaiClearChatSearch(); return; }
+      if (act === 'toggle-sources') {
+        const box = el.closest('.ai-sources'); if (!box) return;
+        const open = box.dataset.open !== 'true';
+        const key = `${nzai.chatId}:${el.dataset.i}`;
+        if (open) nzai.sourcesOpen.add(key); else nzai.sourcesOpen.delete(key);
+        box.dataset.open = String(open);
+        el.setAttribute('aria-expanded', String(open));
+        el.textContent = open ? 'Show less' : `Show all ${box.querySelectorAll('.ai-src').length}`;
+        return;
+      }
       if (act === 'open-source') { const target = notes.find(note => note.id === el.dataset.id); if (target) openNote(target.id); return; }
       if (act === 'tab') { nzai.tab = el.dataset.p; nzai.notice = ''; return nzaiRender(); }
       if (act === 'save-key') {
