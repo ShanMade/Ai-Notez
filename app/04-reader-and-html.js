@@ -774,8 +774,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // Keeps the floating header in step with the open screen: close or back on the left, the current screen lit in the toolbar.
     function nzaiCtxHtml() {
       const note = nzaiScopeNote(), inNote = nzai.scope === 'note' && note;
-      const chipTitle = inNote ? note.title : 'All my notes';
-      return `<button type="button" class="ai-ctx-chip" data-nzai="scope-toggle" ${note || nzai.scope === 'note' ? '' : 'disabled'} aria-label="Answering from ${esc(chipTitle)}. Switch between this note and my library" title="${note ? 'Switch between this note and my library' : 'Open a note to answer from it'}"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inNote ? '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>' : '<path d="M4 5h4v14H4zM10 5h4v14h-4zM16.5 6.2l3.6-.9 2.8 13.3-3.6.9z"/>'}</g></svg><span class="ai-ctx-name">${esc(chipTitle)}</span><span class="ai-ctx-pill">${inNote ? 'This note' : 'Library'}<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
+      if (!inNote) return '';
+      const chipTitle = note.title;
+      return `<button type="button" class="ai-ctx-chip" data-nzai="scope-toggle" aria-label="Answering from ${esc(chipTitle)}. Switch between this note and my library" title="Switch between this note and my library"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></g></svg><span class="ai-ctx-name">${esc(chipTitle)}</span><span class="ai-ctx-pill">This note<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
     }
     function nzaiSyncChrome() {
       const panel = $('#nz-ai'); if (!panel) return;
@@ -1139,9 +1140,10 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
+      const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [];
-      if (note) {
+      if (note && !wantsLibrary) {
         const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
         context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
       } else {
