@@ -205,3 +205,9 @@ def test_latest_user_message_controls_inventory_intent():
     )
     assert "LIBRARY INVENTORY" not in prompt
     assert sources == []
+
+
+def test_topic_qualified_note_questions_use_semantic_retrieval():
+    assert not is_inventory_query("Show notes about biology")
+    assert not is_inventory_query("What notes do I have about biology?")
+    assert not is_inventory_query("How many notes do I have about biology?")
