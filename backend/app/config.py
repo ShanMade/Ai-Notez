@@ -39,20 +39,20 @@ class Settings:
     gemini_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GEMINI_MODELS",
-            "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3-flash-preview",
+            "gemini-2.5-flash,gemini-2.5-flash-lite",
         ).split(",") if item.strip()
     )
     groq_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GROQ_MODELS",
-            "llama-3.3-70b-versatile,openai/gpt-oss-120b,openai/gpt-oss-20b,meta-llama/llama-4-scout-17b-16e-instruct,qwen/qwen3-32b,llama-3.1-8b-instant",
+            "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b,meta-llama/llama-4-scout-17b-16e-instruct,qwen/qwen3-32b,llama-3.1-8b-instant",
         ).split(",") if item.strip()
     )
     mistral_key: str = os.getenv("AI_MISTRAL_API_KEY", "")
     mistral_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_MISTRAL_MODELS",
-            "mistral-large-latest,mistral-small-latest,mistral-tiny-latest",
+            "mistral-large-latest,mistral-small-latest",
         ).split(",") if item.strip()
     )
     gemini_key: str = os.getenv("AI_GEMINI_API_KEY", "")
