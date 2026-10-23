@@ -2444,3 +2444,30 @@ html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--n
 .ai-copy-code:active { transform: scale(0.95); }
 .ai-code pre { margin: 0; padding: 9px 11px 9px 32px; }
 @media (prefers-reduced-motion: reduce) { .ai-copy-code { transition: none; } }
+
+/* Micro-interactions and visual polish */
+/* Button states */
+.ai-action:focus-visible, .ai-ibtn:focus-visible, .ai-send:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
+.ai-action:active, .ai-ibtn:active, .ai-send:active { transform: scale(0.95); }
+.ai-action:disabled, .ai-ibtn:disabled, .ai-send:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Message appearance */
+.ai-msg { transition: opacity 0.15s ease, transform 0.15s ease; }
+.ai-msg.user { animation: slideInRight 0.2s ease; }
+.ai-msg.ai { animation: slideInLeft 0.2s ease; }
+@keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes slideInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .ai-msg { animation: none; transition: none; } }
+
+/* Loading states */
+.ai-typing { transition: opacity 0.15s ease; }
+.ai-jump { opacity: 0; transition: opacity 0.2s ease; }
+.ai-jump:not([hidden]) { opacity: 1; }
+
+/* Hover states for interactive elements */
+.ai-card:hover:not(:disabled), .ai-src:hover, .ai-action:hover { transition: all 0.15s ease; }
+.thinking-row .ai-typing { background: color-mix(in srgb, var(--nz-accent) 10%, transparent); }
+
+/* Smooth scrolling */
+.ai-thread { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { .ai-thread { scroll-behavior: auto; } }
