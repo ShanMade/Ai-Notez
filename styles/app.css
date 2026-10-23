@@ -2402,16 +2402,6 @@ html[data-theme="dark"] #nz-ai { --v3-card: #16263a; --v3-edge: rgba(173,194,220
       .markdown-body table.markdown-table { font-size: 12px; }
     }
 
-/* Chat search */
-.ai-search-wrap { padding: 8px 14px; }
-.ai-search-input { width: 100%; padding: 8px 12px; border: 1px solid var(--line, rgba(128,148,170,.28)); border-radius: 9px; background: var(--panel, #fff); color: inherit; font: inherit; }
-html[data-theme="dark"] .ai-search-input { background: #142236; }
-.ai-search-input::placeholder { color: var(--muted, #63778a); }
-.ai-search-clear { border: 0; background: transparent; color: inherit; padding: 4px 8px; cursor: pointer; font-size: 18px; opacity: .6; }
-.ai-search-clear:hover { opacity: 1; }
-.ai-search-highlight { background: color-mix(in srgb, var(--nz-accent) 30%, transparent); color: var(--nz-accent); padding: 1px 3px; border-radius: 3px; }
-html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--nz-accent) 40%, #ffffff); }
-
 /* Saving status */
 .save-spinner { font-size: 11px; opacity: .7; }
 .save-spinner::after { content: '.'; animation: nzDots 1s infinite; }
@@ -2476,7 +2466,6 @@ html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--n
 button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; }
 .ai-qchip:focus-visible, .ai-card:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 0; }
 .ai-src:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 0; box-shadow: none; }
-.ai-search-input:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--nz-accent) 10%, transparent); }
 @media (prefers-reduced-motion: reduce) { button:focus-visible { outline: 2px solid var(--nz-accent); outline-offset: 2px; } }
 /* ===== Custom Scrollbars ===== */
 ::-webkit-scrollbar {
@@ -2923,3 +2912,55 @@ html[data-theme] #nz-ai .ai-src-t { min-width: 0; overflow: hidden; text-overflo
   html[data-theme] #nz-ai .ai-sources[data-open="true"] .ai-src-grid { max-height: 240px; }
 }
 
+
+/* =========================================================
+   Assistant: readable type, and a panel you can size
+   ========================================================= */
+
+/* The assistant's reading size is its own scale, so the notes column keeps
+   whatever size the rest of the app uses. */
+#nz-ai { --chat-size: 15px; }
+#nz-ai .ai-md { font-size: var(--chat-size, 15px); line-height: 1.68; }
+#nz-ai .ai-md > *:last-child { margin-bottom: 0; }
+#nz-ai .ai-bubble-user { font-size: calc(var(--chat-size, 15px) - .5px); line-height: 1.6; }
+#nz-ai .ai-composer textarea { font-size: var(--chat-size, 15px); line-height: 1.55; }
+#nz-ai .ai-md h1, #nz-ai .ai-md h2, #nz-ai .ai-md h3 { font-size: 1.06em; line-height: 1.35; }
+#nz-ai .ai-md li + li { margin-top: 3px; }
+/* Long lines are hard to track: cap the measure on wide panels rather than
+   stretching a paragraph to 120 characters. */
+#nz-ai .ai-md, #nz-ai .ai-bubble-user, #nz-ai .ai-composer textarea { max-width: 82ch; }
+
+/* A settled thread does not need to repeat the disclaimer on every render. */
+#nz-ai .ai-foot { margin-top: -2px; }
+
+/* Larger / smaller text in the title bar. */
+.fl-aa { font-size: 12.5px; font-weight: 650; letter-spacing: -.02em; }
+.fl-aa span { display: inline-block; line-height: 1; }
+.fl-aa:disabled { opacity: .3; cursor: default; }
+
+/* Vertical grip on the panel's left edge: drag horizontally to resize. */
+#nz-ai { --dock-grip: 11px; }
+.nzai-resizer { position: absolute; top: 0; bottom: 0; left: calc(var(--dock-grip) * -0.5); width: var(--dock-grip); cursor: col-resize; z-index: 3; touch-action: none; border: 0; background: transparent; padding: 0; }
+.nzai-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 2px; background: transparent; transition: background .12s ease; }
+.nzai-resizer:hover::before, .nzai-resizer:focus-visible::before, html.nzai-resizing .nzai-resizer::before { background: color-mix(in srgb, var(--nz-accent) 60%, transparent); }
+.nzai-resizer:focus-visible { outline: 0; }
+.nzai-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 34px; transform: translate(-50%, -50%); border-radius: 3px; background: color-mix(in srgb, var(--ink, #1a2b3a) 18%, transparent); opacity: 0; transition: opacity .12s ease; }
+.nzai-resizer:hover::after, .nzai-resizer:focus-visible::after { opacity: 1; }
+html.nzai-resizing, html.nzai-resizing * { user-select: none !important; cursor: col-resize !important; }
+html.nzai-resizing .app-shell { transition: none !important; }
+@media (max-width: 760px) { .nzai-resizer { display: none; } }
+
+/* Keep the title bar intact when the dock is dragged narrow, and keep the
+   reading-size buttons off the phone layout where the panel is full width. */
+#nz-ai { container-type: inline-size; }
+@container (max-width: 430px) {
+  #nz-ai .dock-title-mark { display: none; }
+  #nz-ai .dock-title small { display: none; }
+}
+@media (max-width: 760px) { #nz-ai .fl-aa { display: none; } }
+
+/* Slightly tighter thread spacing: with a readable size, the gaps no longer
+   need to carry the separation. */
+#nz-ai .ai-thread { gap: 18px; }
+/* The resize grip is decorative; the hit area stays 11px wide. */
+@media (prefers-reduced-motion: reduce) { .nzai-resizer::before, .nzai-resizer::after { transition: none; } }

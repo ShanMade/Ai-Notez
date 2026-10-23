@@ -764,7 +764,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     // ================= NotezAi docked panel with chat history =================
     const NZAI_CHAT_KEY = () => 'notez-ai-chats-v2-' + (currentSession?.mode === 'cloud' ? currentSession.user.uid : 'demo');
-    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, searchQuery: '', searchResults: [], rendering: false, sourcesOpen: new Set() };
+    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, rendering: false, sourcesOpen: new Set() };
     function nzaiReadChats() { try { const list = JSON.parse(localStorage.getItem(NZAI_CHAT_KEY())); return Array.isArray(list) ? list : []; } catch { return []; } }
     function nzaiWriteChats(list) {
       const trimmed = list.slice(0, 50).map(chat => ({ ...chat, messages: (chat.messages || []).slice(-100) }));
@@ -778,8 +778,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       list.sort((x, y) => y.updatedAt - x.updatedAt); nzaiWriteChats(list);
       return chat;
     }
-    function nzaiNewChat() { nzai.chatId = ''; nzai.view = 'chat'; nzai.searchQuery = ''; nzai.searchResults = []; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
-    function nzaiGoView(view) { nzai.view = view; if (nzai.dock === 'voice') return dockShow('ai'); nzai.searchQuery = ''; nzai.searchResults = []; nzaiRender(); }
+    function nzaiNewChat() { nzai.chatId = ''; nzai.view = 'chat'; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
+    function nzaiGoView(view) { nzai.view = view; if (nzai.dock === 'voice') return dockShow('ai'); nzaiRender(); }
     // Keeps the floating header in step with the open screen: close or back on the left, the current screen lit in the toolbar.
     function nzaiSyncChrome() {
       const panel = $('#nz-ai'); if (!panel) return;
@@ -805,6 +805,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       panel = document.createElement('aside');
       panel.id = 'nz-ai'; panel.setAttribute('aria-label', 'NotezAi and voice notes'); panel.hidden = true;
       panel.innerHTML = `<div class="dock-grab" aria-hidden="true"></div>
+        <div class="nzai-resizer" id="nzai-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the NotezAi panel" aria-valuemin="340" aria-valuenow="440" aria-valuemax="1180" tabindex="0" title="Drag to resize · double-click to reset"></div>
         <header class="dock-chrome">
           <button type="button" class="fl-btn fl-lead" id="dock-lead" data-nzai="close" aria-label="Close panel" title="Close (Esc)"><svg class="ic-x" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="ic-down" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="ic-back" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m15 6-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <div class="dock-title"><span class="dock-title-mark" aria-hidden="true"></span><div><b>NotezAi</b><small id="dock-sub">Your study assistant</small></div></div>
@@ -812,6 +813,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <button type="button" class="fl-btn fl-new" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button><button type="button" class="fl-btn" id="dock-scope" data-nzai="scope-toggle" aria-label="Switch note scope" title="Switch note scope" style="display:none"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v17H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v17h5.5A2.5 2.5 0 0 1 20 22z"/><path d="M7 7h2M15 7h2"/></g></svg></button>
             <button type="button" class="fl-btn" data-nzai="history" data-nav="history" aria-label="History" title="History"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></g></svg></button>
             <button type="button" class="fl-btn" data-dock="voice" data-nav="voice" aria-label="Voice notes" title="Voice notes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg><span class="dock-badge" id="dock-rec-badge" hidden aria-label="Recording">●</span></button>
+            <button type="button" class="fl-btn fl-aa" data-nzai="text-smaller" aria-label="Smaller text" title="Smaller text"><span aria-hidden="true">A−</span></button>
+            <button type="button" class="fl-btn fl-aa" data-nzai="text-larger" aria-label="Larger text" title="Larger text"><span aria-hidden="true">A+</span></button>
             <button type="button" class="fl-btn" data-nzai="settings" data-nav="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></g></svg></button>
           </div>
         </header>
@@ -822,6 +825,10 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           <div id="rec-body" class="rec-body"></div>
         </section>`;
       document.body.appendChild(panel);
+      nzaiWireResizer(panel);
+      let savedText = 0;
+      try { savedText = Number(localStorage.getItem(NZAI_TEXT_KEY)) || 0; } catch {}
+      nzaiApplyText(savedText || NZAI_TEXT_STEPS[NZAI_TEXT_DEFAULT]);
       panel.addEventListener('click', event => {
         const dock = event.target.closest('[data-dock]')?.dataset.dock;
         if (dock) return dockShow(dock);
@@ -874,6 +881,126 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (preset && aiReady()) setTimeout(() => nzaiQuick(preset), 60);
     }
     function nzaiClose() { const panel = $('#nz-ai'); if (panel) panel.hidden = true; nzai.open = false; document.documentElement.classList.remove('nzai-open'); }
+
+    // The dock can be scaled horizontally: drag its left edge, or focus the handle
+    // and use the arrow keys. Answers get wider without shrinking text or zooming
+    // the page, the width is remembered per device, and it is clamped to the window
+    // so the notes column never disappears.
+    const NZAI_WIDTH_KEY = 'notez-ai-width-v1';
+    const NZAI_WIDTH_DEFAULT = 440;
+    const NZAI_WIDTH_MIN = 340;
+    const NZAI_WIDTH_MAX = 1180;
+    function nzaiWidthLimits() {
+      const min = NZAI_WIDTH_MIN;
+      const available = Math.round(window.innerWidth - 360);
+      const max = Math.max(min, Math.min(NZAI_WIDTH_MAX, available));
+      return [min, max];
+    }
+    function nzaiApplyWidth(px, persist = false) {
+      const [min, max] = nzaiWidthLimits();
+      const width = Math.round(Math.min(max, Math.max(min, Number(px) || NZAI_WIDTH_DEFAULT)));
+      document.documentElement.style.setProperty('--dock-w', `${width}px`);
+      const handle = $('#nzai-resizer');
+      if (handle) {
+        handle.setAttribute('aria-valuenow', String(width));
+        handle.setAttribute('aria-valuemin', String(min));
+        handle.setAttribute('aria-valuemax', String(max));
+      }
+      if (persist) { try { localStorage.setItem(NZAI_WIDTH_KEY, String(width)); } catch {} }
+      return width;
+    }
+    // A 440 px column is cramped on a laptop: the first open is sized to the
+    // window and remembered from then on.
+    function nzaiDefaultWidth() {
+      return Math.min(680, Math.max(NZAI_WIDTH_DEFAULT, Math.round(window.innerWidth * 0.32)));
+    }
+    function nzaiStoredWidth() {
+      let saved = 0;
+      try { saved = Number(localStorage.getItem(NZAI_WIDTH_KEY)) || 0; } catch {}
+      return saved > 0 ? saved : nzaiDefaultWidth();
+    }
+    function nzaiReadWidth() {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue('--dock-w').trim();
+      const px = parseFloat(raw);
+      if (Number.isFinite(px) && px > 0) return Math.round(px);
+      const panel = $('#nz-ai');
+      const width = panel ? Math.round(panel.getBoundingClientRect().width) : 0;
+      return width > 0 ? width : NZAI_WIDTH_DEFAULT;
+    }
+    function nzaiWireResizer(panel) {
+      const handle = panel.querySelector('#nzai-resizer');
+      nzaiApplyWidth(nzaiStoredWidth());
+      if (!handle) return;
+      let drag = null;
+      const finish = event => {
+        if (!drag) return;
+        drag = null;
+        document.documentElement.classList.remove('nzai-resizing');
+        try { handle.releasePointerCapture?.(event.pointerId); } catch {}
+        nzaiApplyWidth(nzaiReadWidth(), true);
+      };
+      handle.addEventListener('pointerdown', event => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        if (window.matchMedia('(max-width: 760px)').matches) return;
+        event.preventDefault();
+        drag = { startX: event.clientX, startWidth: nzaiReadWidth() };
+        handle.setPointerCapture?.(event.pointerId);
+        document.documentElement.classList.add('nzai-resizing');
+      });
+      handle.addEventListener('pointermove', event => {
+        if (!drag) return;
+        event.preventDefault();
+        // The handle sits on the left edge: dragging left widens the panel.
+        nzaiApplyWidth(drag.startWidth + (drag.startX - event.clientX));
+      });
+      handle.addEventListener('pointerup', finish);
+      handle.addEventListener('pointercancel', finish);
+      handle.addEventListener('lostpointercapture', finish);
+      handle.addEventListener('dblclick', () => nzaiApplyWidth(NZAI_WIDTH_DEFAULT, true));
+      handle.addEventListener('keydown', event => {
+        const step = event.shiftKey ? 96 : 24;
+        const current = nzaiReadWidth();
+        const [, max] = nzaiWidthLimits();
+        if (event.key === 'ArrowLeft') { event.preventDefault(); nzaiApplyWidth(current + step, true); }
+        else if (event.key === 'ArrowRight') { event.preventDefault(); nzaiApplyWidth(current - step, true); }
+        else if (event.key === 'Home') { event.preventDefault(); nzaiApplyWidth(NZAI_WIDTH_DEFAULT, true); }
+        else if (event.key === 'End') { event.preventDefault(); nzaiApplyWidth(max, true); }
+      });
+      // Re-clamp against the new window size, but keep returning to the width
+      // the reader chose once there is room for it again.
+      window.addEventListener('resize', () => nzaiApplyWidth(nzaiStoredWidth()));
+    }
+    // Reading size is a first-class setting, not a zoom trick: it changes the
+    // assistant's type scale only, so the notes column and the rest of the app
+    // keep their own size. The choice persists per device.
+    const NZAI_TEXT_KEY = 'notez-ai-text-v1';
+    const NZAI_TEXT_STEPS = [13.5, 15, 16.5, 18, 19.5];
+    const NZAI_TEXT_DEFAULT = 1;
+    function nzaiTextIndex(value) {
+      let best = NZAI_TEXT_DEFAULT, gap = Infinity;
+      NZAI_TEXT_STEPS.forEach((px, index) => {
+        const d = Math.abs(px - value);
+        if (d < gap) { gap = d; best = index; }
+      });
+      return best;
+    }
+    function nzaiApplyText(value, persist = false) {
+      const index = nzaiTextIndex(Number(value) || NZAI_TEXT_STEPS[NZAI_TEXT_DEFAULT]);
+      const px = NZAI_TEXT_STEPS[index];
+      const panel = $('#nz-ai');
+      if (panel) panel.style.setProperty('--chat-size', `${px}px`);
+      document.documentElement.style.setProperty('--chat-size', `${px}px`);
+      panel?.querySelectorAll('[data-nzai="text-smaller"]').forEach(b => { b.disabled = index === 0; });
+      panel?.querySelectorAll('[data-nzai="text-larger"]').forEach(b => { b.disabled = index === NZAI_TEXT_STEPS.length - 1; });
+      if (persist) { try { localStorage.setItem(NZAI_TEXT_KEY, String(px)); } catch {} }
+      return px;
+    }
+    function nzaiTextStep(delta) {
+      const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--chat-size')) || NZAI_TEXT_STEPS[NZAI_TEXT_DEFAULT];
+      const next = Math.min(NZAI_TEXT_STEPS.length - 1, Math.max(0, nzaiTextIndex(current) + delta));
+      nzaiApplyText(NZAI_TEXT_STEPS[next], true);
+    }
+
     function nzaiRender() {
       const panel = nzaiEnsurePanel(), body = $('#nzai-body');
       nzaiSyncChrome();
@@ -937,7 +1064,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <div class="ai-thread-wrap"><div class="ai-thread" id="nzai-messages" aria-live="polite" role="region">${thread}${thinking}</div><button type="button" class="ai-jump" id="ai-jump" hidden data-nzai="jump" aria-label="Scroll to latest"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="ai-jump-t">Latest</span></button></div>
         ${editing}
         <div class="ai-composer-wrap">${slash}<div class="ai-composer"><textarea id="nzai-input" rows="1" placeholder="${inNote ? 'Ask about this note, or type /' : 'Ask your notes, or type /'}" aria-label="Message NotezAi" ${disabled} style="height: auto; min-height: 42px; max-height: 160px;"></textarea><button type="button" class="ai-ibtn" data-nzai="slash-open" aria-label="Slash commands" title="Commands" ${disabled}>/</button><button type="button" class="ai-ibtn" data-nzai="record" aria-label="Record a voice note" title="Record a voice note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></button><button type="button" class="ai-send${busy ? ' stop' : ''}" data-nzai="${busy ? 'stop' : 'send'}" ${!busy && false ? 'disabled' : ''} aria-label="${busy ? 'Stop generating' : 'Send message'}" title="${busy ? 'Stop' : 'Send (Enter)'}">${sendIcon}</button></div></div>
-        <p class="ai-foot">${esc(footLine)}</p>`;
+        ${messages.length ? '' : `<p class="ai-foot">${esc(footLine)}</p>`}`;
       const threadEl = $('#nzai-messages', body); if (threadEl) { threadEl.scrollTop = (nzai.stick || prevTop === null) ? threadEl.scrollHeight : prevTop; nzaiSyncJump(); }
       if (nzai.reveal) nzaiStartReveal();
       nzai.rendering = false;
@@ -981,9 +1108,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     function nzaiBubble(msg, index) {
       const time = msg.t ? new Date(msg.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
       if (msg.role === 'user') {
-      const rawText = String(msg.text || '');
-      const formattedText = nzai.searchQuery ? rawText.replace(new RegExp(nzai.searchQuery, 'gi'), match => `<mark class="ai-search-highlight">${esc(match)}</mark>`) : rawText;
-      const renderedText = nzaiFormat(formattedText);
+      const renderedText = nzaiFormat(String(msg.text || ''));
       return `<div class="ai-msg user"><div class="ai-bubble-user">${renderedText}</div><div class="ai-user-tools"><button type="button" class="ai-tiny" data-nzai="edit" data-i="${index}">Edit</button><time class="ai-time">${time}</time></div></div>`;
       }
       const note = nzaiScopeNote();
@@ -993,8 +1118,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
       const tools = msg.text && !msg.error && !revealing ? `<div class="ai-actions-row"><button type="button" class="ai-action ai-ic" data-nzai="copy" data-i="${index}" aria-label="Copy answer" title="Copy"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="save" data-i="${index}" aria-label="Save answer as note" title="Save as note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M12 11v6M9 14h6"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="regen" data-i="${index}" aria-label="Regenerate answer" title="Regenerate"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></g></svg></button><span class="ai-fb" role="group" aria-label="Rate this answer"><button type="button" class="ai-action ai-ic${msg.fb === 'up' ? ' on' : ''}" data-nzai="fb" data-fb="up" data-i="${index}" aria-pressed="${msg.fb === 'up'}" aria-label="Helpful" title="Helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10Z"/><path d="M7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7"/></g></svg></button><button type="button" class="ai-action ai-ic${msg.fb === 'down' ? ' on' : ''}" data-nzai="fb" data-fb="down" data-i="${index}" aria-pressed="${msg.fb === 'down'}" aria-label="Not helpful" title="Not helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h4v11Z"/><path d="M17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17"/></g></svg></button></span>${note && nzai.scope === 'note' ? `<button type="button" class="ai-action ai-txt" data-nzai="replace" data-i="${index}" title="Replace this note's text with this answer">Use as note text</button>` : ''}</div>` : '';
       const retryBtn = msg.error ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="retry" data-i="${index}" aria-label="Retry this request">Retry</button></div>` : '';
-      const highlightedText = nzai.searchQuery ? shown.replace(new RegExp(nzai.searchQuery, 'gi'), match => `<mark class="ai-search-highlight">${esc(match)}</mark>`) : shown;
-      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-body"><div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(highlightedText))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
+      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><div class="ai-body"><div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${folderAction}${tools}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
     }
     // Typing reveal: new answers appear word by word; Stop shows the full text at once.
     function nzaiStartReveal() {
@@ -1046,69 +1170,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       });
       if (!chats.length) rows = '<div class="ai-welcome"><p>No saved chats yet. Conversations are kept on this device.</p></div>';
       body.innerHTML = `<div class="hist-list">${rows}</div>`;
-    }
-
-    function nzaiSearchChat() {
-      const input = $('#ai-chat-search');
-      if (!input) return;
-      const query = input.value.trim().toLowerCase();
-      nzai.searchQuery = query;
-      
-      if (!query) {
-        nzai.searchResults = [];
-        $('#ai-chat-search').nextElementSibling?.setAttribute('hidden', 'hidden');
-        nzaiRender();
-        return;
-      }
-      
-      $('#ai-chat-search').nextElementSibling?.removeAttribute('hidden');
-      const chat = nzaiChat();
-      if (!chat) return;
-      
-      const results = [];
-      chat.messages.forEach((msg, index) => {
-        if (msg.text && msg.text.toLowerCase().includes(query)) {
-          results.push(index);
-        }
-      });
-      
-      nzai.searchResults = results;
-      nzaiRender();
-      
-      // Scroll to first result
-      if (results.length > 0) {
-        const firstMsg = $(`#nzai-messages .ai-msg[data-msg="${results[0]}"]`);
-        if (firstMsg) {
-          firstMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }
-    }
-
-    function nzaiClearChatSearch() {
-      const input = $('#ai-chat-search');
-      if (input) input.value = '';
-      nzai.searchQuery = '';
-      nzai.searchResults = [];
-      $('#ai-chat-search').nextElementSibling?.setAttribute('hidden', 'hidden');
-      nzaiRender();
-    }
-
-    function nzaiHighlightSearchResults() {
-      const query = nzai.searchQuery.toLowerCase();
-      if (!query) return '';
-      
-      return (text) => {
-        if (!text) return text;
-        const lowerText = text.toLowerCase();
-        const index = lowerText.indexOf(query);
-        if (index === -1) return text;
-        
-        const before = text.slice(0, index);
-        const match = text.slice(index, index + query.length);
-        const after = text.slice(index + query.length);
-        
-        return `${before}<mark class="ai-search-highlight">${match}</mark>${after}`;
-      };
     }
 
     function nzaiRenderSettings(body) {
@@ -1412,6 +1473,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const act = el.dataset.nzai;
       const say = text => { nzai.notice = text; const m = $('#nzai-msg'); if (m) m.textContent = text; };
       if (act === 'close') return nzaiClose();
+      if (act === 'text-larger') { nzaiTextStep(1); return; }
+      if (act === 'text-smaller') { nzaiTextStep(-1); return; }
       if (act === 'new') { nzai.quiz = ''; return nzaiNewChat(); }
       if (act === 'history') return nzaiGoView('history');
       if (act === 'slash-open') { const input = $('#nzai-input'); if (input && !input.disabled) { input.value = '/'; input.focus(); nzaiSlash('/'); } return; }
@@ -1446,8 +1509,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'stop-quiz') { nzai.quiz = ''; nzai.notice = 'Quiz stopped.'; return nzaiRender(); }
       if (act === 'open-chat') { nzai.chatId = el.dataset.id; const chat = nzaiChat(); if (chat) { nzai.scope = chat.scope || 'library'; nzai.noteId = chat.noteId || nzai.noteId; } nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'delete-chat') { if (!(await uiConfirm({ title: 'Delete this chat?', message: 'The conversation is removed from this device.', confirmLabel: 'Delete chat', danger: true }))) return; nzaiWriteChats(nzaiReadChats().filter(chat => chat.id !== el.dataset.id)); if (nzai.chatId === el.dataset.id) nzai.chatId = ''; return nzaiRender(); }
-      if (act === 'chat-search') { nzaiSearchChat(); return; }
-      if (act === 'chat-search-clear') { nzaiClearChatSearch(); return; }
       if (act === 'toggle-sources') {
         const box = el.closest('.ai-sources'); if (!box) return;
         const open = box.dataset.open !== 'true';
