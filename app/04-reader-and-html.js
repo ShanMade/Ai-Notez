@@ -787,7 +787,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const scopeButton = panel.querySelector('#dock-scope');
       if (scopeButton) {
         const hasNote = Boolean(nzaiScopeNote());
-        scopeButton.style.display = hasNote ? 'inline-flex' : 'none';
+        scopeButton.style.display = screen === 'chat' && hasNote ? 'inline-flex' : 'none';
         const toLibrary = nzai.scope === 'note';
         scopeButton.title = toLibrary ? 'Search all notes' : 'Use this note';
         scopeButton.setAttribute('aria-label', scopeButton.title);
