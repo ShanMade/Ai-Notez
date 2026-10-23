@@ -184,11 +184,9 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
             return await generate(provider, model, provider_key(provider), body.prompt, body.system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
         except HTTPException as exc:
             last_error = exc
-            if exc.headers and exc.headers.get("X-Notez-Provider-Error") == "credential":
-                raise
             if exc.status_code in {429, 503}:
                 cool_down(provider, seconds=45 if exc.status_code == 429 else 15)
-            if exc.status_code not in {429, 503} or index == len(ordered) - 1:
+            if exc.status_code not in {401, 403, 429, 503} or index == len(ordered) - 1:
                 raise
     raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
 
