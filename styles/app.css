@@ -2530,3 +2530,5 @@ html[data-theme="dark"] #nz-ai .ai-jump, html[data-theme="dark"] #nz-ai .ai-bubb
   #nz-ai .fl-btn { width: calc(44px / var(--ui-zoom, 1)); height: calc(44px / var(--ui-zoom, 1)); min-width: calc(44px / var(--ui-zoom, 1)); min-height: calc(44px / var(--ui-zoom, 1)); }
   #nz-ai .ai-ibtn, #nz-ai .ai-send { min-width: calc(40px / var(--ui-zoom, 1)); min-height: calc(40px / var(--ui-zoom, 1)); }
 }
+#nz-ai .ai-md { font-size: 13px; }
+#nz-ai .ai-thread { font-size: 14px; }
