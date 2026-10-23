@@ -25,6 +25,7 @@ class Settings:
     firebase_storage_bucket: str = os.getenv("FIREBASE_STORAGE_BUCKET", "")
     firebase_messaging_sender_id: str = os.getenv("FIREBASE_MESSAGING_SENDER_ID", "")
     firebase_app_id: str = os.getenv("FIREBASE_APP_ID", "")
+    firebase_service_account_json: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
     data_dir: Path = Path(
         os.getenv("NOTEZ_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
     ).expanduser()

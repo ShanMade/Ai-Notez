@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
+import json
 import math
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +12,7 @@ from app.config import settings
 from app.main import app
 import app.main as main_module
 from app.vector_store import HnswIndexManager, split_chunks, user_key
+from app.firebase import firebase_app, verify_id_token
 
 
 def vector_for(text: str) -> list[float]:
@@ -207,3 +210,191 @@ def test_chunking_is_bounded_and_user_identifiers_are_opaque():
     assert all(0 < len(chunk) <= 1600 for chunk in chunks)
     assert user_key("alice") != "alice"
     assert user_key("alice") != user_key("bob")
+
+
+def test_firebase_credential_loading_from_json_env(monkeypatch):
+    """Test loading Firebase Admin credentials from FIREBASE_SERVICE_ACCOUNT_JSON environment variable."""
+    import firebase_admin
+    
+    # Reset the global _app state
+    import app.firebase as fb_module
+    fb_module._app = None
+    
+    # Mock service account JSON
+    mock_json = json.dumps({
+        "type": "service_account",
+        "project_id": "ai-notez",
+        "private_key_id": "test-key-id",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7...\n-----END PRIVATE KEY-----\n",
+        "client_email": "test@ai-notez.iam.gserviceaccount.com",
+        "client_id": "123456789",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test%40ai-notez.iam.gserviceaccount.com"
+    })
+    
+    # Set the environment variable
+    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT_JSON", mock_json)
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "ai-notez")
+    monkeypatch.setenv("FIREBASE_DATABASE_URL", "https://ai-notez-default-rtdb.firebaseio.com")
+    
+    # Import config to pick up the new env vars
+    from app.config import Settings
+    test_settings = Settings()
+    
+    # Temporarily replace settings
+    monkeypatch.setattr("app.firebase.settings", test_settings)
+    
+    try:
+        # Clear any existing Firebase app
+        if firebase_admin._apps:
+            for name in list(firebase_admin._apps.keys()):
+                firebase_admin.delete_app(firebase_admin.get_app(name))
+        
+        # This should initialize with JSON credentials
+        app_instance = firebase_app()
+        assert app_instance is not None
+        assert app_instance.project_id == "ai-notez"
+    finally:
+        # Clean up
+        if firebase_admin._apps:
+            for name in list(firebase_admin._apps.keys()):
+                firebase_admin.delete_app(firebase_admin.get_app(name))
+        fb_module._app = None
+
+
+def test_firebase_credential_loading_from_file_path(monkeypatch, tmp_path):
+    """Test loading Firebase Admin credentials from GOOGLE_APPLICATION_CREDENTIALS file path."""
+    import firebase_admin
+    import app.firebase as fb_module
+    
+    # Reset the global _app state
+    fb_module._app = None
+    
+    # Create a temporary credentials file
+    cred_file = tmp_path / "service-account.json"
+    cred_data = {
+        "type": "service_account",
+        "project_id": "ai-notez",
+        "private_key_id": "test-key-id",
+        "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7...\n-----END PRIVATE KEY-----\n",
+        "client_email": "test@ai-notez.iam.gserviceaccount.com",
+        "client_id": "123456789",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test%40ai-notez.iam.gserviceaccount.com"
+    }
+    cred_file.write_text(json.dumps(cred_data))
+    
+    # Set the environment variable to point to the file
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(cred_file))
+    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "ai-notez")
+    monkeypatch.setenv("FIREBASE_DATABASE_URL", "https://ai-notez-default-rtdb.firebaseio.com")
+    
+    # Import config to pick up the new env vars
+    from app.config import Settings
+    test_settings = Settings()
+    
+    # Temporarily replace settings
+    monkeypatch.setattr("app.firebase.settings", test_settings)
+    
+    try:
+        # Clear any existing Firebase app
+        if firebase_admin._apps:
+            for name in list(firebase_admin._apps.keys()):
+                firebase_admin.delete_app(firebase_admin.get_app(name))
+        
+        # This should fall back to file path
+        app_instance = firebase_app()
+        assert app_instance is not None
+        assert app_instance.project_id == "ai-notez"
+    finally:
+        # Clean up
+        if firebase_admin._apps:
+            for name in list(firebase_admin._apps.keys()):
+                firebase_admin.delete_app(firebase_admin.get_app(name))
+        fb_module._app = None
+
+
+def test_firebase_credential_loading_malformed_json(monkeypatch):
+    """Test that malformed JSON in FIREBASE_SERVICE_ACCOUNT_JSON raises a clear error."""
+    import app.firebase as fb_module
+    
+    # Reset the global _app state
+    fb_module._app = None
+    
+    # Clear any existing Firebase apps first
+    import firebase_admin
+    if firebase_admin._apps:
+        for name in list(firebase_admin._apps.keys()):
+            firebase_admin.delete_app(firebase_admin.get_app(name))
+    
+    # Set malformed JSON
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT_JSON", "not valid json")
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "ai-notez")
+    monkeypatch.delenv("FIREBASE_DATABASE_URL", raising=False)
+    monkeypatch.setenv("FIREBASE_DATABASE_URL", "")
+    
+    # Reload config to pick up the new env vars
+    import importlib
+    import app.config
+    importlib.reload(app.config)
+    test_settings = app.config.Settings()
+    monkeypatch.setattr("app.firebase.settings", test_settings)
+    
+    try:
+        with pytest.raises(RuntimeError, match="Invalid FIREBASE_SERVICE_ACCOUNT_JSON"):
+            firebase_app()
+    finally:
+        fb_module._app = None
+
+
+def test_cors_origins_parsed_correctly(monkeypatch):
+    """Test that CORS origins are parsed correctly from NOTEZ_CORS_ORIGINS."""
+    # Clear the environment variable first to avoid picking up the .env file
+    monkeypatch.delenv("NOTEZ_CORS_ORIGINS", raising=False)
+    monkeypatch.setenv("NOTEZ_CORS_ORIGINS", "https://ai-notez.web.app,http://localhost:8000,https://shanmade.github.io/Ai-Notez")
+    
+    # Reload settings to pick up the new env var
+    import importlib
+    import app.config
+    importlib.reload(app.config)
+    test_settings = app.config.Settings()
+    
+    assert "https://ai-notez.web.app" in test_settings.cors_origins
+    assert "http://localhost:8000" in test_settings.cors_origins
+    assert "https://shanmade.github.io/Ai-Notez" in test_settings.cors_origins
+    assert len(test_settings.cors_origins) == 3
+
+
+def test_cors_production_origin_allowed(monkeypatch):
+    """Test that the production origin is in the allowed CORS origins."""
+    monkeypatch.delenv("NOTEZ_CORS_ORIGINS", raising=False)
+    monkeypatch.setenv("NOTEZ_CORS_ORIGINS", "https://ai-notez.web.app,http://localhost:8000")
+    
+    import importlib
+    import app.config
+    importlib.reload(app.config)
+    test_settings = app.config.Settings()
+    
+    assert "https://ai-notez.web.app" in test_settings.cors_origins
+
+
+def test_cors_whitespace_handling(monkeypatch):
+    """Test that CORS origins with whitespace are trimmed correctly."""
+    monkeypatch.delenv("NOTEZ_CORS_ORIGINS", raising=False)
+    monkeypatch.setenv("NOTEZ_CORS_ORIGINS", " https://ai-notez.web.app , http://localhost:8000 ")
+    
+    import importlib
+    import app.config
+    importlib.reload(app.config)
+    test_settings = app.config.Settings()
+    
+    assert "https://ai-notez.web.app" in test_settings.cors_origins
+    assert "http://localhost:8000" in test_settings.cors_origins
+    assert " " not in test_settings.cors_origins[0]

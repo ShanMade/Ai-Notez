@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import threading
 
 import firebase_admin
-from firebase_admin import auth, db
+from firebase_admin import auth, credentials, db
 from firebase_admin.exceptions import FirebaseError
 
 from .config import settings
@@ -22,10 +24,22 @@ def firebase_app():
         options = {"projectId": settings.firebase_project_id}
         if settings.database_url:
             options["databaseURL"] = settings.database_url
-        try:
-            _app = firebase_admin.get_app()
-        except ValueError:
-            _app = firebase_admin.initialize_app(options=options)
+
+        # Check for JSON credentials in environment variable
+        credentials_json = settings.firebase_service_account_json
+        if credentials_json:
+            try:
+                cred_dict = json.loads(credentials_json)
+                cred = credentials.Certificate(cred_dict)
+                _app = firebase_admin.initialize_app(cred, options=options)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise RuntimeError("Invalid FIREBASE_SERVICE_ACCOUNT_JSON: malformed JSON") from exc
+        else:
+            # Fall back to Application Default Credentials or file path
+            try:
+                _app = firebase_admin.get_app()
+            except ValueError:
+                _app = firebase_admin.initialize_app(options=options)
         return _app
 
 
