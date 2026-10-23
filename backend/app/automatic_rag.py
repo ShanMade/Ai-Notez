@@ -1,6 +1,7 @@
 """Automatic note retrieval for AI prompts."""
 from __future__ import annotations
 import asyncio
+import hashlib
 import re
 from typing import Any, Awaitable, Callable
 
@@ -34,7 +35,7 @@ async def augment_prompt(uid: str, prompt: str, has_images: bool, *,
             note = notes.get(note_id)
             if not note:
                 continue
-            if item.get("contentHash") != __import__("hashlib").sha256(note_text(note).encode()).hexdigest():
+            if item.get("contentHash") != hashlib.sha256(note_text(note).encode()).hexdigest():
                 continue
             excerpt = str(item.get("text") or "").strip()[:1600]
             if excerpt:
