@@ -203,6 +203,33 @@ def test_generation_routes_byok_through_shared_service(monkeypatch):
     assert captured["system_prompt"] == "You are NotezAi."
 
 
+def test_managed_generation_accepts_audio_and_only_uses_gemini(monkeypatch):
+    calls = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        calls.append((provider, images[0]["mime"]))
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["groq", "gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    original_default = settings.default_provider
+    object.__setattr__(settings, "default_provider", "groq")  # settings is frozen
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        client = TestClient(app)
+        audio = client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}]})
+        bad = client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "video/mp4", "data": "AAAA"}]})
+    finally:
+        object.__setattr__(settings, "default_provider", original_default)
+        app.dependency_overrides.clear()
+
+    assert audio.status_code == 200
+    assert calls == [("gemini", "audio/webm")]  # Groq cannot take audio parts, so media skips it
+    assert bad.status_code == 422
+
+
 def test_chunking_is_bounded_and_user_identifiers_are_opaque():
     chunks = split_chunks("word " * 1000)
 

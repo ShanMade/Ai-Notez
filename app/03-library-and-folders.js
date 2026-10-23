@@ -946,7 +946,7 @@ async function loadPdfReader(state) {
         }
         let scanned = null;
         if (!PDF_KEEP_ORIGINAL && kind === 'pdf' && !pdfMarkdown && file.notezPageImages && file.notezPageImages.length && !(file.notezPageTexts || []).some(text => text.trim())) {
-          if (!aiKey('gemini')) toast(`${sourceFile.name} looks scanned. Add a Gemini key in NotezAi settings to transcribe it into a Markdown note.`, 'error', 7000);
+          if (!aiKey('gemini') && !aiUsesManaged()) toast(`${sourceFile.name} looks scanned. Add a Gemini key in NotezAi settings to transcribe it into a Markdown note.`, 'error', 7000);
           else {
             try {
               scanned = await ocrPagesToMarkdown(file.notezPageImages, (done, total) => nzProgress('Transcribing scanned pages with NotezAi', `${sourceFile.name} · page ${done} of ${total}`, (done - 1) / total));

@@ -343,58 +343,10 @@ async function processAudioSegment(blob, segmentIndex, knownVoices = []) {
   const prompt = getEnhancedTranscriptionPrompt(segmentIndex, knownVoices);
   
   try {
-    // Use backend if configured
-    if (aiBackendConfigured() && currentSession?.mode === 'cloud') {
-      const sdk = await ensureFirebase();
-      const user = sdk.auth.currentUser;
-      if (!user) throw new Error('Not authenticated');
-      
-      const token = await user.getIdToken();
-      const formData = new FormData();
-      formData.append('audio', blob, `segment-${segmentIndex}.webm`);
-      formData.append('prompt', prompt);
-      formData.append('segmentIndex', segmentIndex);
-      
-      const response = await fetch(`${aiBackendBase()}/v1/ai/transcribe`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
-      
-      if (!response.ok) throw new Error('Transcription failed');
-      const data = await response.json();
-      return data.transcript || '';
-    }
-    
-    // Fallback to direct API call
+    // One path for every source: aiCall() sends the audio to NotezAi (default) or straight to Gemini with the user's own key.
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    const base64Audio = bytesToB64Safe(bytes);
-    
-    const key = aiKey('gemini');
-    if (!key) throw new Error('Gemini API key required');
-    
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType: blob.type || 'audio/webm', data: base64Audio } }
-            ]
-          }],
-          generationConfig: { temperature: 0.1 }
-        })
-      }
-    );
-    
-    if (!response.ok) throw new Error('API error');
-    const data = await response.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
+    const answer = await aiCall('gemini', prompt, { temperature: 0.1, images: [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }] });
+    return answer.text || '';
   } catch (error) {
     console.error('Transcription error:', error);
     return `[Transcription error for segment ${segmentIndex}]`;
