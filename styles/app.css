@@ -2431,3 +2431,8 @@ html[data-theme="dark"] .ai-search-highlight { color: color-mix(in srgb, var(--n
   margin-right: 4px;
   font-size: .9em;
 }
+
+/* Auto-growing textarea */
+.ai-composer textarea { resize: none; transition: height 0.15s ease; }
+#nz-ai .ai-composer textarea { min-height: 28px; }
+@media (prefers-reduced-motion: reduce) { .ai-composer textarea { transition: none; } }

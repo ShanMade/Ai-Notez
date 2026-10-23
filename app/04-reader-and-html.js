@@ -917,10 +917,19 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <div class="ai-thread-wrap"><div class="ai-thread" id="nzai-messages" aria-live="polite">${thread}${thinking}</div><button type="button" class="ai-jump" id="ai-jump" hidden data-nzai="jump">↓ Latest</button></div>
         ${messages.length ? `<div class="ai-search-wrap"><input type="text" id="ai-chat-search" class="ai-search-input" placeholder="Search this chat..." aria-label="Search chat messages" data-nzai="chat-search" /><button type="button" class="ai-search-clear" data-nzai="chat-search-clear" aria-label="Clear search" hidden>×</button></div>` : ''}
         ${quick}${editing}
-        <div class="ai-composer-wrap">${slash}<div class="ai-composer"><textarea id="nzai-input" rows="1" placeholder="${inNote ? 'Ask about this note, or type /' : 'Ask your notes, or type /'}" aria-label="Message NotezAi" ${disabled}></textarea><button type="button" class="ai-ibtn" data-nzai="slash-open" aria-label="Slash commands" title="Commands" ${disabled}>/</button><button type="button" class="ai-ibtn" data-nzai="record" aria-label="Record a voice note" title="Record a voice note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></button><button type="button" class="ai-send${busy ? ' stop' : ''}" data-nzai="${busy ? 'stop' : 'send'}" ${!busy && false ? 'disabled' : ''} aria-label="${busy ? 'Stop generating' : 'Send message'}" title="${busy ? 'Stop' : 'Send (Enter)'}">${sendIcon}</button></div></div>
+        <div class="ai-composer-wrap">${slash}<div class="ai-composer"><textarea id="nzai-input" rows="1" placeholder="${inNote ? 'Ask about this note, or type /' : 'Ask your notes, or type /'}" aria-label="Message NotezAi" ${disabled} style="height: auto; min-height: 42px; max-height: 160px;"></textarea><button type="button" class="ai-ibtn" data-nzai="slash-open" aria-label="Slash commands" title="Commands" ${disabled}>/</button><button type="button" class="ai-ibtn" data-nzai="record" aria-label="Record a voice note" title="Record a voice note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></button><button type="button" class="ai-send${busy ? ' stop' : ''}" data-nzai="${busy ? 'stop' : 'send'}" ${!busy && false ? 'disabled' : ''} aria-label="${busy ? 'Stop generating' : 'Send message'}" title="${busy ? 'Stop' : 'Send (Enter)'}">${sendIcon}</button></div></div>
         <div class="ai-foot"><button type="button" class="ai-foot-link" data-nzai="settings" title="Change provider or model">${esc(provider)}</button><span>${nzaiReadChats().length} saved chat${nzaiReadChats().length === 1 ? '' : 's'}</span></div>`;
       const threadEl = $('#nzai-messages', body); if (threadEl) threadEl.scrollTop = threadEl.scrollHeight;
       if (nzai.reveal) nzaiStartReveal();
+      // Setup auto-growing textarea
+      const textarea = $('#nzai-input', body);
+      if (textarea && !textarea.dataset.autoGrow) {
+        textarea.dataset.autoGrow = 'true';
+        textarea.addEventListener('input', function() {
+          this.style.height = 'auto';
+          this.style.height = Math.min(160, this.scrollHeight) + 'px';
+        });
+      }
       // Setup search input event listener
       const searchInput = $('#ai-chat-search', body);
       if (searchInput && !searchInput.dataset.nzaiListener) {
@@ -1234,7 +1243,7 @@ ${retryBtn}      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data
       if (act === 'stop') return nzaiStop();
       if (act === 'jump') { const t = $('#nzai-messages'); if (t) t.scrollTo({ top: t.scrollHeight, behavior: 'smooth' }); return; }
       if (act === 'cancel-edit') { nzai.editAt = null; return nzaiRender(); }
-      if (act === 'edit') { const chat = nzaiChat(), i = Number(el.dataset.i); const msg = chat?.messages[i]; if (!msg) return; nzai.editAt = i; nzaiRender(); const input = $('#nzai-input'); if (input) { input.value = msg.text; input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; input.focus(); input.setSelectionRange(input.value.length, input.value.length); } return; }
+      if (act === 'edit') { const chat = nzaiChat(), i = Number(el.dataset.i); const msg = chat?.messages[i]; if (!msg) return; nzai.editAt = i; nzaiRender(); const input = $('#nzai-input'); if (input) { input.value = msg.text; input.style.height = 'auto'; input.style.height = Math.min(160, input.scrollHeight) + 'px'; input.focus(); input.setSelectionRange(input.value.length, input.value.length); input.dispatchEvent(new Event('input', { bubbles: true })); } return; }
       if (act === 'fb') { const i = Number(el.dataset.i), v = el.dataset.fb; nzaiUpdateChat(c => { const m = c.messages[i]; if (m) m.fb = m.fb === v ? '' : v; }); return nzaiRender(); }
       if (act === 'copy-code') { const pre = el.parentElement?.querySelector('pre'); try { await navigator.clipboard.writeText(pre?.textContent || ''); el.textContent = 'Copied'; setTimeout(() => { el.textContent = 'Copy'; }, 1400); } catch { toast('Your browser blocked clipboard access.', 'error'); } return; }
       if (act === 'rename-chat') { const id = el.dataset.id, chat = nzaiReadChats().find(c => c.id === id); if (!chat) return; const title = await uiPrompt({ title: 'Rename chat', value: chat.title, placeholder: 'Chat name', confirmLabel: 'Rename' }); if (title && title.trim()) { nzaiWriteChats(nzaiReadChats().map(c => c.id === id ? { ...c, title: title.trim().slice(0, 80) } : c)); nzaiRender(); } return; }
