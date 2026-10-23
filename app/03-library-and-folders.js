@@ -863,6 +863,11 @@ async function loadPdfReader(state) {
           try { await window.notezAiDeleteIndexedNote(note.id); }
           catch (error) { console.warn('The note was deleted from Firebase, but semantic index cleanup failed:', error); }
         }
+        // Also trigger knowledge index cleanup
+        if (typeof window.removeFromIndex === 'function') {
+          try { await window.removeFromIndex(note.id); }
+          catch (error) { console.warn('Note deleted from Firebase, but knowledge index cleanup failed:', error); }
+        }
         if (note.filePath && note.filePath.includes('/files/')) await deleteCloudFile(sdk, note.filePath);
         setCloudDeletion(cloudUid, note.id, null);
         writeCloudCache(cloudUid, notes);
@@ -1013,6 +1018,15 @@ ${scanned.markdown}`;
           }
           imported++;
           if (!firstId) firstId = id;
+          
+          // Trigger knowledge index for imported note
+          if (typeof window.enqueueForIndexing === 'function') {
+            try {
+              await window.enqueueForIndexing(id, note, 'index');
+            } catch (indexError) {
+              console.warn('Note imported, but knowledge index update failed:', indexError);
+            }
+          }
         } catch (error) {
           console.error(error);
           toast(`Could not keep ${file.name} in this browser. Check available storage and try again.`, 'error', 6000);

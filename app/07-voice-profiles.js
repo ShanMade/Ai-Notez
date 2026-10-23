@@ -926,6 +926,16 @@ function saveRecordingAsNote() {
   window.notes = [note, ...globalNotes];
   addFolderPath(note.folderPath);
   persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
+  
+  // Trigger knowledge index for the recording note
+  if (typeof window.enqueueForIndexing === 'function') {
+    try {
+      window.enqueueForIndexing(note.id, note, 'index');
+    } catch (indexError) {
+      console.warn('Recording saved, but knowledge index update failed:', indexError);
+    }
+  }
+  
   renderEverything();
   
   // Open the note

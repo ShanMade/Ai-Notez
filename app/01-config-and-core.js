@@ -1319,6 +1319,14 @@
         } catch (error) { setSyncState('pending'); noteSaving = false; throw error; }
         noteSaving = false;
       }
+      // Trigger knowledge index update after successful save
+      if (currentSession && typeof window.enqueueForIndexing === 'function') {
+        try {
+          await window.enqueueForIndexing(note.id, note, 'index');
+        } catch (error) {
+          console.warn('Note saved, but knowledge index update failed:', error);
+        }
+      }
     }
 
     let noteSaving = false;

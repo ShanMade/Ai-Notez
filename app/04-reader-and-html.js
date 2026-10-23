@@ -1144,23 +1144,64 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const note = nzai.scope === 'note' ? nzaiScopeNote() : null;
       const wantsLibrary = /library|all\s+notes|entire\s+library|all\s+my\s+notes|from\s+my\s+notes|across\s+all/i.test(question);
       const chatBefore = nzaiChat();
-      let sources = [], context = '', found = [];
-      if (note && !wantsLibrary) {
-        const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
-        context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
-      } else {
-        if (aiBackendSession()) {
-          try {
-            const result = await aiBackendRequest('/v1/index/search', { query: question, limit: 5 });
-            found = (result.results || []).map(item => ({ id: item.id, title: item.title, folderPath: item.folderPath, body: item.text }));
-          } catch (error) {
-            console.warn('Notez semantic search failed; using local retrieval:', error);
-            nzai.notice = `Semantic search unavailable (${error.message}). Using local note search instead.`;
+      let sources = [], context = '', found = [], retrievalMetadata = null;
+      
+      // Try to use knowledge index for retrieval if available
+      if (aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
+        try {
+          const retrievalResult = await window.retrieveRelevantContext(question, { 
+            limit: 5,
+            scope: note ? 'note' : 'library',
+            noteId: note ? note.id : null,
+          });
+          
+          if (retrievalResult && retrievalResult.context) {
+            // Parse the context into individual sources
+            const contextLines = retrievalResult.context.split('\n---\n');
+            found = contextLines.map((line, index) => {
+              const match = line.match(/Source\s+(\d+)\s+\[([^\]]+)\]:/);
+              const sourceInfo = retrievalResult.sources?.[index] || {};
+              return {
+                id: sourceInfo.noteId || '',
+                title: sourceInfo.title || 'Untitled',
+                folderPath: sourceInfo.folderPath || '',
+                body: line.replace(/^Source\s+\d+\s+\[[^\]]+\]:\n/, ''),
+              };
+            }).filter(f => f.id);
+            
+            retrievalMetadata = retrievalResult.retrievalMetadata;
+          }
+        } catch (error) {
+          console.warn('Knowledge index retrieval failed; falling back to local search:', error);
+        }
+      }
+      
+      // Fall back to local retrieval if knowledge index didn't return results
+      if ((!found.length || !note) && !wantsLibrary) {
+        if (note) {
+          const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
+          context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
+        } else {
+          // Try backend semantic search as fallback
+          if (aiBackendSession()) {
+            try {
+              const result = await aiBackendRequest('/v1/index/search', { query: question, limit: 5 });
+              found = (result.results || []).map(item => ({ id: item.id, title: item.title, folderPath: item.folderPath, body: item.text }));
+            } catch (error) {
+              console.warn('Notez semantic search failed; using local retrieval:', error);
+              nzai.notice = `Semantic search unavailable (${error.message}). Using local note search instead.`;
+              found = nzaiRetrieve(question, 5);
+            }
+          } else {
             found = nzaiRetrieve(question, 5);
           }
-        } else found = nzaiRetrieve(question, 5);
+        }
+      }
+      
+      // Build context from found sources
+      if (!context && found.length) {
         sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title }));
-        context = found.length ? 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n') : '';
+        context = 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n');
       }
       const hasNotes = note || found.length > 0;
       const rules = note
@@ -1187,7 +1228,22 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const taskDef = task ? AI_TASKS[task] : null;
         const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\n${note ? `Note title: ${note.title}\n<note>\n${(note.body || '').slice(0, aiActive() === 'groq' ? 9000 : 40000)}\n</note>` : (hasNotes ? context : '')}` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
-        nzaiUpdateChat(chat => chat.messages.push({ role: 'assistant', text: answer.text, model: `${AI_PROVIDERS[answer.provider]?.label || ''} · ${answer.model}`, sources, replace: Boolean(taskDef?.replace), t: Date.now(), fresh: true }));
+        // Add retrieval metadata to the response if available
+        const messageData = {
+          role: 'assistant',
+          text: answer.text,
+          model: `${AI_PROVIDERS[answer.provider]?.label || ''} \u00b7 ${answer.model}`,
+          sources,
+          replace: Boolean(taskDef?.replace),
+          t: Date.now(),
+          fresh: true,
+        };
+        // Add retrieval metadata if we used the knowledge index
+        if (retrievalMetadata) {
+          messageData.retrievalMetadata = retrievalMetadata;
+        }
+        
+        nzaiUpdateChat(chat => chat.messages.push(messageData));
         nzai.busy = false; nzaiRender(); nzaiStartReveal();
         return;
       } catch (error) {

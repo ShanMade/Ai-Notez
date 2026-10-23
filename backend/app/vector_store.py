@@ -670,3 +670,109 @@ class HnswIndexManager:
         owner_key = user_key(uid)
         async with self._async_lock(owner_key):
             return await asyncio.to_thread(self._search_sync, owner_key, vector, limit)
+
+    def get_note_state(self, uid: str, note_id: str) -> dict[str, Any] | None:
+        """
+        Get the current state of a note in the index.
+        
+        Args:
+            uid: User ID
+            note_id: Note ID
+            
+        Returns:
+            Dictionary with note state or None if not indexed
+        """
+        owner_key = user_key(uid)
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT content_hash, embedding_model, chunk_count
+                FROM note_states
+                WHERE owner_key = ? AND note_id = ?
+                """,
+                (owner_key, note_id),
+            ).fetchone()
+        
+        if not row:
+            return None
+        
+        return {
+            "content_hash": str(row["content_hash"]),
+            "embedding_model": str(row["embedding_model"]),
+            "chunk_count": int(row["chunk_count"]),
+        }
+
+    def get_index_stats(self, uid: str) -> dict[str, Any]:
+        """
+        Get index statistics for a user.
+        
+        Args:
+            uid: User ID
+            
+        Returns:
+            Dictionary with index statistics
+        """
+        owner_key = user_key(uid)
+        
+        with self._connect() as connection:
+            # Get note count
+            note_count = connection.execute(
+                "SELECT COUNT(*) FROM note_states WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchone()[0]
+            
+            # Get chunk count
+            chunk_count = connection.execute(
+                "SELECT COUNT(*) FROM note_chunks WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchone()[0]
+            
+            # Get index revision
+            revision_row = connection.execute(
+                "SELECT revision, indexed_revision FROM index_revisions WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchone()
+        
+        return {
+            "note_count": int(note_count),
+            "chunk_count": int(chunk_count),
+            "revision": int(revision_row["revision"]) if revision_row else 0,
+            "indexed_revision": int(revision_row["indexed_revision"]) if revision_row else 0,
+        }
+
+    def list_indexed_notes(self, uid: str, limit: int = 1000, offset: int = 0) -> list[dict[str, Any]]:
+        """
+        List indexed notes for a user with pagination.
+        
+        Args:
+            uid: User ID
+            limit: Maximum number of notes to return
+            offset: Offset for pagination
+            
+        Returns:
+            List of indexed note metadata
+        """
+        owner_key = user_key(uid)
+        
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT note_id, content_hash, embedding_model, chunk_count
+                FROM note_states
+                WHERE owner_key = ?
+                ORDER BY note_id
+                LIMIT ? OFFSET ?
+                """,
+                (owner_key, limit, offset),
+            ).fetchall()
+        
+        notes = []
+        for row in rows:
+            notes.append({
+                "note_id": str(row["note_id"]),
+                "content_hash": str(row["content_hash"]),
+                "embedding_model": str(row["embedding_model"]),
+                "chunk_count": int(row["chunk_count"]),
+            })
+        
+        return notes
