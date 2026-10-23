@@ -378,6 +378,71 @@ def _augment(prompt, notes, index, embed_query=None, embed_texts=None):
     ))
 
 
+class TestAcknowledgementsAndTurns:
+    def test_only_bare_acknowledgements_are_recognised(self):
+        from app.automatic_rag import _is_acknowledgement
+
+        for message in ("ok", "Okay.", "thanks!", "got it", "Thank you", "👍"):
+            assert _is_acknowledgement(message), message
+        # Anything carrying a request must still be answered.
+        for message in ("sure, explain more", "thanks, now compare the two notes",
+                        "what is due today?", "ok what about chemistry"):
+            assert not _is_acknowledgement(message), message
+
+    def test_acknowledgement_skips_retrieval_and_re_answering(self):
+        # The screenshot case: "ok" after a review answer made the model ask
+        # "what do you have due today?" — the opposite of its previous message.
+        notes = {"bio": {"title": "Biology", "body": "Photosynthesis converts light energy."}}
+        index = FakeIndex(results=[{
+            "id": "bio", "title": "Biology", "text": "Photosynthesis converts light energy.",
+            "contentHash": hashlib.sha256(note_text(notes["bio"]).encode()).hexdigest(),
+            "similarity": 0.9,
+        }])
+        prompt, sources = _augment("USER: ok", notes, index)
+        assert sources == []
+        assert "acknowledging" in prompt.lower()
+        assert "do not re-answer" in prompt.lower()
+        assert "Photosynthesis converts light energy." not in prompt
+        # The low-confidence template is what produced the contradicting reply.
+        assert "NOTE RETRIEVAL STATUS" not in prompt
+
+    def test_acknowledgement_that_answers_a_question_reaches_the_model(self):
+        from app.automatic_rag import _assistant_asked_question
+
+        prompt = (
+            "Earlier in this chat:\nUSER: explain mitosis\n"
+            "ASSISTANT: Mitosis has four phases. Want an example?\n\nUSER: ok"
+        )
+        assert _assistant_asked_question(prompt) is True
+        unchanged, sources = _augment(prompt, {}, FakeIndex())
+        assert sources == []
+        assert "acknowledging" not in unchanged.lower()
+
+        statement = (
+            "Earlier in this chat:\nUSER: what is due today?\n"
+            "ASSISTANT: Nothing is due for review right now.\n\nUSER: ok"
+        )
+        assert _assistant_asked_question(statement) is False
+        answered, _ = _augment(statement, {}, FakeIndex())
+        assert "acknowledging" in answered.lower()
+
+    def test_app_transcript_labels_resolve_short_follow_ups(self):
+        from app.automatic_rag import _contextual_query, _prior_user_turns
+
+        # The frontend used to send "User:"/"NotezAi:", which the turn parser
+        # does not recognise, so no follow-up could ever be resolved in the app.
+        transcript = (
+            "Earlier in this chat:\n"
+            "USER: What is due today?\n"
+            "ASSISTANT: Nothing is due for review right now.\n\n"
+            "USER: largest?"
+        )
+        assert _prior_user_turns(transcript) == ["What is due today?"]
+        query, fragment = _contextual_query("largest?", transcript)
+        assert fragment is True
+        assert query.startswith("What is due today?")
+
+
 class TestAutomaticRagRegressions:
     def test_embeddings_unavailable_falls_back_to_live_notes(self):
         notes = {"bio": {"title": "Biology", "body": "Photosynthesis converts light energy."}}
