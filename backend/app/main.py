@@ -125,6 +125,9 @@ class GenerateRequest(BaseModel):
     # A Voice-to-Note part may carry a recording clip plus up to eight learned
     # voice samples, so the cap is one recording + NZ_VOICE_MAX references.
     images: list[ImagePayload] = Field(default_factory=list, max_length=10)
+    # Voice-to-Note asks for a diarized transcript: the transcription model then
+    # returns one labelled turn per speaker instead of a wall of text.
+    audio_transcription: bool = Field(default=False)
     api_key: SecretStr | None = Field(default=None, repr=False)
 
 
@@ -239,10 +242,15 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
     for index, provider in enumerate(ordered):
         explicit = body.model if provider == body.provider and body.model else ""
         if audio and provider == "gemini":
-            # Voice-to-Note gets its own model — the cheapest current-generation
-            # Gemini that accepts audio — with the chat models behind it in case
-            # this key cannot reach that model yet.
-            models = list(dict.fromkeys([explicit or settings.gemini_transcribe_model, *MODEL_DEFAULTS["gemini"]]))
+            # Voice-to-Note gets its own models: Gemini 3.5 Transcribe first, then
+            # the cheaper chat models behind it. Quotas are counted per model, so
+            # a model that is exhausted for the day only costs one 429 before the
+            # next one takes over.
+            models = list(dict.fromkeys([
+                explicit or settings.gemini_transcribe_model,
+                *settings.gemini_transcribe_fallbacks,
+                *MODEL_DEFAULTS["gemini"],
+            ]))
         else:
             models = [explicit or MODEL_DEFAULTS[provider][0]]
         for model_index, model in enumerate(models):
@@ -256,7 +264,17 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
                         body.prompt,
                     )
                 else:
-                    result = await generate(provider, model, provider_key(provider), prompt, system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
+                    result = await generate(
+                        provider,
+                        model,
+                        provider_key(provider),
+                        prompt,
+                        system_prompt,
+                        body.temperature,
+                        body.json_mode,
+                        [image.model_dump() for image in body.images],
+                        audio_transcription=bool(audio and body.audio_transcription),
+                    )
                 result["sources"] = rag_sources
                 return result
             except HTTPException as exc:
@@ -265,9 +283,15 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
                 model_missing = exc.status_code == 404 or any(
                     marker in detail for marker in ("not found", "not supported", "decommissioned", "does not exist")
                 )
-                # Only a missing transcription model walks to the next Gemini
-                # model; a rate limit or a bad prompt is not a model problem.
-                if model_index < len(models) - 1 and audio and provider == "gemini" and model_missing:
+                # A missing transcription model walks to the next Gemini model,
+                # and so does a model that is out of quota for the day: free-tier
+                # limits are counted per model, so another model can still answer.
+                exhausted = exc.status_code in {429, 503} or "quota" in detail or "exhaust" in detail
+                # A transcription model can also refuse the request shape itself
+                # (an older API revision, a key without access to it). The chat
+                # models behind it take the same audio with a prompt.
+                unsupported = bool(body.audio_transcription) and exc.status_code in {400, 404, 422, 501}
+                if model_index < len(models) - 1 and audio and provider == "gemini" and (model_missing or exhausted or unsupported):
                     continue
                 if exc.status_code in {429, 503}:
                     cool_down(provider, seconds=45 if exc.status_code == 429 else 15)

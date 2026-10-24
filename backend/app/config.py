@@ -39,13 +39,23 @@ class Settings:
     gemini_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GEMINI_MODELS",
-            "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.5-flash-lite",
+            "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.5-flash-lite,gemini-3.1-flash-lite",
         ).split(",") if item.strip()
     )
-    # Voice-to-Note has its own model. 3.5 Flash-Lite takes audio at $0.30/M
-    # tokens (a third of 2.5 Flash) and is the cheapest current-generation
-    # Gemini, so 20-second parts stay inside the free tier for much longer.
-    gemini_transcribe_model: str = os.getenv("AI_GEMINI_TRANSCRIBE_MODEL", "gemini-3.5-flash-lite")
+    # Voice-to-Note has its own model. Gemini 3.5 Transcribe is the dedicated
+    # speech-to-text model: it labels up to eight speakers natively and returns
+    # the transcript in one pass, which is why it replaced 3.5 Flash-Lite as the
+    # default. The live variant (gemini-3.5-transcribe-live) is streaming only
+    # and cannot diarize, so it is not used here.
+    gemini_transcribe_model: str = os.getenv("AI_GEMINI_TRANSCRIBE_MODEL", "gemini-3.5-transcribe")
+    # Quotas are counted per model, so a model that is out of free requests for
+    # the day is skipped for the next one instead of failing the recording.
+    gemini_transcribe_fallbacks: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "AI_GEMINI_TRANSCRIBE_FALLBACKS",
+            "gemini-3.5-flash-lite,gemini-3.1-flash-lite",
+        ).split(",") if item.strip()
+    )
     groq_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GROQ_MODELS",
@@ -60,6 +70,13 @@ class Settings:
         ).split(",") if item.strip()
     )
     gemini_key: str = os.getenv("AI_GEMINI_API_KEY", "")
+    @property
+    def gemini_transcribe_models(self) -> tuple[str, ...]:
+        """Every Gemini model Voice-to-Note may use, in order."""
+        return tuple(dict.fromkeys(
+            item for item in (self.gemini_transcribe_model, *self.gemini_transcribe_fallbacks) if item
+        ))
+
     groq_key: str = os.getenv("AI_GROQ_API_KEY", "")
     embedding_key: str = os.getenv("AI_EMBEDDING_API_KEY", "")
     embedding_provider: str = os.getenv("AI_EMBEDDING_PROVIDER", "gemini").lower()

@@ -138,6 +138,46 @@ def _provider_error(response: httpx.Response) -> HTTPException:
     return HTTPException(status_code=status_code, detail=message, headers=headers)
 
 
+def diarized_text(parts: list[dict[str, Any]]) -> str:
+    """Turn a diarized transcription reply into one line per speaker turn.
+
+    Gemini 3.5 Transcribe answers with ``audioTranscription`` parts that carry a
+    ``speakerLabel`` (``spk_1``) and the spoken words. The label becomes
+    ``Voice 1`` so the browser can match it to its own speaker chips, and
+    consecutive turns of the same voice are merged into one line.
+    """
+    turns: list[tuple[str, str]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        transcription = part.get("audioTranscription")
+        if isinstance(transcription, dict):
+            body = str(transcription.get("text") or "").strip()
+            if not body:
+                body = " ".join(
+                    str(word.get("word") or "").strip()
+                    for word in transcription.get("words") or []
+                    if isinstance(word, dict)
+                ).strip()
+            if not body:
+                continue
+            raw = str(transcription.get("speakerLabel") or "").strip()
+            match = re.fullmatch(r"(?:spk|speaker|voice)[\s_-]*([0-9]{1,2})", raw, re.IGNORECASE)
+            label = f"Voice {int(match.group(1))}" if match else raw
+            if turns and turns[-1][0] == label:
+                turns[-1] = (label, f"{turns[-1][1]} {body}".strip())
+            else:
+                turns.append((label, body))
+        elif part.get("text"):
+            turns.append(("", str(part["text"]).strip()))
+    lines = []
+    for label, body in turns:
+        if not body:
+            continue
+        lines.append(f"{label}: {body}" if label else body)
+    return "\n".join(lines).strip()
+
+
 async def generate(
     provider: str,
     model: str,
@@ -147,12 +187,18 @@ async def generate(
     temperature: float,
     json_mode: bool,
     images: list[dict[str, str]],
+    audio_transcription: bool = False,
 ) -> dict[str, str]:
     if provider not in MODEL_DEFAULTS:
         raise HTTPException(status_code=422, detail="Unsupported AI provider.")
     if not api_key:
         raise HTTPException(status_code=503, detail="No credential is configured for the selected AI provider.")
-    if model not in MODEL_DEFAULTS[provider]:
+    # The transcription models are not chat models, but Voice-to-Note pins them
+    # on purpose and the request below is shaped for them.
+    allowed = set(MODEL_DEFAULTS[provider])
+    if provider == "gemini":
+        allowed.update(settings.gemini_transcribe_models)
+    if model not in allowed:
         raise HTTPException(status_code=422, detail="The requested model is not enabled for this provider.")
 
     timeout = httpx.Timeout(settings.request_timeout_seconds)
@@ -199,27 +245,43 @@ async def generate(
             if data.get("choices", [{}])[0].get("finish_reason") == "length":
                 raise HTTPException(status_code=502, detail="The AI answer was cut off.")
         else:
-            parts: list[dict[str, Any]] = [{"text": prompt}]
+            # A transcription model takes the audio on its own: text next to it
+            # is read as something to answer rather than something to transcribe.
+            parts: list[dict[str, Any]] = [] if audio_transcription else [{"text": prompt}]
             for image in images:
                 parts.append({"inlineData": {"mimeType": image["mime"], "data": image["data"]}})
             response = await client.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 params={"key": api_key},
-                json={
-                    "systemInstruction": {"parts": [{"text": f"{system_prompt}\n\nThe actual generation provider is Gemini and the model is {model}."}]},
-                    "contents": [{"role": "user", "parts": parts}],
-                    "generationConfig": {
-                        "temperature": temperature,
-                        **({"responseMimeType": "application/json"} if json_mode else {}),
-                    },
-                },
+                json=(
+                    # A transcription model is not a chat model: it takes no system
+                    # instruction and no temperature, only the audio and its config.
+                    {
+                        "contents": [{"role": "user", "parts": parts}],
+                        "generationConfig": {"audioTranscriptionConfig": {"diarization": True}},
+                    }
+                    if audio_transcription
+                    else {
+                        "systemInstruction": {"parts": [{"text": f"{system_prompt}\n\nThe actual generation provider is Gemini and the model is {model}."}]},
+                        "contents": [{"role": "user", "parts": parts}],
+                        "generationConfig": {
+                            "temperature": temperature,
+                            **({"responseMimeType": "application/json"} if json_mode else {}),
+                        },
+                    }
+                ),
             )
             if not response.is_success:
                 raise _provider_error(response)
             data = response.json()
             candidate = (data.get("candidates") or [{}])[0]
-            text = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts", []))
-            text = text.strip()
+            answer_parts = candidate.get("content", {}).get("parts", [])
+            if audio_transcription:
+                text = diarized_text(answer_parts)
+                if not text:
+                    text = "".join(part.get("text", "") for part in answer_parts).strip()
+            else:
+                text = "".join(part.get("text", "") for part in answer_parts).strip()
             finish = candidate.get("finishReason")
             if text and finish and finish != "STOP":
                 raise HTTPException(status_code=502, detail="The AI answer was cut off.")

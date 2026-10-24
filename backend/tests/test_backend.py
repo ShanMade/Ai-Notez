@@ -170,7 +170,7 @@ def test_health_check_reports_local_hnsw_store():
 def test_generation_routes_byok_through_shared_service(monkeypatch):
     captured = {}
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         captured.update(
             provider=provider,
             model=model,
@@ -207,7 +207,7 @@ def test_generation_routes_byok_through_shared_service(monkeypatch):
 def test_managed_audio_transcribes_with_gemini_when_it_is_healthy(monkeypatch):
     calls = []
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         calls.append((provider, images[0]["mime"]))
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
@@ -238,7 +238,7 @@ def test_voice_to_note_uses_the_dedicated_transcription_model(monkeypatch):
 
     seen = []
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
@@ -261,12 +261,15 @@ def test_voice_to_note_uses_the_dedicated_transcription_model(monkeypatch):
 
 
 def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
-    seen = []
+    from app.config import settings
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    seen = []
+    first = settings.gemini_transcribe_model
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
-        if model == "gemini-3.5-flash-lite":
-            raise HTTPException(status_code=404, detail="models/gemini-3.5-flash-lite is not found for API version v1beta")
+        if model == first:
+            raise HTTPException(status_code=404, detail=f"models/{model} is not found for API version v1beta")
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
     monkeypatch.setattr(main_module, "generate", fake_generate)
@@ -284,8 +287,161 @@ def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert seen[0] == "gemini-3.5-flash-lite"
-    assert len(seen) > 1 and seen[1] != "gemini-3.5-flash-lite"
+    assert seen[0] == first
+    assert len(seen) > 1 and seen[1] != first
+
+
+def test_a_transcription_request_asks_for_diarization(monkeypatch):
+    import app.providers as providers
+    from app.config import settings
+
+    captured = {}
+
+    class FakeResponse:
+        is_success = True
+
+        def json(self):
+            return {
+                "candidates": [{
+                    "content": {"parts": [
+                        {"audioTranscription": {"speakerLabel": "spk_1", "text": "Good morning."}},
+                        {"audioTranscription": {"speakerLabel": "spk_1", "words": [{"word": "Today"}, {"word": "we"}]}},
+                        {"audioTranscription": {"speakerLabel": "spk_2", "text": "A question?"}},
+                    ]},
+                    "finishReason": "STOP",
+                }]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    result = asyncio.run(
+        providers.generate(
+            "gemini",
+            settings.gemini_transcribe_model,
+            "gemini-key",
+            "Transcribe this part.",
+            "You are NotezAi.",
+            0,
+            False,
+            [{"mime": "audio/webm", "data": "AAAA"}],
+            audio_transcription=True,
+        )
+    )
+
+    body = captured["json"]
+    parts = body["contents"][0]["parts"]
+    assert settings.gemini_transcribe_model in captured["url"]
+    # The audio is the only part: a text instruction next to it is read as a
+    # question about the audio rather than something to transcribe.
+    assert len(parts) == 1 and parts[0]["inlineData"]["mimeType"] == "audio/webm"
+    assert body["generationConfig"]["audioTranscriptionConfig"] == {"diarization": True}
+    # spk_1 -> Voice 1, same voice merged, spk_2 -> Voice 2.
+    assert result["text"] == "Voice 1: Good morning. Today we\nVoice 2: A question?"
+
+
+def test_an_exhausted_transcription_model_falls_back_to_the_next_one(monkeypatch):
+    from app.config import settings
+
+    seen = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
+        seen.append(model)
+        if model == settings.gemini_transcribe_model:
+            raise HTTPException(status_code=429, detail="Quota exceeded for this model.")
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post(
+            "/v1/ai/generate",
+            json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}], "audio_transcription": True},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert seen[0] == settings.gemini_transcribe_model
+    assert seen[1] == settings.gemini_transcribe_fallbacks[0]
+
+
+def test_a_transcription_model_that_rejects_the_shape_falls_back(monkeypatch):
+    from app.config import settings
+
+    seen = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
+        seen.append(model)
+        if model == settings.gemini_transcribe_model:
+            raise HTTPException(status_code=400, detail="audioTranscriptionConfig is not supported by this API revision.")
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post(
+            "/v1/ai/generate",
+            json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}], "audio_transcription": True},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert seen == [settings.gemini_transcribe_model, settings.gemini_transcribe_fallbacks[0]]
+
+
+def test_the_transcription_flag_reaches_the_provider(monkeypatch):
+    captured = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
+        captured.append((bool(images), audio_transcription))
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        client = TestClient(app)
+        client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}], "audio_transcription": True})
+        client.post("/v1/ai/generate", json={"prompt": "Explain osmosis."})
+    finally:
+        app.dependency_overrides.clear()
+
+    # Audio asks for a diarized transcript; a plain text call never does.
+    assert captured == [(True, True), (False, False)]
+
+
+def test_the_transcription_chain_is_transcribe_then_the_flash_lite_models():
+    from app.config import settings
+
+    assert settings.gemini_transcribe_model == "gemini-3.5-transcribe"
+    assert settings.gemini_transcribe_fallbacks == ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+    assert settings.gemini_transcribe_models == ("gemini-3.5-transcribe", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
 
 
 def test_a_part_can_carry_its_recording_plus_eight_voice_samples():
@@ -302,7 +458,7 @@ def test_managed_audio_falls_back_to_groq_when_gemini_is_rate_limited(monkeypatc
     # of being handed to the provider that can still transcribe.
     transcribed = []
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         raise HTTPException(status_code=429, detail="The selected AI provider is rate limited.")
 
     async def fake_transcribe(provider, api_key, audio, mime, instruction, model=""):
@@ -333,7 +489,7 @@ def test_a_cooling_provider_is_still_tried_instead_of_failing_everything(monkeyp
     # Every provider cooling down used to return 503 before a single attempt.
     attempts = []
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         attempts.append(provider)
         return {"text": "ok", "provider": provider, "model": model}
 
@@ -354,7 +510,7 @@ def test_a_cooling_provider_is_still_tried_instead_of_failing_everything(monkeyp
 def test_managed_generation_tries_the_next_provider_on_any_failure(monkeypatch):
     attempts = []
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         attempts.append(provider)
         if provider == "gemini":
             raise HTTPException(status_code=502, detail="The selected AI provider rejected its configured credential.")
@@ -401,7 +557,7 @@ def test_groq_transcription_uses_the_whisper_endpoint(monkeypatch):
             captured.update(kwargs)
             return FakeResponse()
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         captured["prompt"] = prompt
         return {"text": "Voice 1: hello world", "provider": "groq", "model": model}
 
@@ -445,7 +601,7 @@ def test_groq_transcription_walks_the_enabled_chat_models(monkeypatch):
         async def post(self, url, **kwargs):
             return FakeResponse()
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         tried.append(model)
         if model == retired:
             raise HTTPException(status_code=502, detail="The requested model is decommissioned.")
@@ -500,7 +656,7 @@ def test_whisper_retries_the_other_build_when_a_part_comes_back_empty(monkeypatc
             # The full model returns nothing for this clip; the turbo build hears it.
             return FakeResponse("" if len(asked) == 1 else "hello world")
 
-    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         return {"text": "Voice 1: hello world", "provider": "groq", "model": model}
 
     monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
