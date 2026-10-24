@@ -272,8 +272,11 @@ The clip goes to a private IndexedDB store (`notez-voice-samples-v1`) and the pr
 - the live transcript renders a learned name as a speaker chip with the same colouring as a voice number,
   and the prompt forbids inventing a name that is not on the list.
 
-Open it from **Voices** in the recorder panel. Up to eight clips are attached to one request, and each clip
-is capped at 700 KB.
+Open it from **Voices** in the recorder panel, or from **Voice settings** in the settings hub (both open the
+same library). Up to eight clips are attached to one request, and each clip is capped at 700 KB.
+
+The older `notez-voice-profiles-v1` entries are folded into the library once, on first load: their names and
+descriptions carry over (that screen never stored audio, so those entries start text-only).
 
 ### Retrieval settings
 
