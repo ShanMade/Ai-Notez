@@ -212,7 +212,8 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
-| `AI_GEMINI_TRANSCRIBE_MODEL` | Model used for Voice-to-Note audio; defaults to `gemini-3.5-flash-lite` (cheapest current-generation Gemini that accepts audio) |
+| `AI_GEMINI_TRANSCRIBE_MODEL` | Model used for Voice-to-Note audio; defaults to `gemini-3.5-transcribe`, the dedicated speech-to-text model with speaker diarization |
+| `AI_GEMINI_TRANSCRIBE_FALLBACKS` | Ordered models tried when the transcription model is missing or out of quota; defaults to `gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
 | `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model for Voice-to-Note fallback transcription; defaults to `whisper-large-v3` (the full model, not turbo) |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
@@ -258,20 +259,34 @@ repeats are removed before the part is stored (`recTrimOverlap`). A part that en
 two-word echo; a part that ends at a full stop only trims an echo of three words or more, because there it
 is far more likely to be real speech.
 
-Transcription uses `gemini-3.5-flash-lite` (`AI_GEMINI_TRANSCRIBE_MODEL`), the cheapest current-generation
-Gemini that accepts audio. The prompt carries the accuracy rules that matter for a transcript: every
-sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word that
-cannot be heard.
+Transcription uses **Gemini 3.5 Transcribe** (`gemini-3.5-transcribe`, `AI_GEMINI_TRANSCRIBE_MODEL`), the
+dedicated speech-to-text model. It is asked for a **diarized** transcript
+(`generationConfig.audioTranscriptionConfig.diarization: true`) and returns speaker turns directly, as
+`audioTranscription` parts carrying a `speakerLabel` (`spk_1`) and the spoken words. The client turns those
+into `Voice 1: words` lines, merging consecutive turns of the same voice, so the transcript arrives already
+labelled by the model instead of relying on a chat model's guess. The audio is the only part in that
+request: a text instruction next to it is read as a question *about* the audio rather than something to
+transcribe, and a transcription model takes no system instruction or temperature.
 
-Speaker labels are asked for in the same prompt (`[00:12] Voice 1: words`), but a cheap audio model
-sometimes returns a clean transcript with no labels at all, and that part then rendered as plain
-paragraphs — no chips, and **Name speakers** found nothing to name. So a part that comes back without a
-recognised label gets one **text-only labelling pass** (`recLabelPart`, `RECORD_LABEL_PASS`): the audio is
-never sent again, the pass runs on the chat model, and it is kept only if it adds labels *and* keeps every
-spoken word (`recKeepsWords`, 80% floor). A model that summarises instead of labelling cannot delete
-speech. When even that fails, the panel says so instead of quietly showing a wall of text. Labels are
-parsed generously: `Voice 2`, `Speaker 2`, `Speaker B` (A=1), `**Voice 1:**`, `[00:12] Voice 1:`, a colon or
-a dash, and a learned name written with a trailing full stop or different case all count as a speaker turn.
+The Live variant (`gemini-3.5-transcribe-live`) is **not** used: it streams over a WebSocket and, per
+Google's own feature table, cannot diarize, which is the one thing Voice-to-Note needs from it.
+
+Free-tier quotas are counted **per model**, so a model that is out of requests for the day is skipped for
+the next one instead of ending the transcript: `gemini-3.5-transcribe` → `gemini-3.5-flash-lite` →
+`gemini-3.1-flash-lite` (`AI_GEMINI_TRANSCRIBE_FALLBACKS`). The model that answered is remembered for the
+rest of the session, so a spent model costs one request rather than one per part, and the recorder shows the
+chain it will use.
+
+The chat models cannot diarize, so their prompt carries the accuracy rules that matter for a transcript:
+every sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word
+that cannot be heard, with `[00:12] Voice 1: words` as the requested shape. A part that comes back from one
+of those models without a recognised label gets one **text-only labelling pass** (`recLabelPart`,
+`RECORD_LABEL_PASS`): the audio is never sent again, the pass runs on the chat model, and it is kept only if
+it adds labels *and* keeps every spoken word (`recKeepsWords`, 80% floor). A model that summarises instead
+of labelling cannot delete speech. When even that fails, the panel says so instead of quietly showing a wall
+of text. Labels are parsed generously: `Voice 2`, `Speaker 2`, `Speaker B` (A=1), `spk_2`, `**Voice 1:**`,
+`[00:12] Voice 1:`, a colon or a dash, and a learned name written with a trailing full stop or different
+case all count as a speaker turn.
 
 Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
 endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3`) when Gemini is rate limited or rejects its

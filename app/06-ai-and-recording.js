@@ -280,6 +280,11 @@ async function openWikiLink(title) {
       const minutes = Math.floor(seconds / 60), rest = seconds % 60;
       return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
     }
+    // Shown in the recorder so the model in use is never a mystery.
+    function recSttHint() {
+      const chain = recSttModels().map(recModelLabel);
+      return `Transcribed by ${chain[0]} with speaker labels. If it runs out of quota: ${chain.slice(1).join(', then ')}.`;
+    }
     function recChunkHint(ms) {
       const perHour = Math.round(3600000 / ms);
       const hours = Math.round(500 * ms / 3600000 * 10) / 10;
@@ -308,7 +313,7 @@ async function openWikiLink(title) {
     const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0,
       status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
       noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
-      segMarks: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false };
+      segMarks: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false, sttModel: '' };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
     // Audio time, not wall time: every continuation adds the time already
     // recorded, so part marks and the clock keep counting across a resume.
@@ -320,15 +325,32 @@ async function openWikiLink(title) {
     const recTransient = error => error?.status === 429 || error?.status >= 500 || error instanceof TypeError || error?.name === 'AbortError' || error?.code === 'cut';
     const recLabel = provider => provider === 'gemini' ? 'Gemini' : 'Groq';
     const recSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-    // The transcription model: the cheapest current-generation Gemini that takes
-    // audio, so a 20-second part costs a fraction of a cent and the free tier
-    // lasts. Override it with localStorage['notez-stt-model-v1'].
-    const REC_STT_MODEL_DEFAULT = 'gemini-3.5-flash-lite';
-    const recSttModel = () => aiStore.get('notez-stt-model-v1', '') || REC_STT_MODEL_DEFAULT;
+    // Override the model with localStorage['notez-stt-model-v1'].
+    // Gemini 3.5 Transcribe is the dedicated speech-to-text model: it labels up to
+    // eight speakers itself, so the transcript arrives diarized instead of hoping
+    // a chat model guesses the turns. The Live variant (gemini-3.5-transcribe-live)
+    // streams audio over a WebSocket and cannot diarize, so it is not used here.
+    const REC_STT_MODEL_DEFAULT = 'gemini-3.5-transcribe';
+    // Free-tier quotas are counted per model, so an exhausted model is skipped for
+    // the next one instead of ending the transcript.
+    const REC_STT_MODEL_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+    const recSttModels = () => [...new Set([String(aiStore.get('notez-stt-model-v1', '') || '').trim(), REC_STT_MODEL_DEFAULT, ...REC_STT_MODEL_FALLBACKS].filter(Boolean))];
+    const recSttModel = () => recSttModels()[0];
+    // The Live variant streams over a WebSocket, so it can never be used here.
+    const recIsTranscribeModel = model => /transcribe/i.test(String(model || '')) && !/-live$/i.test(String(model || ''));
+    const recModelLabel = model => model === 'gemini-3.5-transcribe' ? 'Gemini 3.5 Transcribe'
+      : model === 'gemini-3.5-flash-lite' ? 'Gemini 3.5 Flash-Lite'
+      : model === 'gemini-3.1-flash-lite' ? 'Gemini 3.1 Flash-Lite' : model;
+    // A model that is missing, rate limited or out of its daily free requests is
+    // not a broken recording: the next model can still answer.
+    const recModelExhausted = error => {
+      if (typeof aiModelMissing === 'function' && aiModelMissing(error)) return true;
+      return error?.status === 429 || /quota|exhaust|rate limit|resource_exhausted/i.test(String(error?.message || ''));
+    };
     const recHasLabels = text => String(text || '').split('\n').some(line => recSpeakerOf(line));
-    // The transcription model is the cheapest Gemini that takes audio, and on
-    // some parts it returns a clean transcript with no speaker labels at all.
-    // That used to reach the note as plain paragraphs, so nothing could be
+    // The chat models that stand in for the transcription model cannot diarize,
+    // and on some parts they return a clean transcript with no speaker labels at
+    // all. That used to reach the note as plain paragraphs, so nothing could be
     // named and the voices looked broken. A short text-only pass labels the
     // part (no audio is sent again); it is kept only when every spoken word
     // survives it, so a model that summarises instead of labelling cannot
@@ -423,13 +445,13 @@ async function openWikiLink(title) {
     // numbered forms share one numbering so colours and naming still line up.
     function recLabelName(name) {
       const raw = String(name || '').replace(/\*+/g, '').trim();
-      const numbered = /^(?:voice|speaker|person)\s*(\d{1,2})$/i.exec(raw);
+      const numbered = /^(?:voice|speaker|person|spk)[\s_-]*(\d{1,2})$/i.exec(raw);
       if (numbered) return `Voice ${Number(numbered[1])}`;
       const letter = /^(?:speaker|person)\s*([A-Za-z])$/i.exec(raw);
       if (letter) return `Voice ${letter[1].toUpperCase().charCodeAt(0) - 64}`;
       return recKnownMatch(raw) || raw;
     }
-    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person)\s*(?:\d{1,2}|[A-Za-z])|[^:\n]{1,40}?)\s*\**\s*(?::\s*|\s+[-–—]\s+)(.*)$/i;
+    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:\d{1,2}|[A-Za-z])|[^:\n]{1,40}?)\s*\**\s*(?::\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
       const match = String(line).match(REC_LABEL_RE);
       if (!match) return null;
@@ -503,20 +525,45 @@ async function openWikiLink(title) {
       const steps = [];
       if (aiUsesManaged() || aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
         const bytes = new Uint8Array(await blob.arrayBuffer());
-        // The recording part always comes first: the backend transcribes the
-        // first audio part and treats the rest as reference voices. The prompt
-        // names the clips in the order they are actually attached, so a clip
-        // that has been evicted can never shift the mapping between a name and
-        // the wrong voice.
-        const samples = withSamples ? await nzVoiceSamples() : [];
-        const images = [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }];
-        for (const sample of samples) images.push({ mime: sample.mime, data: sample.data });
-        // A minute of audio plus the failover chain needs more than the 60 s a
-        // chat call gets, or the client gives up while the backend is still
-        // working and the part is retried for nothing.
-        const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), { temperature: 0, model: recSttModel(), images, timeout: 150000 });
-        const transcript = answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-        return { text: await recLabelPart(transcript, index), provider: answer.provider || 'gemini' };
+        const audio = { mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) };
+        // Whatever worked last time is tried first, so a spent model only costs
+        // one request per recording rather than one per part.
+        const order = [...new Set([REC.sttModel, ...recSttModels()].filter(Boolean))];
+        let lastError = null;
+        for (let i = 0; i < order.length; i++) {
+          const model = order[i];
+          const diarize = recIsTranscribeModel(model);
+          // The transcription model takes the audio on its own and labels the
+          // speakers; reference clips belong to the prompt-driven chat models.
+          // The recording part always comes first, and the prompt names the clips
+          // in the order they are attached, so an evicted clip can never shift the
+          // mapping between a name and the wrong voice.
+          const samples = withSamples && !diarize ? await nzVoiceSamples() : [];
+          const images = [audio];
+          for (const sample of samples) images.push({ mime: sample.mime, data: sample.data });
+          try {
+            // A minute of audio plus the failover chain needs more than the 60 s a
+            // chat call gets, or the client gives up while the backend is still
+            // working and the part is retried for nothing.
+            const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), {
+              temperature: 0, model, images, timeout: 150000,
+              ...(diarize ? { audioTranscription: { diarization: true }, partsOnly: true } : {})
+            });
+            REC.sttModel = model;
+            const transcript = String(answer.text || '').replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+            return { text: await recLabelPart(transcript, index), provider: answer.provider || 'gemini' };
+          } catch (error) {
+            lastError = error;
+            // A transcription model can also reject the request itself (an older
+            // API revision, a key without it): that is worth one fallback too,
+            // because the chat models take the same audio with a prompt.
+            const rejected = diarize && [400, 404, 422, 501].includes(error?.status);
+            if (i === order.length - 1 || !(recModelExhausted(error) || rejected)) throw error;
+            REC.notice = `${recModelLabel(model)} could not take this part (${aiErrorMessage(error)}). Switching to ${recModelLabel(order[i + 1])}.`;
+            updateRecLive();
+          }
+        }
+        throw lastError || new Error('No transcription model is available.');
       } });
       if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
         const raw = await recTranscribeGroq(blob, context);
@@ -713,7 +760,7 @@ Output only the transcript.`;
       REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
       REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set();
       REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.audioSaved = false;
-      REC.noteId = ''; REC.baseMs = 0; REC.stoppedMs = 0; REC.partMs = 0;
+      REC.noteId = ''; REC.baseMs = 0; REC.stoppedMs = 0; REC.partMs = 0; REC.sttModel = '';
       REC.partStartAt = 0; REC.partDeadline = 0; REC.partTimer = 0;
       REC.discarding = false; REC.starting = false;
       clearRecTimers();
@@ -786,6 +833,7 @@ Output only the transcript.`;
           <label class="nzai-label" for="rec-chunk">Transcript length</label>
           <select class="nzai-field" id="rec-chunk">${REC_CHUNK_CHOICES.map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '60 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
           <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
+          <p class="rec-muted" id="rec-stt-hint">${recSttHint()}</p>
           <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
@@ -832,7 +880,7 @@ Output only the transcript.`;
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
           REC.choice = $('#rec-enhance')?.value || 'auto';
-          REC.baseMs = 0; REC.partMs = 0; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();
