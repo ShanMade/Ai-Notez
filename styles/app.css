@@ -3460,3 +3460,1334 @@ html[data-theme="dark"].nzai-open #nz-ai { box-shadow: -22px 0 52px -26px rgba(0
 #nz-ai .ai-md .katex-display { margin: .65em 0; }
 #nz-ai .ai-md .markdown-table .katex-display { margin: .2em 0; }
 html[data-theme] .markdown-body .katex-display { margin: 1em 0; }
+
+/* ==========================================================================
+   Round 21 — NotezAi chat + Voice-to-Note, one surface language.
+
+   Paper-and-ink surfaces, a two-tier masthead, a command-bar composer, and a
+   studio console for recording. Everything here is presentation only: no id,
+   data-attribute or class name changes, so every handler, shortcut, resizer
+   step and recorder transition keeps working exactly as before.
+
+   Tokens are scoped to #nz-ai and named --p-* so they never leak into the
+   workspace. The accent follows the user's own --nz-accent; light and dark
+   each get a full set, and the whole block is appended last so it beats the
+   earlier panel layers on equal specificity.
+   ========================================================================== */
+html[data-theme] #nz-ai {
+  --p-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --p-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --p-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --p-bg: #fbfaf6;
+  --p-card: #ffffff;
+  --p-well: #f2f0e8;
+  --p-ink: #1f241f;
+  --p-muted: #5c645a;
+  --p-faint: #6f776d;
+  --p-line: rgba(31, 36, 31, .10);
+  --p-line-2: rgba(31, 36, 31, .17);
+  --p-accent: var(--nz-accent, #0b6b4f);
+  --p-accent-ink: #ffffff;
+  --p-soft: color-mix(in srgb, var(--p-accent) 9%, transparent);
+  --p-soft-2: color-mix(in srgb, var(--p-accent) 15%, transparent);
+  --p-edge: color-mix(in srgb, var(--p-accent) 34%, transparent);
+  --p-danger: #b83f38;
+  --p-warn: #8a5f0c;
+  --p-shadow-sm: 0 1px 2px rgba(22, 30, 24, .06);
+  --p-shadow-md: 0 18px 40px -24px rgba(22, 30, 24, .38);
+  --p-fade: linear-gradient(to top, var(--p-bg) 12%, color-mix(in srgb, var(--p-bg) 0%, transparent));
+
+  background:
+    radial-gradient(130% 46% at 100% 0%, color-mix(in srgb, var(--p-accent) 7%, transparent), transparent 70%),
+    var(--p-bg);
+  color: var(--p-ink);
+  font-family: var(--p-ui);
+  -webkit-font-smoothing: antialiased;
+}
+html[data-theme="dark"] #nz-ai {
+  --p-bg: #0d1411;
+  --p-card: #15201a;
+  --p-well: #1b2620;
+  --p-ink: #e9efe8;
+  --p-muted: #9aa79d;
+  --p-faint: #839086;
+  --p-line: rgba(233, 239, 232, .12);
+  --p-line-2: rgba(233, 239, 232, .2);
+  --p-accent-ink: #08130f;
+  --p-soft: color-mix(in srgb, var(--p-accent) 20%, transparent);
+  --p-soft-2: color-mix(in srgb, var(--p-accent) 28%, transparent);
+  --p-danger: #e07a72;
+  --p-warn: #d9b062;
+  --p-shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
+  --p-shadow-md: 0 20px 46px -26px rgba(0, 0, 0, .8);
+  background:
+    radial-gradient(130% 46% at 100% 0%, color-mix(in srgb, var(--p-accent) 13%, transparent), transparent 70%),
+    var(--p-bg);
+}
+
+/* ---- masthead ----------------------------------------------------------- */
+html[data-theme] #nz-ai .dock-chrome {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 14px 10px;
+  background: transparent;
+  border-bottom: 1px solid var(--p-line);
+}
+html[data-theme] #nz-ai .dock-chrome::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--p-accent), transparent 62%);
+  opacity: .45;
+}
+html[data-theme] #nz-ai .dock-title { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; }
+html[data-theme] #nz-ai .dock-title-mark {
+  position: relative;
+  width: 30px; height: 30px; flex: 0 0 30px;
+  border-radius: 9px;
+  background: var(--nz-logo) center / 74% no-repeat, var(--p-soft-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-accent) 24%, transparent);
+}
+html[data-theme] #nz-ai .dock-title b { font-size: 13.5px; font-weight: 650; letter-spacing: -.005em; color: var(--p-ink); }
+html[data-theme] #nz-ai .dock-title small {
+  font-family: var(--p-mono);
+  font-size: 9.5px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--p-muted);
+  margin-top: 2px;
+}
+
+/* one quiet strip of actions under the wordmark, instead of eight buttons
+   crammed into the title row */
+html[data-theme] #nz-ai .fl-bar {
+  flex: 1 0 100%;
+  order: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--p-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--p-ink) 3.5%, var(--p-card));
+  box-shadow: none;
+}
+html[data-theme] #nz-ai .fl-btn {
+  width: 32px; height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  border: 0; border-radius: 8px;
+  background: transparent;
+  color: var(--p-muted);
+  box-shadow: none;
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, transform .14s ease;
+}
+html[data-theme] #nz-ai .fl-btn:hover { background: var(--p-card); color: var(--p-ink); box-shadow: var(--p-shadow-sm); }
+html[data-theme] #nz-ai .fl-btn:active { transform: scale(.94); }
+html[data-theme] #nz-ai .fl-btn:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+html[data-theme] #nz-ai .fl-bar .fl-btn { color: var(--p-muted); }
+html[data-theme] #nz-ai .fl-aa span { font: 600 11px/1 var(--p-ui); letter-spacing: -.02em; }
+html[data-theme] #nz-ai .fl-bar .fl-new {
+  width: auto;
+  gap: 6px;
+  padding: 0 11px 0 9px;
+  border-radius: 8px;
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--p-accent) 45%, transparent);
+}
+html[data-theme] #nz-ai .fl-bar .fl-new::after {
+  content: "New chat";
+  font: 600 11.5px/1 var(--p-ui);
+  letter-spacing: .01em;
+}
+html[data-theme] #nz-ai .fl-bar .fl-new:hover {
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+  filter: brightness(1.07);
+  box-shadow: 0 3px 10px -4px color-mix(in srgb, var(--p-accent) 70%, transparent);
+}
+html[data-theme] #nz-ai .fl-bar .fl-btn[data-dock="voice"] { color: var(--p-accent); background: var(--p-soft); }
+html[data-theme] #nz-ai .fl-bar .fl-btn[data-dock="voice"]:hover { background: var(--p-soft-2); }
+html[data-theme] #nz-ai .fl-bar .fl-btn[data-dock="voice"][aria-selected="true"] {
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+}
+html[data-theme] #nz-ai .dock-badge { color: var(--p-danger); font-size: 8px; }
+html[data-theme] #nz-ai .fl-bar .fl-btn[data-dock="voice"][aria-selected="true"] .dock-badge { color: #fff; }
+
+/* ---- body rhythm -------------------------------------------------------- */
+html[data-theme] #nz-ai .nzai-body { padding: 0 15px 12px; gap: 8px; background: transparent; }
+html[data-theme] #nz-ai .rec-body { padding: 16px 15px 18px; gap: 12px; }
+html[data-theme] #nz-ai .ai-thread {
+  gap: 22px;
+  padding: 16px 3px 12px 1px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--p-ink) 16%, transparent) transparent;
+}
+html[data-theme] #nz-ai .ai-thread::-webkit-scrollbar { width: 8px; }
+html[data-theme] #nz-ai .ai-thread::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--p-ink) 16%, transparent);
+}
+html[data-theme] #nz-ai .ai-thread::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--p-ink) 28%, transparent); }
+html[data-theme] #nz-ai .ai-thread-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 26px;
+  background: var(--p-fade);
+  pointer-events: none;
+}
+html[data-theme] #nz-ai .ai-composer-wrap { padding: 8px 0 0; }
+html[data-theme] #nz-ai .ai-foot {
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 0 0;
+  font-size: 10.5px;
+  letter-spacing: .005em;
+  color: var(--p-faint);
+  opacity: 1;
+}
+
+/* ---- empty state: an editorial opener, then an indexed list -------------- */
+html[data-theme] #nz-ai .ai-welcome { margin: auto 0; padding: 14px 1px 2px; text-align: left; }
+html[data-theme] #nz-ai .ai-welcome-head::before {
+  content: "Ask your notes";
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 4px 9px;
+  border: 1px solid var(--p-edge);
+  border-radius: 7px;
+  background: var(--p-soft);
+  color: var(--p-accent);
+  font: 650 9.5px/1 var(--p-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+html[data-theme] #nz-ai .ai-welcome-head h3 {
+  margin: 0 0 10px;
+  font-family: var(--p-serif);
+  font-size: 25px;
+  line-height: 1.14;
+  font-weight: 500;
+  letter-spacing: -.015em;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .ai-welcome-head h3 em { font-style: italic; font-weight: 500; color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-welcome-head p {
+  margin: 0 0 16px;
+  max-width: 40ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--p-muted);
+  text-align: left;
+}
+html[data-theme] #nz-ai .ai-welcome-head p b { color: var(--p-ink); font-weight: 600; }
+
+html[data-theme] #nz-ai .ai-suggest {
+  counter-reset: sg;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--p-line);
+}
+html[data-theme] #nz-ai .ai-card {
+  counter-increment: sg;
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 28px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 9px 2px 9px 0;
+  border: 0;
+  border-bottom: 1px solid var(--p-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--p-ink);
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background .16s ease, padding .16s ease;
+}
+html[data-theme] #nz-ai .ai-card::before {
+  content: counter(sg, decimal-leading-zero);
+  font: 500 9.5px/1 var(--p-mono);
+  letter-spacing: .06em;
+  color: var(--p-faint);
+  transition: color .16s ease;
+}
+html[data-theme] #nz-ai .ai-card::after {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--p-accent);
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+html[data-theme] #nz-ai .ai-card:hover:not(:disabled),
+html[data-theme] #nz-ai .ai-card:focus-visible {
+  padding-left: 9px;
+  border-radius: 10px;
+  background: var(--p-soft);
+  transform: none;
+}
+html[data-theme] #nz-ai .ai-card:hover:not(:disabled)::before { color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-card:hover:not(:disabled)::after { opacity: 1; }
+html[data-theme] #nz-ai .ai-card:active { transform: scale(.995); }
+html[data-theme] #nz-ai .ai-card:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+html[data-theme] #nz-ai .ai-card-ic {
+  width: 28px; height: 28px; flex: 0 0 28px;
+  display: inline-grid; place-items: center;
+  border-radius: 8px;
+  background: var(--p-soft-2);
+  color: var(--p-accent);
+}
+html[data-theme] #nz-ai .ai-card-ic svg { width: 15px; height: 15px; }
+html[data-theme] #nz-ai .ai-card-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+html[data-theme] #nz-ai .ai-card b { font-size: 13px; font-weight: 600; color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-card small { font-size: 11.5px; line-height: 1.4; text-align: left; color: var(--p-muted); }
+html[data-theme] #nz-ai .ai-card-go {
+  justify-self: end;
+  color: var(--p-faint);
+  font-size: 13px;
+  transition: transform .16s ease, color .16s ease;
+}
+html[data-theme] #nz-ai .ai-card:hover:not(:disabled) .ai-card-go { transform: translateX(3px); color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-hint { margin-top: 14px; font-size: 10.5px; color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-hint kbd {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 1px 5px;
+  border: 1px solid var(--p-line-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--p-card);
+  color: var(--p-muted);
+  font: 600 9.5px/1.5 var(--p-mono);
+}
+
+/* ---- conversation ------------------------------------------------------- */
+html[data-theme] #nz-ai .ai-msg { animation: p-rise .2s ease-out both; }
+html[data-theme] #nz-ai .ai-msg.user { align-items: flex-end; gap: 5px; }
+html[data-theme] #nz-ai .ai-bubble-user {
+  max-width: 86%;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--p-accent) 16%, transparent);
+  border-radius: 16px 16px 5px 16px;
+  background: color-mix(in srgb, var(--p-accent) 10%, var(--p-card));
+  color: var(--p-ink);
+  font-size: var(--chat-size, 16.5px);
+  line-height: 1.55;
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .ai-user-tools { opacity: 0; padding: 0 2px; transition: opacity .16s ease; }
+html[data-theme] #nz-ai .ai-msg.user:hover .ai-user-tools,
+html[data-theme] #nz-ai .ai-msg.user:focus-within .ai-user-tools { opacity: 1; }
+html[data-theme] #nz-ai .ai-time { font: 500 9.5px/1 var(--p-mono); letter-spacing: .04em; color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-tiny {
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--p-muted); font: 600 10.5px/1 var(--p-ui);
+  padding: 3px 6px; cursor: pointer;
+}
+html[data-theme] #nz-ai .ai-tiny:hover { background: var(--p-well); color: var(--p-ink); }
+
+html[data-theme] #nz-ai .ai-msg.ai {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  column-gap: 11px;
+  align-items: start;
+  animation: none;
+}
+html[data-theme] #nz-ai .ai-msg.ai::before {
+  content: "";
+  grid-column: 1; grid-row: 1;
+  width: 26px; height: 26px;
+  margin-top: 1px;
+  border-radius: 8px;
+  background: var(--nz-logo) center / 72% no-repeat, var(--p-soft-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-accent) 20%, transparent);
+}
+html[data-theme] #nz-ai .ai-msg.ai .ai-body { grid-column: 2; grid-row: 1; min-width: 0; padding: 0; }
+html[data-theme] #nz-ai .thinking-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 11px; }
+html[data-theme] #nz-ai .thinking-row .ai-typing {
+  grid-column: 2;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 0;
+  border: 0; background: transparent;
+  color: var(--p-muted); font-size: 11.5px;
+}
+html[data-theme] #nz-ai .ai-typing span { width: 5px; height: 5px; background: var(--p-accent); opacity: .5; }
+html[data-theme] #nz-ai .ai-caret { display: inline-block; width: 6px; height: 14px; margin-left: 2px; border-radius: 2px; background: var(--p-accent); animation: p-blink 1s steps(2) infinite; }
+
+html[data-theme] #nz-ai .ai-md {
+  font-size: var(--chat-size, 16.5px);
+  line-height: 1.68;
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+html[data-theme] #nz-ai .ai-md > :first-child { margin-top: 0; }
+html[data-theme] #nz-ai .ai-md > :last-child { margin-bottom: 0; }
+html[data-theme] #nz-ai .ai-md p { margin: 0 0 10px; }
+html[data-theme] #nz-ai .ai-md ul, html[data-theme] #nz-ai .ai-md ol { margin: 0 0 10px; padding-left: 20px; }
+html[data-theme] #nz-ai .ai-md li { margin: 3px 0; }
+html[data-theme] #nz-ai .ai-md li::marker { color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-md h1, html[data-theme] #nz-ai .ai-md h2, html[data-theme] #nz-ai .ai-md h3, html[data-theme] #nz-ai .ai-md h4 {
+  margin: 16px 0 6px;
+  font-family: var(--p-ui);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  line-height: 1.35;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .ai-md h1 { font-size: 16px; }
+html[data-theme] #nz-ai .ai-md a { color: var(--p-accent); text-underline-offset: 2px; }
+html[data-theme] #nz-ai .ai-md strong { font-weight: 640; }
+html[data-theme] #nz-ai .ai-md hr { margin: 14px 0; border: 0; border-top: 1px solid var(--p-line); }
+html[data-theme] #nz-ai .ai-md blockquote {
+  margin: 10px 0;
+  padding: 3px 0 3px 12px;
+  border-left: 2px solid var(--p-edge);
+  background: transparent;
+  color: var(--p-muted);
+}
+html[data-theme] #nz-ai .ai-md code {
+  padding: 1px 5px;
+  border: 1px solid var(--p-line);
+  border-radius: 5px;
+  background: var(--p-well);
+  color: var(--p-ink);
+  font: 500 .88em/1.5 var(--p-mono);
+}
+html[data-theme] #nz-ai .ai-md pre {
+  margin: 10px 0;
+  padding: 11px 12px;
+  border: 1px solid var(--p-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--p-ink) 4%, var(--p-card));
+  overflow-x: auto;
+}
+html[data-theme] #nz-ai .ai-md pre code { padding: 0; border: 0; background: transparent; font-size: 12px; line-height: 1.6; }
+html[data-theme] #nz-ai .ai-copy-code {
+  top: 6px; right: 6px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 7px;
+  background: var(--p-card);
+  color: var(--p-muted);
+  font: 600 10px/1 var(--p-ui);
+  padding: 5px 8px;
+  opacity: .55;
+}
+html[data-theme] #nz-ai .ai-copy-code:hover { opacity: 1; color: var(--p-ink); background: var(--p-card); }
+html[data-theme] #nz-ai .ai-md table.markdown-table {
+  margin: 10px 0;
+  border: 1px solid var(--p-line);
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+html[data-theme] #nz-ai .ai-md table.markdown-table th {
+  background: var(--p-well);
+  color: var(--p-ink);
+  font-weight: 650;
+}
+/* rounded corners without clipping: the table keeps its horizontal scroll */
+html[data-theme] #nz-ai .ai-md table.markdown-table th:first-child { border-top-left-radius: 9px; }
+html[data-theme] #nz-ai .ai-md table.markdown-table th:last-child { border-top-right-radius: 9px; }
+html[data-theme] #nz-ai .ai-md table.markdown-table tr:last-child td:first-child { border-bottom-left-radius: 9px; }
+html[data-theme] #nz-ai .ai-md table.markdown-table tr:last-child td:last-child { border-bottom-right-radius: 9px; }
+html[data-theme] #nz-ai .ai-md table.markdown-table th,
+html[data-theme] #nz-ai .ai-md table.markdown-table td { padding: 6px 10px; border-bottom: 1px solid var(--p-line); }
+html[data-theme] #nz-ai .ai-md table.markdown-table tr:last-child td { border-bottom: 0; }
+
+html[data-theme] #nz-ai .ai-model {
+  margin-top: 6px;
+  font: 500 9.5px/1.4 var(--p-mono);
+  letter-spacing: .04em;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .ai-actions-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 1px;
+  margin: 6px 0 0 -6px;
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+html[data-theme] #nz-ai .ai-msg.ai:hover .ai-actions-row,
+html[data-theme] #nz-ai .ai-msg.ai:focus-within .ai-actions-row,
+html[data-theme] #nz-ai .ai-actions-row:has(.ai-action.primary) { opacity: 1; }
+@media (hover: none) { html[data-theme] #nz-ai .ai-actions-row { opacity: 1; } }
+html[data-theme] #nz-ai .ai-action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--p-muted);
+  font: 500 11.5px/1.2 var(--p-ui);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+html[data-theme] #nz-ai .ai-action:hover { background: var(--p-well); color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-action:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+html[data-theme] #nz-ai .ai-action.ai-ic { width: 30px; height: 30px; padding: 0; border-radius: 8px; }
+html[data-theme] #nz-ai .ai-action.ai-ic svg { width: 15px; height: 15px; }
+html[data-theme] #nz-ai .ai-action.ai-ic.on { background: var(--p-soft-2); color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-action.ai-txt { margin-left: 4px; padding: 0 8px; color: var(--p-muted); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+html[data-theme] #nz-ai .ai-action.primary { background: var(--p-accent); color: var(--p-accent-ink); border-color: transparent; font-weight: 600; }
+html[data-theme] #nz-ai .ai-action.primary:hover { background: var(--p-accent); filter: brightness(1.07); color: var(--p-accent-ink); }
+html[data-theme] #nz-ai .ai-action.danger, html[data-theme] #nz-ai .ai-action.rec-danger { color: var(--p-danger); }
+html[data-theme] #nz-ai .ai-action.danger:hover, html[data-theme] #nz-ai .ai-action.rec-danger:hover { background: color-mix(in srgb, var(--p-danger) 12%, transparent); }
+html[data-theme] #nz-ai .ai-fb { display: inline-flex; gap: 1px; }
+html[data-theme] #nz-ai .ai-msg.error .ai-md { color: var(--p-danger); }
+
+/* ---- sources: one compact, collapsible card ----------------------------- */
+html[data-theme] #nz-ai .ai-sources {
+  margin-top: 12px;
+  padding: 9px 10px 10px;
+  border: 1px solid var(--p-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--p-ink) 2.5%, var(--p-card));
+}
+html[data-theme] #nz-ai .ai-sources-head { display: flex; align-items: center; gap: 7px; min-height: 18px; }
+html[data-theme] #nz-ai .ai-sources .ai-sources-title {
+  font: 650 9px/1 var(--p-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-muted);
+}
+html[data-theme] #nz-ai .ai-sources .ai-sources-count {
+  min-width: 17px; height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--p-soft-2);
+  color: var(--p-accent);
+  font: 650 9.5px/17px var(--p-mono);
+}
+html[data-theme] #nz-ai .ai-sources-toggle {
+  margin-left: auto;
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--p-accent);
+  font: 600 10.5px/1.3 var(--p-ui);
+  cursor: pointer;
+}
+html[data-theme] #nz-ai .ai-sources-toggle:hover { text-decoration: underline; text-underline-offset: 2px; }
+html[data-theme] #nz-ai .ai-src-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 4px; margin-top: 8px; }
+html[data-theme] #nz-ai .ai-src {
+  gap: 7px;
+  min-height: 27px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--p-line);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font-size: 11.5px;
+  transition: border-color .14s ease, background .14s ease, transform .14s ease;
+}
+html[data-theme] #nz-ai .ai-src:hover {
+  border-color: var(--p-edge);
+  background: var(--p-soft);
+  color: var(--p-ink);
+  transform: translateY(-1px);
+}
+html[data-theme] #nz-ai .ai-src-n {
+  flex: none;
+  width: 19px; height: 19px;
+  display: inline-grid; place-items: center;
+  border-radius: 50%;
+  background: var(--p-soft-2);
+  color: var(--p-accent);
+  font: 650 9px/1 var(--p-mono);
+}
+html[data-theme] #nz-ai .ai-src-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- quick chips, slash menu, composer --------------------------------- */
+html[data-theme] #nz-ai .ai-quickbar {
+  gap: 5px;
+  padding: 2px 0 6px;
+  mask-image: linear-gradient(90deg, #000 93%, transparent);
+}
+html[data-theme] #nz-ai .ai-qchip {
+  gap: 6px;
+  min-height: 29px;
+  padding: 0 11px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-muted);
+  font: 500 11.5px/1 var(--p-ui);
+  box-shadow: none;
+  transition: border-color .14s ease, background .14s ease, color .14s ease, transform .14s ease;
+}
+html[data-theme] #nz-ai .ai-qchip svg { width: 13px; height: 13px; color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-qchip:hover:not(:disabled) {
+  border-color: var(--p-edge);
+  background: var(--p-soft);
+  color: var(--p-accent);
+  transform: translateY(-1px);
+}
+html[data-theme] #nz-ai .ai-qchip:hover:not(:disabled) svg { color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-qchip:active { transform: scale(.97); }
+html[data-theme] #nz-ai .ai-qchip-more { border-style: dashed; }
+html[data-theme] #nz-ai .ai-qchip b { color: var(--p-accent); font-weight: 700; }
+
+html[data-theme] #nz-ai .ai-composer {
+  align-items: flex-end;
+  gap: 2px;
+  padding: 5px 5px 5px 13px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 16px;
+  background: var(--p-card);
+  box-shadow: var(--p-shadow-sm);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+html[data-theme] #nz-ai .ai-composer:focus-within {
+  border-color: var(--p-edge);
+  box-shadow: 0 0 0 3px var(--p-soft), var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .ai-composer textarea {
+  padding: 9px 0 8px;
+  font-size: var(--chat-size, 16.5px);
+  line-height: 1.5;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .ai-composer textarea::placeholder { color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-ibtn {
+  width: 30px; height: 30px;
+  flex: 0 0 30px;
+  border: 0; border-radius: 8px;
+  background: transparent;
+  color: var(--p-muted);
+  font: 500 15px/1 var(--p-ui);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease;
+}
+html[data-theme] #nz-ai .ai-ibtn svg { width: 16px; height: 16px; }
+html[data-theme] #nz-ai .ai-ibtn:hover:not(:disabled) { background: var(--p-well); color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-ibtn:active { transform: scale(.94); }
+html[data-theme] #nz-ai .ai-send {
+  width: 33px; height: 33px;
+  flex: 0 0 33px;
+  margin: 1px;
+  border: 0; border-radius: 9px;
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+  box-shadow: 0 2px 8px -3px color-mix(in srgb, var(--p-accent) 80%, transparent);
+  transition: filter .14s ease, transform .14s ease, background .14s ease;
+}
+html[data-theme] #nz-ai .ai-send:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+html[data-theme] #nz-ai .ai-send:active:not(:disabled) { transform: scale(.95); }
+html[data-theme] #nz-ai .ai-send:disabled { background: var(--p-well); color: var(--p-faint); box-shadow: none; opacity: 1; cursor: default; }
+html[data-theme] #nz-ai .ai-send.stop { background: var(--p-ink); color: var(--p-bg); }
+
+html[data-theme] #nz-ai .ai-slash {
+  padding: 6px;
+  border: 1px solid var(--p-line);
+  border-radius: 14px;
+  background: var(--p-card);
+  box-shadow: var(--p-shadow-md);
+}
+html[data-theme] #nz-ai .ai-slash-hint { padding: 2px 8px 6px; color: var(--p-faint); font: 500 9.5px/1.4 var(--p-ui); }
+html[data-theme] #nz-ai .ai-slash-hint span:first-child { font-family: var(--p-mono); letter-spacing: .12em; }
+html[data-theme] #nz-ai .ai-slash-group { padding: 9px 8px 3px; color: var(--p-faint); font: 650 9px/1 var(--p-mono); letter-spacing: .13em; }
+html[data-theme] #nz-ai .ai-slash-item { padding: 7px 8px; border-radius: 8px; font-size: 12.5px; color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-slash-item b { color: var(--p-accent); font: 600 11px/1.4 var(--p-mono); }
+html[data-theme] #nz-ai .ai-slash-item span:last-child { color: var(--p-muted); }
+html[data-theme] #nz-ai .ai-slash-item .ai-slash-ic { color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-slash-item.on, html[data-theme] #nz-ai .ai-slash-item:hover { background: var(--p-soft); }
+html[data-theme] #nz-ai .ai-slash-item.on .ai-slash-ic { color: var(--p-accent); }
+
+html[data-theme] #nz-ai .ai-notice,
+html[data-theme] #nz-ai .ai-editing,
+html[data-theme] #nz-ai .ai-quizbar {
+  padding: 8px 11px;
+  border: 1px solid var(--p-line);
+  border-radius: 10px;
+  background: var(--p-well);
+  color: var(--p-ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+html[data-theme] #nz-ai .ai-quizbar { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .ai-task-card {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--p-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--p-accent) 4%, var(--p-card));
+}
+html[data-theme] #nz-ai .ai-task-head b { font-size: 12px; font-weight: 650; }
+html[data-theme] #nz-ai .ai-task-head span { font-size: 10.5px; color: var(--p-muted); }
+html[data-theme] #nz-ai .ai-suggest-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 500 11.5px/1.3 var(--p-ui);
+  cursor: pointer;
+}
+html[data-theme] #nz-ai .ai-suggest-chip:hover { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .ai-suggest-chip.on { border-color: var(--p-edge); background: var(--p-soft-2); color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-jump {
+  z-index: 2;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--p-ink) 12%, transparent);
+  border-radius: 16px;
+  background: var(--p-ink);
+  color: var(--p-bg);
+  font: 600 11.5px/1 var(--p-ui);
+  box-shadow: var(--p-shadow-md);
+  cursor: pointer;
+}
+html[data-theme] #nz-ai .ai-jump:hover { filter: brightness(1.08); }
+
+/* ---- history ------------------------------------------------------------ */
+html[data-theme] #nz-ai .hist-day {
+  padding: 14px 2px 5px;
+  color: var(--p-faint);
+  font: 650 9px/1 var(--p-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+html[data-theme] #nz-ai .hist-row {
+  display: flex; align-items: center; gap: 2px;
+  min-height: 52px;
+  padding: 0 2px 0 11px;
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--p-line);
+  border-radius: 0;
+  background: transparent;
+  transition: background .14s ease, border-color .14s ease;
+}
+html[data-theme] #nz-ai .hist-row:hover { background: color-mix(in srgb, var(--p-ink) 3%, var(--p-card)); }
+html[data-theme] #nz-ai .hist-row.current {
+  border: 1px solid var(--p-edge);
+  border-radius: 10px;
+  background: var(--p-soft);
+}
+html[data-theme] #nz-ai .hist-open { min-height: 52px; gap: 1px; padding: 0; color: var(--p-ink); }
+html[data-theme] #nz-ai .hist-open b { font-size: 12.5px; font-weight: 600; }
+html[data-theme] #nz-ai .hist-open small { font: 500 10px/1.4 var(--p-mono); letter-spacing: .03em; color: var(--p-faint); }
+html[data-theme] #nz-ai .hist-del { width: 32px; height: 32px; border-radius: 8px; color: var(--p-faint); }
+html[data-theme] #nz-ai .hist-del:hover { background: color-mix(in srgb, var(--p-danger) 12%, transparent); color: var(--p-danger); }
+
+/* ---- settings ----------------------------------------------------------- */
+html[data-theme] #nz-ai .nzai-section-head {
+  margin: 2px 0 -2px;
+  font: 650 9px/1 var(--p-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .nzai-section-head small { font-size: 10px; letter-spacing: .02em; text-transform: none; color: var(--p-muted); }
+html[data-theme] #nz-ai .nzai-source { display: grid; grid-template-columns: 1fr; gap: 8px; }
+html[data-theme] #nz-ai .nzai-src {
+  position: relative;
+  display: block;
+  padding: 11px 12px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 12px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease;
+}
+html[data-theme] #nz-ai .nzai-src b { display: block; font-size: 12.5px; font-weight: 650; }
+html[data-theme] #nz-ai .nzai-src small { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--p-muted); }
+html[data-theme] #nz-ai .nzai-src:hover { border-color: var(--p-edge); }
+html[data-theme] #nz-ai .nzai-src.on { border-color: var(--p-accent); background: var(--p-soft); padding-right: 30px; }
+html[data-theme] #nz-ai .nzai-src.on::after {
+  content: "";
+  position: absolute; top: 12px; right: 12px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--p-accent);
+  box-shadow: 0 0 0 3px var(--p-soft-2);
+}
+html[data-theme] #nz-ai .nzai-chips { gap: 6px; }
+html[data-theme] #nz-ai .nzai-chip {
+  padding: 6px 11px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-muted);
+  font: 600 11.5px/1 var(--p-ui);
+  cursor: pointer;
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+html[data-theme] #nz-ai .nzai-chip:hover:not(:disabled) { border-color: var(--p-edge); color: var(--p-ink); }
+html[data-theme] #nz-ai .nzai-chip.on { border-color: var(--p-accent); background: var(--p-accent); color: var(--p-accent-ink); }
+html[data-theme] #nz-ai .nzai-keybox {
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--p-edge);
+  border-radius: 12px;
+  background: var(--p-soft);
+}
+html[data-theme] #nz-ai .nzai-keybox b { font-size: 12px; }
+html[data-theme] #nz-ai .nzai-keybox span { font: 600 12px/1.4 var(--p-mono); letter-spacing: .08em; color: var(--p-accent); }
+html[data-theme] #nz-ai .nzai-keybox small, html[data-theme] #nz-ai .nzai-small { font-size: 11px; line-height: 1.5; color: var(--p-muted); opacity: 1; }
+html[data-theme] #nz-ai .nzai-small a { color: var(--p-accent); }
+html[data-theme] #nz-ai .nzai-actions { gap: 6px; margin-top: 7px; }
+html[data-theme] #nz-ai .nzai-actions button,
+html[data-theme] #nz-ai .nzai-row-inline button,
+html[data-theme] #nz-ai .nzai-keybox button {
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 8px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 600 11px/1 var(--p-ui);
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease;
+}
+html[data-theme] #nz-ai .nzai-actions button:hover,
+html[data-theme] #nz-ai .nzai-row-inline button:hover,
+html[data-theme] #nz-ai .nzai-keybox button:hover { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .nzai-keybox button.danger { border-color: color-mix(in srgb, var(--p-danger) 40%, transparent); color: var(--p-danger); }
+html[data-theme] #nz-ai .nzai-label {
+  margin-top: 8px;
+  font: 650 9px/1 var(--p-mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .nzai-field {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 10px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 500 12.5px/1.4 var(--p-ui);
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+html[data-theme] #nz-ai select.nzai-field {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%236c746a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+html[data-theme="dark"] #nz-ai select.nzai-field {
+  background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%239aa79d' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html[data-theme] #nz-ai .nzai-field:focus,
+html[data-theme] #nz-ai .nzai-field:focus-visible {
+  outline: none;
+  border-color: var(--p-edge);
+  box-shadow: 0 0 0 3px var(--p-soft);
+}
+html[data-theme] #nz-ai .nzai-row-inline { gap: 8px; }
+html[data-theme] #nz-ai .nzai-primary {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--p-accent);
+  border-radius: 10px;
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+  font: 600 12.5px/1 var(--p-ui);
+  cursor: pointer;
+  transition: filter .14s ease, transform .14s ease;
+}
+html[data-theme] #nz-ai .nzai-primary:hover { filter: brightness(1.07); }
+html[data-theme] #nz-ai .nzai-primary:active { transform: scale(.995); }
+html[data-theme] #nz-ai .nzai-check { gap: 8px; font-size: 12px; color: var(--p-ink); }
+html[data-theme] #nz-ai .nzai-check input[type="checkbox"] { accent-color: var(--p-accent); width: 16px; height: 16px; }
+html[data-theme] #nz-ai .nzai-notice { min-height: 0; padding: 0; border: 0; background: transparent; font-size: 11.5px; color: var(--p-muted); }
+html[data-theme] #nz-ai .nzai-notice:not(:empty) {
+  padding: 8px 10px;
+  border: 1px solid var(--p-edge);
+  border-radius: 9px;
+  background: var(--p-soft);
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai :is(button, input, textarea, select):focus-visible { outline: 2px solid var(--p-accent); outline-offset: 2px; }
+
+/* ---- voice to note ------------------------------------------------------ */
+html[data-theme] #nz-ai .rec-body { gap: 12px; }
+html[data-theme] #nz-ai .rec-sub {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--p-muted);
+}
+html[data-theme] #nz-ai .rec-sub::before {
+  content: "Voice to note";
+  display: block;
+  margin-bottom: 8px;
+  color: var(--p-accent);
+  font: 650 9.5px/1 var(--p-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+html[data-theme] #nz-ai .rec-mode {
+  display: flex;
+  width: 100%;
+  padding: 3px;
+  border: 1px solid var(--p-line);
+  border-radius: 11px;
+  background: var(--p-well);
+}
+html[data-theme] #nz-ai .rec-opt {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--p-muted);
+  font: 600 12px/1 var(--p-ui);
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+html[data-theme] #nz-ai .rec-opt input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+html[data-theme] #nz-ai .rec-opt:hover { color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-opt:has(input:checked) {
+  background: var(--p-card);
+  color: var(--p-ink);
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .rec-opt:has(input:focus-visible) { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+
+/* idle: the record button is the whole point of the screen */
+html[data-theme] #nz-ai .rec-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 16px;
+  border: 1px solid var(--p-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--p-ink) 3%, var(--p-card));
+  text-align: center;
+}
+html[data-theme] #nz-ai .rec-stage.idle {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  text-align: left;
+  background:
+    radial-gradient(120% 150% at 0% 0%, color-mix(in srgb, var(--p-accent) 16%, transparent), transparent 62%),
+    var(--p-card);
+  border-color: color-mix(in srgb, var(--p-accent) 22%, var(--p-line));
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .rec-rec {
+  position: relative;
+  flex: 0 0 56px;
+  width: 56px; height: 56px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #e2594f 0%, #bf3a32 100%);
+  box-shadow: 0 10px 24px -12px rgba(196, 69, 61, .9), inset 0 1px 0 rgba(255, 255, 255, .35);
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+html[data-theme] #nz-ai .rec-rec::before,
+html[data-theme] #nz-ai .rec-rec::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--p-danger) 30%, transparent);
+  transition: inset .2s ease, opacity .2s ease;
+}
+html[data-theme] #nz-ai .rec-rec::before { inset: -7px; }
+html[data-theme] #nz-ai .rec-rec::after { inset: -14px; opacity: .55; }
+html[data-theme] #nz-ai .rec-rec:hover:not(:disabled) { transform: translateY(-1px) scale(1.02); filter: brightness(1.04); }
+html[data-theme] #nz-ai .rec-rec:hover:not(:disabled)::before { inset: -9px; }
+html[data-theme] #nz-ai .rec-rec:hover:not(:disabled)::after { inset: -17px; opacity: .35; }
+html[data-theme] #nz-ai .rec-rec:active:not(:disabled) { transform: scale(.97); }
+html[data-theme] #nz-ai .rec-rec:disabled { cursor: default; opacity: .7; }
+html[data-theme] #nz-ai .rec-rec:focus-visible { outline: 2px solid var(--p-danger); outline-offset: 6px; }
+html[data-theme] #nz-ai .rec-rec i {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .18);
+}
+html[data-theme] #nz-ai .rec-stage-t { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+html[data-theme] #nz-ai .rec-stage-t b { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-stage-t small { font-size: 11.5px; line-height: 1.45; color: var(--p-muted); }
+
+/* live: a console */
+html[data-theme] #nz-ai .rec-stage.recording,
+html[data-theme] #nz-ai .rec-stage.paused {
+  background:
+    radial-gradient(140% 120% at 50% 0%, color-mix(in srgb, var(--p-accent) 10%, transparent), transparent 70%),
+    var(--p-card);
+}
+html[data-theme] #nz-ai .rec-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 11px 4px 9px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 650 9.5px/1 var(--p-mono);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+html[data-theme] #nz-ai .rec-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--p-faint); }
+html[data-theme] #nz-ai .rec-state.recording i { background: var(--p-danger); animation: p-pulse 1.8s ease-out infinite; }
+html[data-theme] #nz-ai .rec-state.paused i { background: var(--p-warn); }
+html[data-theme] #nz-ai .rec-state.finishing i, html[data-theme] #nz-ai .rec-state.done i { background: var(--p-accent); }
+html[data-theme] #nz-ai .rec-clock {
+  margin: 0;
+  font-family: var(--p-mono);
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .rec-meter {
+  align-self: stretch;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--p-ink) 8%, transparent);
+  overflow: hidden;
+}
+html[data-theme] #nz-ai .rec-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--p-accent) 65%, transparent), var(--p-accent));
+  transition: width .12s linear;
+}
+html[data-theme] #nz-ai .rec-ctls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 2px; }
+html[data-theme] #nz-ai .rec-ctl {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 10px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 600 12px/1 var(--p-ui);
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease, transform .14s ease;
+}
+html[data-theme] #nz-ai .rec-ctl svg { width: 15px; height: 15px; }
+html[data-theme] #nz-ai .rec-ctl:hover { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .rec-ctl:active { transform: scale(.98); }
+html[data-theme] #nz-ai .rec-ctl.stop {
+  border-color: transparent;
+  background: linear-gradient(160deg, #d9544b 0%, #b93a33 100%);
+  color: #fff;
+  box-shadow: 0 6px 16px -10px rgba(196, 69, 61, .9);
+}
+html[data-theme] #nz-ai .rec-ctl.stop:hover { filter: brightness(1.05); background: linear-gradient(160deg, #d9544b 0%, #b93a33 100%); }
+html[data-theme] #nz-ai .rec-ctl.quiet { width: 36px; padding: 0; justify-content: center; color: var(--p-muted); }
+html[data-theme] #nz-ai .rec-ctl.quiet:hover { color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-ctl.quiet[data-rec="discard"]:hover { color: var(--p-danger); background: color-mix(in srgb, var(--p-danger) 10%, transparent); border-color: color-mix(in srgb, var(--p-danger) 30%, transparent); }
+
+html[data-theme] #nz-ai .rec-live { gap: 8px; }
+html[data-theme] #nz-ai .rec-card {
+  border: 1px solid var(--p-line);
+  border-radius: 14px;
+  background: var(--p-card);
+}
+html[data-theme] #nz-ai .rec-scroll { padding: 12px 13px; }
+html[data-theme] #nz-ai .rec-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--p-line);
+  border-radius: 11px;
+  background: var(--p-well);
+}
+html[data-theme] #nz-ai .rec-tabs button {
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 42px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--p-muted);
+  font: 600 12px/1.2 var(--p-ui);
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+html[data-theme] #nz-ai .rec-tabs button small {
+  font: 500 9px/1.2 var(--p-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--p-faint);
+  opacity: 1;
+}
+html[data-theme] #nz-ai .rec-tabs button:hover { color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-tabs button[aria-selected="true"] {
+  background: var(--p-card);
+  color: var(--p-ink);
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .rec-tabs button[aria-selected="true"] small { color: var(--p-accent); }
+
+html[data-theme] #nz-ai .rec-part { margin-bottom: 14px; }
+html[data-theme] #nz-ai .rec-part:last-child { margin-bottom: 0; }
+html[data-theme] #nz-ai .rec-part header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--p-line);
+  color: var(--p-muted);
+  font: 650 9px/1 var(--p-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+html[data-theme] #nz-ai .rec-part header b { font-weight: 650; }
+html[data-theme] #nz-ai .rec-part header span { margin-left: auto; color: var(--p-faint); letter-spacing: .06em; }
+html[data-theme] #nz-ai .rec-part.current header b { color: var(--p-danger); }
+html[data-theme] #nz-ai .rec-part.failed header b, html[data-theme] #nz-ai .rec-part.needs-retry header b { color: var(--p-warn); }
+html[data-theme] #nz-ai .rec-line {
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 7px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .rec-stamp {
+  font: 500 9.5px/1.6 var(--p-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .rec-speaker {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font: 650 9.5px/1.5 var(--p-mono);
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+html[data-theme] #nz-ai .rec-speaker.voice-a { background: var(--p-soft-2); color: var(--p-accent); }
+html[data-theme] #nz-ai .rec-speaker.voice-b { background: color-mix(in srgb, #b07a12 14%, transparent); color: #7d570c; }
+html[data-theme] #nz-ai .rec-speaker.voice-c { background: color-mix(in srgb, #2f6f9e 14%, transparent); color: #24597f; }
+html[data-theme] #nz-ai .rec-speaker.voice-d { background: color-mix(in srgb, #7c4a92 14%, transparent); color: #653a78; }
+html[data-theme="dark"] #nz-ai .rec-speaker.voice-b { background: color-mix(in srgb, #e6c04a 18%, transparent); color: #e6c04a; }
+html[data-theme="dark"] #nz-ai .rec-speaker.voice-c { background: color-mix(in srgb, #7fbfe9 18%, transparent); color: #9ed2f2; }
+html[data-theme="dark"] #nz-ai .rec-speaker.voice-d { background: color-mix(in srgb, #c59ad8 18%, transparent); color: #d3addf; }
+html[data-theme] #nz-ai .rec-text { overflow-wrap: anywhere; }
+html[data-theme] #nz-ai .rec-empty {
+  margin: 0;
+  padding: 26px 10px;
+  border: 1px dashed var(--p-line-2);
+  border-radius: 11px;
+  color: var(--p-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+html[data-theme] #nz-ai .rec-muted { margin: 0; font-size: 11px; line-height: 1.55; color: var(--p-muted); }
+html[data-theme] #nz-ai .rec-strip { gap: 6px; }
+html[data-theme] #nz-ai .rec-prov {
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 10px 3px 9px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 999px;
+  background: var(--p-card);
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .rec-prov i { width: 6px; height: 6px; background: var(--p-faint); }
+html[data-theme] #nz-ai .rec-prov b { font: 600 10.5px/1.4 var(--p-ui); }
+html[data-theme] #nz-ai .rec-prov small { font: 500 9px/1.4 var(--p-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--p-faint); opacity: 1; }
+html[data-theme] #nz-ai .rec-prov.active { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .rec-prov.active i { background: var(--p-accent); animation: p-pulse 1.8s ease-out infinite; }
+html[data-theme] #nz-ai .rec-prov.stopped i { background: var(--p-warn); }
+html[data-theme] #nz-ai .rec-prov.used i { background: var(--p-accent); }
+html[data-theme] #nz-ai .rec-notice {
+  border: 1px solid var(--p-edge);
+  border-left: 2px solid var(--p-accent);
+  border-radius: 9px;
+  background: var(--p-soft);
+  color: var(--p-ink);
+  font-size: 11.5px;
+}
+html[data-theme] #nz-ai .rec-actions { gap: 7px; margin-top: 6px; }
+html[data-theme] #nz-ai .rec-actions .ai-action {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 10px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font: 600 12px/1 var(--p-ui);
+}
+html[data-theme] #nz-ai .rec-actions .ai-action:hover { border-color: var(--p-edge); background: var(--p-soft); color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-actions .ai-action.primary {
+  border-color: transparent;
+  background: var(--p-accent);
+  color: var(--p-accent-ink);
+}
+html[data-theme] #nz-ai .rec-actions .ai-action.primary:hover { background: var(--p-accent); filter: brightness(1.07); color: var(--p-accent-ink); }
+html[data-theme] #nz-ai .rec-actions .ai-action.rec-danger { color: var(--p-danger); }
+html[data-theme] #nz-ai .rec-actions .ai-action.rec-danger:hover { border-color: color-mix(in srgb, var(--p-danger) 35%, transparent); background: color-mix(in srgb, var(--p-danger) 10%, transparent); color: var(--p-danger); }
+html[data-theme] #nz-ai .rec-body .nzai-label { margin-top: 4px; }
+html[data-theme] #nz-ai .rec-body .nzai-field + .nzai-label { margin-top: 10px; }
+
+/* voice library dialog rows (the dialog is mounted outside the panel, so these
+   use the workspace tokens rather than the panel's --p-* set) */
+html[data-theme] .nz-voice-list { display: flex; flex-direction: column; }
+html[data-theme] .nz-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line, rgba(128, 148, 170, .22));
+}
+html[data-theme] .nz-voice-row > div { min-width: 0; flex: 1 1 auto; }
+html[data-theme] .nz-voice-row b { display: block; font-size: 13px; font-weight: 650; color: var(--ink, inherit); }
+html[data-theme] .nz-voice-row small { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--muted, #63778a); }
+html[data-theme] .nz-voice-row button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 1px solid color-mix(in srgb, #c4453d 40%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: #c4453d;
+  font: 600 11.5px/1 var(--p-ui, system-ui, sans-serif);
+  cursor: pointer;
+  transition: background .14s ease;
+}
+html[data-theme] .nz-voice-row button:hover { background: color-mix(in srgb, #c4453d 10%, transparent); }
+
+/* ---- motion ------------------------------------------------------------- */
+@keyframes p-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes p-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .15; } }
+@keyframes p-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--p-danger) 55%, transparent); }
+  70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--p-danger) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--p-danger) 0%, transparent); }
+}
+
+/* ---- narrow panel (the dock can be dragged to 340px) -------------------- */
+@container (max-width: 400px) {
+  #nz-ai .ai-welcome-head h3 { font-size: 23px; }
+  #nz-ai .ai-welcome-head p { font-size: 12px; }
+  #nz-ai .ai-card { grid-template-columns: 28px minmax(0, 1fr) 14px; gap: 9px; }
+  #nz-ai .ai-card::before { display: none; }
+  #nz-ai .ai-src-grid { grid-template-columns: 1fr; }
+  #nz-ai .nzai-source { grid-template-columns: 1fr; }
+  #nz-ai .rec-prov small { display: none; }
+  #nz-ai .rec-line { grid-template-columns: auto minmax(0, 1fr); row-gap: 3px; }
+  #nz-ai .rec-stamp { display: none; }
+}
+@container (max-width: 365px) {
+  #nz-ai .fl-bar .fl-new { width: 32px; padding: 0; justify-content: center; }
+  #nz-ai .fl-bar .fl-new::after { display: none; }
+  #nz-ai .fl-btn { width: 30px; height: 30px; }
+}
+@container (min-width: 470px) {
+  #nz-ai .nzai-source { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---- phone: bottom sheet ------------------------------------------------ */
+@media (max-width: 760px) {
+  html[data-theme] #nz-ai {
+    border: 0;
+    border-top: 1px solid var(--p-line);
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -20px 54px -26px rgba(8, 16, 12, .55);
+  }
+  html[data-theme] #nz-ai .dock-grab { width: 42px; height: 4px; margin: 9px auto 0; border-radius: 2px; background: var(--p-line-2); }
+  html[data-theme] #nz-ai .dock-chrome { gap: 8px; padding: 8px 12px 10px; }
+  html[data-theme] #nz-ai .dock-chrome::after { left: 12px; right: 12px; }
+  html[data-theme] #nz-ai .fl-btn { width: 40px; height: 40px; }
+  html[data-theme] #nz-ai .fl-bar { padding: 3px; border-radius: 13px; }
+  html[data-theme] #nz-ai .fl-bar .fl-new { height: 40px; }
+  html[data-theme] #nz-ai .nzai-body { padding: 0 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
+  html[data-theme] #nz-ai .rec-body { padding: 14px 14px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  html[data-theme] #nz-ai .ai-thread { padding: 14px 0 10px; gap: 20px; }
+  html[data-theme] #nz-ai .ai-welcome-head h3 { font-size: 26px; }
+  html[data-theme] #nz-ai .ai-card { min-height: 58px; }
+  html[data-theme] #nz-ai .ai-action.ai-ic,
+  html[data-theme] #nz-ai .ai-ibtn,
+  html[data-theme] #nz-ai .hist-del { width: 40px; height: 40px; }
+  html[data-theme] #nz-ai .ai-send { width: 40px; height: 40px; flex-basis: 40px; }
+  html[data-theme] #nz-ai .ai-qchip { min-height: 36px; font-size: 12.5px; }
+  html[data-theme] #nz-ai .ai-action { min-height: 36px; }
+  html[data-theme] #nz-ai .rec-ctl,
+  html[data-theme] #nz-ai .rec-tabs button,
+  html[data-theme] #nz-ai .rec-opt,
+  html[data-theme] #nz-ai .rec-actions .ai-action { min-height: 40px; }
+  html[data-theme] #nz-ai .rec-ctl.quiet { width: 40px; }
+  html[data-theme] #nz-ai .rec-clock { font-size: 42px; }
+}
+@media (max-width: 420px) {
+  html[data-theme] #nz-ai .fl-bar .fl-new::after { display: none; }
+  html[data-theme] #nz-ai .fl-bar .fl-new { width: 40px; padding: 0; justify-content: center; }
+  html[data-theme] #nz-ai .rec-line { grid-template-columns: auto minmax(0, 1fr); row-gap: 3px; }
+  html[data-theme] #nz-ai .rec-stamp { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] #nz-ai .ai-msg,
+  html[data-theme] #nz-ai .ai-typing span,
+  html[data-theme] #nz-ai .rec-state i,
+  html[data-theme] #nz-ai .rec-prov i,
+  html[data-theme] #nz-ai .ai-caret { animation: none !important; }
+  html[data-theme] #nz-ai .ai-card:hover:not(:disabled),
+  html[data-theme] #nz-ai .ai-src:hover,
+  html[data-theme] #nz-ai .ai-qchip:hover:not(:disabled),
+  html[data-theme] #nz-ai .ai-send:hover:not(:disabled),
+  html[data-theme] #nz-ai .rec-rec:hover:not(:disabled) { transform: none; }
+}
+
+/* Dark: accent-on-accent badges lose contrast, so the number sits in ink on the
+   tint instead. The transcript's first speaker chip is lightened for the same
+   reason (it is the one chip drawn in the theme accent rather than a fixed hue). */
+html[data-theme="dark"] #nz-ai .ai-src-n,
+html[data-theme="dark"] #nz-ai .ai-sources .ai-sources-count {
+  background: color-mix(in srgb, var(--p-accent) 22%, transparent);
+  color: var(--p-ink);
+}
+html[data-theme="dark"] #nz-ai .rec-speaker.voice-a {
+  background: color-mix(in srgb, var(--p-accent) 22%, transparent);
+  color: color-mix(in srgb, var(--p-accent) 62%, #ffffff);
+}
+/* A dock dragged wide should not return 90-character answer lines. */
+@container (min-width: 520px) { #nz-ai .ai-md { max-width: 68ch; } }
