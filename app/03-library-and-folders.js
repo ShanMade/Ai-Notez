@@ -830,10 +830,10 @@ async function loadPdfReader(state) {
         saveButton.textContent = 'Save note';
       }
     }
-    async function deleteNote(noteId) {
+    async function deleteNote(noteId, { confirm = true } = {}) {
       let note = notes.find(item => item.id === noteId);
       if (!note) return;
-      if (!(await uiConfirm({ title: 'Delete this note?', message: `“${note.title}” and its attachment will be permanently removed. This cannot be undone.`, confirmLabel: 'Delete note', danger: true }))) return;
+      if (confirm && !(await uiConfirm({ title: 'Delete this note?', message: `“${note.title}” and its attachment will be permanently removed. This cannot be undone.`, confirmLabel: 'Delete note', danger: true }))) return;
       const cloudUid = currentSession?.mode === 'cloud' ? currentSession.user.uid : '';
       const returnPage = currentPage === 'editor' ? (editorReturnPage || 'home') : currentPage;
       if (cloudUid && cloudSyncPromise) { try { await cloudSyncPromise; } catch {} note = notes.find(item => item.id === noteId) || note; }

@@ -272,6 +272,14 @@ async function openWikiLink(title) {
     // whatever the chunk length is.
     const REC_NOTES_EVERY = () => Math.max(1, Math.round(90000 / REC_SEGMENT_MS()));
     const recChunkLabel = ms => ms === 60000 ? '60 s' : `${Math.round(ms / 1000)} s`;
+    // How long a finished part actually is, so the timeline can show it instead
+    // of a timestamp that looked like the part's length.
+    function recLengthLabel(ms) {
+      const seconds = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+      if (seconds < 60) return `${seconds} s`;
+      const minutes = Math.floor(seconds / 60), rest = seconds % 60;
+      return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
+    }
     function recChunkHint(ms) {
       const perHour = Math.round(3600000 / ms);
       const hours = Math.round(500 * ms / 3600000 * 10) / 10;
@@ -287,17 +295,27 @@ async function openWikiLink(title) {
     document.addEventListener('change', event => {
       if (event.target?.id === 'rec-chunk') recChunkPicked(event.target.value);
     });
+    // A hidden tab may delay timers until its next wake-up. On the way back, the
+    // part that overran is closed at once instead of growing further.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && REC.status === REC_STATUS.RECORDING) recTick();
+    });
     const REC_MAX_MS = 50 * 60 * 1000;
     // Segment status constants
     const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
     // Recording status constants (separate from transcription status)
     const REC_STATUS = { IDLE: 'idle', RECORDING: 'recording', PAUSED: 'paused', FINALIZING: 'finishing', DONE: 'done' };
-    const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0, segTimer: 0,
-      status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, chunks: [], segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
+    const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0,
+      status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
       noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
-      firstTimer: 0, segMarks: [], speakerClips: {} };
+      segMarks: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
-    const recElapsed = () => Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
+    // Audio time, not wall time: every continuation adds the time already
+    // recorded, so part marks and the clock keep counting across a resume.
+    const recElapsed = () => {
+      if (REC.status === REC_STATUS.FINALIZING || REC.status === REC_STATUS.DONE) return REC.stoppedMs || REC.baseMs;
+      return REC.baseMs + Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
+    };
     const fmtClock = ms => { const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
     const recTransient = error => error?.status === 429 || error?.status >= 500 || error instanceof TypeError || error?.name === 'AbortError' || error?.code === 'cut';
     const recLabel = provider => provider === 'gemini' ? 'Gemini' : 'Groq';
@@ -498,6 +516,7 @@ Output only the transcript.`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
     function recSaveNote(finishing = false, notesText = REC.liveNotes) {
+      if (REC.discarding) return;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
       note.body = recNoteBody(recLiveTranscript(), notesText, finishing).slice(0, 200000);
       note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', REC.mode === 'meeting' ? 'MEETING' : 'CLASS'];
@@ -531,6 +550,7 @@ Output only the transcript.`;
     }
     function enqueuePart(blob, index) {
       REC.queue = REC.queue.then(async () => {
+        if (REC.discarding) return;
         if (REC.segMarks[index] == null) REC.segMarks[index] = recElapsed();   // when this part closed
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
         try {
@@ -561,13 +581,17 @@ Output only the transcript.`;
       return REC.queue;
     }
     function startPart() {
-      REC.chunks = [];
       const recorder = new MediaRecorder(REC.stream, { mimeType: REC.mime, audioBitsPerSecond: 32000 });
       const index = REC.segIdx++;
-      recorder.ondataavailable = event => { if (event.data?.size) REC.chunks.push(event.data); };
-      recorder.onstop = () => { const blob = new Blob(REC.chunks, { type: REC.mime.split(';')[0] }); REC.chunks = []; enqueuePart(blob, index); };
+      // The chunks belong to this recorder alone. A shared buffer would be
+      // cleared by the next part before this one's stop event runs, so a part
+      // could be sent with the wrong audio or none at all.
+      const chunks = [];
+      recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+      recorder.onstop = () => { const blob = new Blob(chunks, { type: REC.mime.split(';')[0] }); enqueuePart(blob, index); };
       recorder.start();
       REC.recorder = recorder;
+      REC.partStartAt = Date.now();
       REC.expectedParts = index + 1;
     }
     function endPart() {
@@ -577,25 +601,54 @@ Output only the transcript.`;
     }
     function clearRecTimers() {
       clearInterval(REC.timer); REC.timer = 0;
-      clearInterval(REC.segTimer); REC.segTimer = 0;
-      clearTimeout(REC.firstTimer); REC.firstTimer = 0;
+      clearTimeout(REC.partTimer); REC.partTimer = 0;
+      REC.partDeadline = 0;
     }
-    function recRollPart() { if (REC.status === REC_STATUS.RECORDING) { endPart(); startPart(); } }
-    function recArmSegTimer() {
-      clearInterval(REC.segTimer);
-      REC.segTimer = setInterval(recRollPart, REC_SEGMENT_MS());
+    // The length of the part that is recording right now. The first part is short
+    // so the transcript starts quickly; every later part is exactly the length
+    // chosen for this recording.
+    function recPartTarget() {
+      const index = Math.max(0, REC.segIdx - 1);
+      return index === 0 && REC.partMs > REC_CHUNK_FIRST ? REC_CHUNK_FIRST : REC.partMs;
+    }
+    function recRollPart() {
+      if (REC.status !== REC_STATUS.RECORDING) return;
+      const target = recPartTarget();       // the length this part was supposed to have
+      const spent = Date.now() - REC.partStartAt;
+      endPart(); startPart();
+      // A timeout that fires late (a background tab is allowed to delay timers
+      // until the next wake-up) must not make every following part longer: the
+      // next deadline starts from the part that just began.
+      if (spent > target + 3000) {
+        REC.notice = `Part ${Math.max(1, REC.segIdx - 1)} ran ${fmtClock(spent)} instead of ${fmtClock(target)} because the tab was in the background. Back to ${recChunkLabel(REC.partMs)} now.`;
+        updateRecLive();
+      }
+      recSchedulePart();
+    }
+    function recSchedulePart() {
+      clearTimeout(REC.partTimer); REC.partTimer = 0;
+      if (REC.status !== REC_STATUS.RECORDING) { REC.partDeadline = 0; return; }
+      const target = recPartTarget();
+      const spent = Date.now() - REC.partStartAt;
+      REC.partDeadline = REC.partStartAt + target;
+      REC.partTimer = setTimeout(recRollPart, Math.max(200, target - spent));
+    }
+    function recTick() {
+      const clock = $('#rec-clock');
+      if (clock) clock.textContent = fmtClock(recElapsed());
+      if (REC.status !== REC_STATUS.RECORDING) return;
+      if (recElapsed() >= REC_MAX_MS) { recStop(); return; }
+      // Catches a delayed timeout as soon as the page runs again. Measured
+      // against the part's own start so a lost or late timeout cannot stack up.
+      if (REC.partStartAt && Date.now() - REC.partStartAt >= recPartTarget()) recRollPart();
     }
     function recRunTimers() {
       clearRecTimers();
-      REC.timer = setInterval(() => { const clock = $('#rec-clock'); if (clock) clock.textContent = fmtClock(recElapsed()); if (REC.status === REC_STATUS.RECORDING && recElapsed() >= REC_MAX_MS) recStop(); }, 250);
-      // Nothing is on screen until the first part closes, so the first part is
-      // kept short even when the chosen length is longer. After that the chosen
-      // length takes over.
-      if (REC.segIdx <= 1 && REC_SEGMENT_MS() > REC_CHUNK_FIRST) {
-        REC.firstTimer = setTimeout(() => { REC.firstTimer = 0; recRollPart(); recArmSegTimer(); }, REC_CHUNK_FIRST);
-      } else {
-        recArmSegTimer();
-      }
+      // One length for the whole recording, fixed when it starts: changing the
+      // setting mid-recording must not produce parts of two different lengths.
+      REC.partMs = REC.partMs || recChunkMs();
+      REC.timer = setInterval(recTick, 250);
+      recSchedulePart();
     }
     function openRecorder() {
       if (!currentSession) return;
@@ -604,26 +657,22 @@ Output only the transcript.`;
         toast('Recording needs NotezAi or your own Gemini/Groq key. Check AI source in NotezAi settings.', 'error', 6000); 
         return; 
       }
-      if (REC.status === REC_STATUS.DONE) { 
-        REC.status = REC_STATUS.IDLE; 
-        REC.segTexts = []; 
-        REC.segBlobs = [];
-        REC.segStatuses = [];
-        REC.segMarks = [];
-        REC.speakerClips = {};
-        REC.segIdx = 0; 
-        REC.processed = 0; 
-        REC.failovers = 0; 
-        REC.liveNotes = ''; 
-        REC.provider = ''; 
-        REC.failedOn = new Set(); 
-        REC.notice = ''; 
-        REC.errors = 0; 
-        REC.queue = Promise.resolve(); 
-        REC.audioSaved = false;
-      }
+      // A finished session stays on screen: that is where Continue, New session
+      // and Discard live. Opening the recorder never throws it away silently.
       REC.dialog = { set hidden(value) { if (value) nzaiClose(); else dockShow('voice'); }, get hidden() { return !nzai.open || nzai.dock !== 'voice'; } };
       dockShow('voice');
+    }
+    // Forgets the recording session but keeps the note it produced (if any).
+    function recResetSession() {
+      REC.status = REC_STATUS.IDLE;
+      REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = [];
+      REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
+      REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set();
+      REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.audioSaved = false;
+      REC.noteId = ''; REC.baseMs = 0; REC.stoppedMs = 0; REC.partMs = 0;
+      REC.partStartAt = 0; REC.partDeadline = 0; REC.partTimer = 0;
+      REC.discarding = false; REC.starting = false;
+      clearRecTimers();
     }
     const REC_VOICE_CLASS = ['voice-a', 'voice-b', 'voice-c', 'voice-d'];
     function recTimeline() {
@@ -639,7 +688,10 @@ Output only the transcript.`;
         }).join('');
         const statusClass = part.status === SEG_STATUS.FAILED ? ' failed' : part.status === SEG_STATUS.IN_PROGRESS ? ' in-progress' : part.status === SEG_STATUS.NEEDS_RETRY ? ' needs-retry' : '';
         const statusLabel = part.status === SEG_STATUS.FAILED ? ' (Failed)' : part.status === SEG_STATUS.IN_PROGRESS ? ' (In progress)' : part.status === SEG_STATUS.NEEDS_RETRY ? ' (Needs retry)' : '';
-        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${fmtClock(REC.segMarks[part.index] || (part.index + 1) * REC_SEGMENT_MS())}</span></header>${lines}</section>`;
+        const partEnd = REC.segMarks[part.index] ?? recElapsed();
+        const partStart = part.index > 0 ? (REC.segMarks[part.index - 1] || 0) : 0;
+        const partLength = recLengthLabel(partEnd - partStart);
+        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${esc(partLength)}</span></header>${lines}</section>`;
       }).join('');
     }
     function recProviderStrip() {
@@ -679,10 +731,10 @@ Output only the transcript.`;
       const modeSeg = status === REC_STATUS.IDLE ? `<div class="ai-seg rec-mode" role="radiogroup" aria-label="Recording type">${[['class', 'Classroom'], ['meeting', 'Meeting']].map(([v, l]) => `<label class="rec-opt"><input type="radio" name="rec-mode" id="rec-mode-${v}" value="${v}" ${REC.mode === v ? 'checked' : ''}>${l}</label>`).join('')}</div>` : '';
       const intro = status === REC_STATUS.IDLE ? `<p class="rec-sub">Record a lecture or meeting. You get a live transcript with speakers, and notes written as you go.</p>${modeSeg}` : '';
       const stage = (() => {
-        if (status === REC_STATUS.IDLE) return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording"><i></i></button><div class="rec-stage-t"><b>Start recording</b><small>Saved to your library from the first second</small></div></div>`;
+        if (status === REC_STATUS.IDLE) return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording" ${REC.starting ? 'disabled aria-busy="true"' : ''}><i></i></button><div class="rec-stage-t"><b>${REC.starting ? 'Waiting for the microphone…' : 'Start recording'}</b><small>${REC.starting ? 'Allow the microphone in your browser' : 'Saved to your library from the first second'}</small></div></div>`;
         const meter = status === REC_STATUS.RECORDING ? `<div class="rec-meter" aria-hidden="true"><i id="rec-level" style="width:0%"></i></div>` : '';
         const mid = status === REC_STATUS.PAUSED ? `<button type="button" class="rec-ctl" data-rec="resume">${ic('<path d="M7 4l13 8-13 8Z"/>')}<span>Resume</span></button>` : status === REC_STATUS.RECORDING ? `<button type="button" class="rec-ctl" data-rec="pause">${ic('<path d="M8 5v14M16 5v14"/>')}<span>Pause</span></button>` : '';
-        const ctl = status === REC_STATUS.RECORDING || status === REC_STATUS.PAUSED ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop and finish</span></button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
+        const ctl = status === REC_STATUS.RECORDING || status === REC_STATUS.PAUSED ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop and finish</span></button><button type="button" class="rec-ctl quiet" data-rec="discard" aria-label="Discard this recording" title="Discard this recording">${ic('<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>')}</button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
@@ -692,7 +744,7 @@ Output only the transcript.`;
           <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
           <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
-        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
+        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
       return `${intro}${stage}<div id="rec-live" class="rec-live">${recLiveHtml()}</div>${tail}`;
@@ -715,22 +767,91 @@ Output only the transcript.`;
     }
     function recStopMeter() { cancelAnimationFrame(recMeterRaf); try { recMeterCtx?.close(); } catch {} recMeterCtx = null; }
     function recRender() { const body = $('#rec-body'); if (body) body.innerHTML = recBodyHtml(); }
-    function recStart() {
-      if (REC.status !== 'idle') return;
-      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(stream => {
-        REC.stream = stream; REC.mime = recMime(); REC.choice = $('#rec-enhance')?.value || 'auto';
-        REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
-        REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.status = REC_STATUS.RECORDING;
-        const when = new Date();
-        const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
-        REC.noteId = note.id; notes = [note, ...notes]; addFolderPath(note.folderPath); persistNote(note).catch(() => {}); renderEverything();
+    const REC_MIC = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
+    // Opens the microphone and starts capturing. `fresh` creates a new note; the
+    // other path continues an earlier recording in the same note.
+    function recBeginCapture(fresh) {
+      if (REC.starting) return;
+      REC.starting = true;
+      recRender();
+      navigator.mediaDevices.getUserMedia(REC_MIC).then(stream => {
+        REC.starting = false;
+        // The microphone prompt can be open for a while; if the session was
+        // discarded in the meantime, do not revive it.
+        if (REC.discarding || REC.status === REC_STATUS.FINALIZING) {
+          try { stream.getTracks().forEach(track => track.stop()); } catch { /* not started */ }
+          return;
+        }
+        // Remember where the clock stopped before it is cleared for the new capture.
+        const resumeFrom = REC.stoppedMs || REC.baseMs;
+        REC.stream = stream; REC.mime = recMime();
+        REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
+        if (fresh) {
+          REC.choice = $('#rec-enhance')?.value || 'auto';
+          REC.baseMs = 0; REC.partMs = 0; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
+          REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
+          REC.startedAt = Date.now();
+          const when = new Date();
+          const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
+          REC.noteId = note.id; notes = [note, ...notes]; addFolderPath(note.folderPath); persistNote(note).catch(() => {}); renderEverything();
+        } else {
+          // Continue: the clock picks up where the last recording stopped and the
+          // part numbering carries on, so the note reads as one uninterrupted
+          // session instead of three stitched ones.
+          REC.baseMs = resumeFrom;
+          REC.startedAt = Date.now();
+          REC.partMs = 0;              // a new capture reads the current setting again
+          REC.notice = '';
+          REC.status = REC_STATUS.RECORDING;   // so the note reads "in progress" again
+          recSaveNote(false);
+        }
+        REC.status = REC_STATUS.RECORDING;
         startPart(); recRunTimers(); recStartMeter(stream); recRender();
-      }).catch(error => { console.error('Recording could not start:', error); toast(error?.name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it in your browser settings.' : 'Could not open the microphone.', 'error', 6000); });
+      }).catch(error => {
+        REC.starting = false;
+        console.error('Recording could not start:', error);
+        if (REC.status === REC_STATUS.RECORDING) REC.status = REC_STATUS.IDLE;
+        recRender();
+        toast(error?.name === 'NotAllowedError' ? 'Microphone access was blocked. Allow it in your browser settings.' : 'Could not open the microphone.', 'error', 6000);
+      });
     }
-    function recPause() { if (REC.status !== REC_STATUS.RECORDING) return; endPart(); REC.status = 'paused'; REC.pausedAt = Date.now(); clearInterval(REC.segTimer); REC.segTimer = 0; recRender(); }
+    function recStart() {
+      if (REC.status !== REC_STATUS.IDLE) return;
+      recBeginCapture(true);
+    }
+    // Continue an earlier recording in the same note.
+    function recContinue() {
+      if (REC.status !== REC_STATUS.DONE || !REC.noteId) return;
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('This browser cannot record audio. Use Chrome or Edge on https.', 'error', 6000); return; }
+      if (!hasAudioProvider()) { toast('Recording needs NotezAi or your own Gemini/Groq key. Check AI source in NotezAi settings.', 'error', 6000); return; }
+      recBeginCapture(false);
+    }
+    // Throw the recording away: stop the microphone, drop the parts, delete the
+    // note the session created.
+    async function recDiscard() {
+      if (!REC.noteId && REC.status !== REC_STATUS.RECORDING && REC.status !== REC_STATUS.PAUSED) return;
+      if (!(await uiConfirm({ title: 'Discard this recording?', message: 'Its transcript and notes will be deleted. Anything you already copied out is safe, everything else is gone.', confirmLabel: 'Discard recording', danger: true }))) return;
+      const noteId = REC.noteId;
+      REC.discarding = true; REC.noteId = '';   // in-flight parts stop writing to a note that is about to go
+      REC.status = REC_STATUS.FINALIZING; recRender();
+      clearRecTimers();
+      await endPart();
+      recStopMeter();
+      try { REC.stream?.getTracks().forEach(track => track.stop()); } catch { /* already stopped */ }
+      REC.stream = null;
+      await Promise.race([REC.queue, recSleep(15000)]);   // let requests in flight settle, never hang the panel
+      recResetSession();
+      recRender();
+      if (noteId) await deleteNote(noteId, { confirm: false });
+      toast('Recording discarded.', 'success', 3000);
+    }
+    function recPause() { if (REC.status !== REC_STATUS.RECORDING) return; endPart(); REC.status = 'paused'; REC.pausedAt = Date.now(); clearRecTimers(); recRender(); }
     function recResume() { if (REC.status !== REC_STATUS.PAUSED) return; REC.pausedMs += Date.now() - REC.pausedAt; REC.pausedAt = 0; REC.status = REC_STATUS.RECORDING; startPart(); recRunTimers(); recRender(); }
     async function recStop() {
       if (REC.status !== REC_STATUS.RECORDING && REC.status !== REC_STATUS.PAUSED) return;
+      if (REC.discarding) return;
+      REC.stoppedMs = recElapsed();
       if (REC.status === REC_STATUS.RECORDING) { REC.pausedAt = 0; }
       REC.status = REC_STATUS.FINALIZING; clearRecTimers(); recRender();
       await endPart();                                     // the last part is finalised before the microphone is released
@@ -750,6 +871,9 @@ Output only the transcript.`;
     function recClick(event) {
       const act = event.target.closest('[data-rec]')?.dataset.rec; if (!act) return;
       if (act === 'start') return recStart();
+      if (act === 'continue') return recContinue();
+      if (act === 'new') { recResetSession(); return recRender(); }
+      if (act === 'discard') { recDiscard(); return; }
       if (act === 'tab') { REC.tab = event.target.closest('[data-rec]').dataset.tab; return updateRecLive(); }
       
     // Retry failed segments after provider configuration
