@@ -833,8 +833,23 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
       panel.querySelectorAll('[data-nav]').forEach(btn => { const on = btn.dataset.nav === screen; btn.classList.toggle('on', on); if (on) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current'); });
       panel.dataset.screen = screen;
+      const sheetScope = panel.querySelector('#nzai-sheet-scope');
+      if (sheetScope) sheetScope.textContent = nzai.scope === 'note' && nzaiScopeNote() ? 'This note' : 'All notes';
       const sub = panel.querySelector('#dock-sub');
       if (sub) sub.textContent = screen === 'voice' ? 'Voice notes' : screen === 'history' ? 'Chat history' : screen === 'settings' ? 'Settings' : aiUsesManaged() ? 'Managed AI' : aiReady() ? `${AI_PROVIDERS[aiActive()]?.label || 'AI'} · your key` : 'Setup needed';
+    }
+    // The phone layout keeps three controls in the bar and moves the rest into a
+    // sheet that rises from the bottom edge, where a thumb already is. Nothing is
+    // removed on a phone: every action is one tap away, the same handlers run.
+    function nzaiSheet(open) {
+      const panel = $('#nz-ai'); if (!panel) return;
+      const sheet = $('#nzai-sheet', panel), scrim = $('#nzai-scrim', panel), more = panel.querySelector('[data-nzai="sheet"]');
+      const on = Boolean(open);
+      if (sheet) sheet.hidden = !on;
+      if (scrim) scrim.hidden = !on;
+      panel.dataset.sheet = on ? 'true' : 'false';
+      if (more) more.setAttribute('aria-expanded', String(on));
+      if (on) { const first = sheet && sheet.querySelector('.nzai-sheet-row'); if (first) setTimeout(() => first.focus({ preventScroll: true }), 40); }
     }
     function nzaiEnsurePanel() {
       let panel = $('#nz-ai');
@@ -852,9 +867,31 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <button type="button" class="fl-btn" data-dock="voice" data-nav="voice" aria-label="Voice notes" title="Voice notes"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg><span class="dock-badge" id="dock-rec-badge" hidden aria-label="Recording">●</span></button>
             <button type="button" class="fl-btn fl-aa" data-nzai="text-smaller" aria-label="Smaller text" title="Smaller text"><span aria-hidden="true">A−</span></button>
             <button type="button" class="fl-btn fl-aa" data-nzai="text-larger" aria-label="Larger text" title="Larger text"><span aria-hidden="true">A+</span></button>
+            <button type="button" class="fl-btn fl-more" data-nzai="sheet" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></g></svg></button>
             <button type="button" class="fl-btn" data-nzai="settings" data-nav="settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></g></svg></button>
           </div>
         </header>
+        <div class="nzai-scrim" id="nzai-scrim" data-nzai="sheet-close" hidden></div>
+        <nav class="nzai-sheet" id="nzai-sheet" aria-label="Chat actions" hidden>
+          <div class="nzai-sheet-grab" aria-hidden="true"></div>
+          <p class="nzai-sheet-grp">Chat</p>
+          <div class="nzai-sheet-rows">
+            <button type="button" class="nzai-sheet-row" data-nzai="new"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><b>New chat</b><small>Start a fresh thread</small></button>
+            <button type="button" class="nzai-sheet-row" data-nzai="history" data-nav="history"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></g></svg></span><b>History</b><small>Saved chats on this device</small></button>
+            <button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g></svg></span><b>Voice notes</b><small>Record and transcribe</small></button>
+            <button type="button" class="nzai-sheet-row" data-nzai="scope-toggle"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v17H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v17h5.5A2.5 2.5 0 0 1 20 22z"/></g></svg></span><b>Answer scope</b><small id="nzai-sheet-scope">This note</small></button>
+          </div>
+          <p class="nzai-sheet-grp">Reading</p>
+          <div class="nzai-sheet-split">
+            <button type="button" class="nzai-sheet-row" data-nzai="text-smaller"><span class="ic" aria-hidden="true">A−</span><b>Smaller</b></button>
+            <button type="button" class="nzai-sheet-row" data-nzai="text-larger"><span class="ic" aria-hidden="true">A+</span><b>Larger</b></button>
+          </div>
+          <p class="nzai-sheet-grp">More</p>
+          <div class="nzai-sheet-rows">
+            <button type="button" class="nzai-sheet-row" data-nzai="settings" data-nav="settings"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></g></svg></span><b>Settings</b><small>Key, model, style</small></button>
+            <button type="button" class="nzai-sheet-row" data-nzai="close"><span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span><b>Back to note</b><small>Keep this chat where it is</small></button>
+          </div>
+        </nav>
         <section class="dock-pane" id="pane-ai">
           <div id="nzai-body" class="nzai-body"></div>
         </section>
@@ -895,14 +932,14 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const key = items[cur]?.dataset.slash; if (key) { event.target.value = ''; menu.hidden = true; nzaiRunKey(key); } return; }
         }
         if (event.target.id === 'nzai-input' && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); nzaiSendFromInput(); }
-        if (event.key === 'Escape') { if (nzai.editAt != null) { nzai.editAt = null; nzaiRender(); return; } if (menu && !menu.hidden) { menu.hidden = true; return; } nzaiClose(); }
+        if (event.key === 'Escape') { const panel = $('#nz-ai'); if (panel && panel.dataset.sheet === 'true') { nzaiSheet(false); return; } if (nzai.editAt != null) { nzai.editAt = null; nzaiRender(); return; } if (menu && !menu.hidden) { menu.hidden = true; return; } nzaiClose(); }
       });
       return panel;
     }
     // One right-hand dock hosts the assistant and voice notes. It never blocks the library.
     function dockShow(tab = 'ai') {
       const panel = nzaiEnsurePanel();
-      nzai.open = true; nzai.dock = tab; panel.hidden = false;
+      nzai.open = true; nzai.dock = tab; panel.hidden = false; nzaiSheet(false);
       document.documentElement.classList.add('nzai-open');
       nzaiApplyWidth(nzaiStoredWidth());
       nzaiSyncSpace();
@@ -1646,17 +1683,19 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const el = event.target.closest('[data-nzai]'); if (!el) return;
       const act = el.dataset.nzai;
       const say = text => { nzai.notice = text; const m = $('#nzai-msg'); if (m) m.textContent = text; };
-      if (act === 'close') return nzaiClose();
+      if (act === 'close') { nzaiSheet(false); return nzaiClose(); }
+      if (act === 'sheet') return nzaiSheet(true);
+      if (act === 'sheet-close') return nzaiSheet(false);
       if (act === 'text-larger') { nzaiTextStep(1); return; }
       if (act === 'text-smaller') { nzaiTextStep(-1); return; }
-      if (act === 'new') { nzai.quiz = ''; return nzaiNewChat(); }
-      if (act === 'history') return nzaiGoView('history');
+      if (act === 'new') { nzaiSheet(false); nzai.quiz = ''; return nzaiNewChat(); }
+      if (act === 'history') { nzaiSheet(false); return nzaiGoView('history'); }
       if (act === 'slash-open') { const input = $('#nzai-input'); if (input && !input.disabled) { input.value = '/'; input.focus(); nzaiSlash('/'); } return; }
       if (act === 'back') { nzai.view = 'chat'; if (nzai.dock === 'voice') return dockShow('ai'); return nzaiRender(); }
-      if (act === 'scope-toggle') { if (nzai.scope === 'note') nzai.scope = 'library'; else if (nzaiScopeNote()) nzai.scope = 'note'; return nzaiRender(); }
+      if (act === 'scope-toggle') { nzaiSheet(false); if (nzai.scope === 'note') nzai.scope = 'library'; else if (nzaiScopeNote()) nzai.scope = 'note'; return nzaiRender(); }
       if (act === 'chat') { nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'toggle-more') { nzai.moreOpen = !nzai.moreOpen; return nzaiRender(); }
-      if (act === 'settings') return nzaiGoView('settings');
+      if (act === 'settings') { nzaiSheet(false); return nzaiGoView('settings'); }
       if (act === 'scope') { nzai.scope = el.dataset.scope; return nzaiRender(); }
       if (act === 'send') return nzaiSendFromInput();
       if (act === 'quick') return nzaiQuick(el.dataset.task);

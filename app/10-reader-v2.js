@@ -113,7 +113,8 @@
   askBar.type = 'button';
   askBar.className = 'rv2-ask';
   askBar.id = 'rv2-ask';
-  askBar.setAttribute('aria-haspopup', 'dialog');
+  askBar.setAttribute('aria-controls', 'nz-ai');
+  askBar.setAttribute('aria-expanded', 'false');
   askBar.innerHTML = '<span class="spark" aria-hidden="true">✦</span><span class="ph">Ask about this note…</span><kbd>⌘J</kbd>';
 
   const scrim = document.createElement('div');
@@ -314,6 +315,7 @@
     panelEl = $('#nz-ai');
     if (!panelEl) return false;
     const open = !panelEl.hidden;
+    askBar.setAttribute('aria-expanded', String(open));
     const sheet = open && reading;
     root.classList.toggle('nzai-sheet', sheet);
     document.body.classList.toggle('rv2-sheet-open', sheet || contentsSheet.classList.contains('open'));
