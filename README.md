@@ -10,7 +10,7 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Create and organize notes in a focused web workspace.
 - Sign in through Firebase Authentication and sync user data with Firebase Realtime Database.
 - Use AI generation through configured Gemini and Groq providers; Mistral support can be enabled in backend configuration.
-- Record a lecture and watch it become notes: 20-second parts, each transcribed as it is recorded, with the tail of the previous part carried into the next one so a sentence cut by the boundary survives, and repeated words removed instead of duplicated.
+- Record a lecture and watch it become notes: one-minute parts by default, each transcribed as it is recorded, with the tail of the previous part carried into the next one so a sentence cut by the boundary survives, and repeated words removed instead of duplicated. The part length is a setting (20/30/45/60 s); longer parts spend far fewer requests for the same audio.
 - Teach a voice once — record a name's owner for eight seconds — and every later transcript labels that person by name instead of "Voice 2".
 - Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
@@ -223,9 +223,22 @@ output size); the backend refuses to start with a mismatched value instead of fa
 
 ### Voice-to-Note transcription
 
-A recording is cut into **20-second parts**. Each part is transcribed as soon as it is recorded, so the
-transcript appears while the lecture is still running, and the next part always receives the tail of what
-was already heard. That tail is what makes a cut-off sentence survive a part boundary: the model is told
+A recording is cut into parts of **60 seconds by default**, and the length is a setting (20 / 30 / 45 / 60
+s, stored as `localStorage['notez-rec-chunk-v1']`). Each part is transcribed as soon as it is recorded, so
+the transcript appears while the lecture is still running, and the next part always receives the tail of
+what was already heard.
+
+Why 60 s is the ceiling and the default: the binding limit is not tokens, it is **requests**. Gemini counts
+audio at 32 tokens a second, so a one-minute part is ~1,900 audio tokens and ~3,000 tokens with the prompt —
+one request a minute is about 3,000 tokens per minute, roughly 1.5% of a 200,000 tokens-per-minute
+allowance. The request count is what actually runs out: at 20-second parts a 500-request day covers about
+2.8 hours of audio, at 60-second parts it covers 8.3 hours. Past 60 s the first sentence takes too long to
+appear, a failed part costs a whole minute of retry, and the upload stops being cheap on a phone line. Below
+60 s the transcript is fresher but the allowance drains proportionally faster.
+
+The first part is always capped at 20 seconds, whatever the setting, so the first words appear quickly and
+the chosen length only applies from the second part. Live notes refresh about once every 90 seconds of audio
+at any length (`REC_NOTES_EVERY`), so bigger parts do not double the number of note calls. That tail is what makes a cut-off sentence survive a part boundary: the model is told
 how the previous part ended, so it continues the sentence instead of starting cold, and any words it
 repeats are removed before the part is stored (`recTrimOverlap`). A part that ends mid-sentence tolerates a
 two-word echo; a part that ends at a full stop only trims an echo of three words or more, because there it

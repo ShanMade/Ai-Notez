@@ -243,8 +243,50 @@ async function openWikiLink(title) {
     updateFaviconFromTheme();
 
     // ================= Live recording: real-time notes with provider failover =================
-    const REC_SEGMENT_MS = () => window.__REC_SEGMENT_MS || 20000;   // 20s parts: short enough to transcribe live, long enough to keep the context
-    const REC_NOTES_EVERY = 2;                                        // refresh the AI notes every 2 parts
+    // ---- chunk length -------------------------------------------------------
+    // How much audio one transcription request carries. Longer chunks mean fewer
+    // requests, so the daily allowance covers far more audio; shorter chunks put
+    // words on screen sooner. 60 s is the ceiling: past that the first sentence
+    // takes too long to appear, a failed part costs a whole minute of retry, and
+    // the payload stops being small enough to retry cheaply over a phone line.
+    //
+    // Tokens are not the limit here. Gemini counts audio at 32 tokens a second,
+    // so even a minute of speech is ~1,900 input tokens: with the prompt, a part
+    // is ~3,000 tokens, and a minute-sized part is one request a minute, about
+    // 3,000 tokens per minute — 1.5% of a 200,000 tokens-per-minute allowance.
+    // What runs out first is the request count (requests per minute and per day).
+    const REC_CHUNK_KEY = 'notez-rec-chunk-v1';
+    const REC_CHUNK_CHOICES = [20000, 30000, 45000, 60000];
+    const REC_CHUNK_DEFAULT = 60000;
+    const REC_CHUNK_FIRST = 20000;      // the first part is short so text appears fast
+    function recChunkMs() {
+      const stored = Number(aiStore.get(REC_CHUNK_KEY, ''));
+      const wanted = Number.isFinite(stored) && stored > 0 ? stored : REC_CHUNK_DEFAULT;
+      const low = REC_CHUNK_CHOICES[0], high = REC_CHUNK_CHOICES[REC_CHUNK_CHOICES.length - 1];
+      return Math.max(low, Math.min(high, Math.round(wanted / 5000) * 5000));
+    }
+    const recChunkSet = ms => aiStore.set(REC_CHUNK_KEY, String(ms));
+    const REC_SEGMENT_MS = () => window.__REC_SEGMENT_MS || recChunkMs();
+    // One extra AI call per minute of audio would undo the saving from bigger
+    // parts, so notes are refreshed about once every 90 seconds of audio
+    // whatever the chunk length is.
+    const REC_NOTES_EVERY = () => Math.max(1, Math.round(90000 / REC_SEGMENT_MS()));
+    const recChunkLabel = ms => ms === 60000 ? '60 s' : `${Math.round(ms / 1000)} s`;
+    function recChunkHint(ms) {
+      const perHour = Math.round(3600000 / ms);
+      const hours = Math.round(500 * ms / 3600000 * 10) / 10;
+      return `About ${perHour} request${perHour === 1 ? '' : 's'} an hour — roughly ${hours} hours of audio on a 500-request day.`;
+    }
+    function recChunkPicked(value) {
+      const ms = Number(value) || REC_CHUNK_DEFAULT;
+      recChunkSet(ms);
+      const hint = $('#rec-chunk-hint');
+      if (hint) hint.textContent = recChunkHint(recChunkMs());
+      return ms;
+    }
+    document.addEventListener('change', event => {
+      if (event.target?.id === 'rec-chunk') recChunkPicked(event.target.value);
+    });
     const REC_MAX_MS = 50 * 60 * 1000;
     // Segment status constants
     const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
@@ -252,7 +294,8 @@ async function openWikiLink(title) {
     const REC_STATUS = { IDLE: 'idle', RECORDING: 'recording', PAUSED: 'paused', FINALIZING: 'finishing', DONE: 'done' };
     const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0, segTimer: 0,
       status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, chunks: [], segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
-      noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false };
+      noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
+      firstTimer: 0, segMarks: [] };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
     const recElapsed = () => Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
     const fmtClock = ms => { const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
@@ -382,7 +425,10 @@ async function openWikiLink(title) {
         const samples = withSamples ? await nzVoiceSamples() : [];
         const images = [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }];
         for (const sample of samples) images.push({ mime: sample.mime, data: sample.data });
-        const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), { temperature: 0, model: recSttModel(), images });
+        // A minute of audio plus the failover chain needs more than the 60 s a
+        // chat call gets, or the client gives up while the backend is still
+        // working and the part is retried for nothing.
+        const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), { temperature: 0, model: recSttModel(), images, timeout: 150000 });
         return { text: answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim(), provider: answer.provider || 'gemini' };
       } });
       if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
@@ -457,6 +503,7 @@ Output only the transcript.`;
     }
     function enqueuePart(blob, index) {
       REC.queue = REC.queue.then(async () => {
+        if (REC.segMarks[index] == null) REC.segMarks[index] = recElapsed();   // when this part closed
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
         try {
           const cleaned = recCleanPart(await recTranscribePart(blob, index));
@@ -466,7 +513,7 @@ Output only the transcript.`;
           REC.segBlobs[index] = null;
           REC.processed++;
           const isLast = REC.status === REC_STATUS.FINALIZING && REC.processed >= REC.expectedParts;
-          if (!isLast && REC.processed % REC_NOTES_EVERY === 0) await recRefreshNotes(false);
+          if (!isLast && REC.processed % REC_NOTES_EVERY() === 0) await recRefreshNotes(false);
           recSaveNote(false);
         } catch (error) {
           REC.errors++;
@@ -499,11 +546,27 @@ Output only the transcript.`;
       if (!recorder || recorder.state === 'inactive') return Promise.resolve();
       return new Promise(resolve => { recorder.addEventListener('stop', () => resolve(), { once: true }); recorder.stop(); });
     }
-    function clearRecTimers() { clearInterval(REC.timer); REC.timer = 0; clearInterval(REC.segTimer); REC.segTimer = 0; }
+    function clearRecTimers() {
+      clearInterval(REC.timer); REC.timer = 0;
+      clearInterval(REC.segTimer); REC.segTimer = 0;
+      clearTimeout(REC.firstTimer); REC.firstTimer = 0;
+    }
+    function recRollPart() { if (REC.status === REC_STATUS.RECORDING) { endPart(); startPart(); } }
+    function recArmSegTimer() {
+      clearInterval(REC.segTimer);
+      REC.segTimer = setInterval(recRollPart, REC_SEGMENT_MS());
+    }
     function recRunTimers() {
       clearRecTimers();
       REC.timer = setInterval(() => { const clock = $('#rec-clock'); if (clock) clock.textContent = fmtClock(recElapsed()); if (REC.status === REC_STATUS.RECORDING && recElapsed() >= REC_MAX_MS) recStop(); }, 250);
-      REC.segTimer = setInterval(() => { if (REC.status === REC_STATUS.RECORDING) { endPart(); startPart(); } }, REC_SEGMENT_MS());
+      // Nothing is on screen until the first part closes, so the first part is
+      // kept short even when the chosen length is longer. After that the chosen
+      // length takes over.
+      if (REC.segIdx <= 1 && REC_SEGMENT_MS() > REC_CHUNK_FIRST) {
+        REC.firstTimer = setTimeout(() => { REC.firstTimer = 0; recRollPart(); recArmSegTimer(); }, REC_CHUNK_FIRST);
+      } else {
+        recArmSegTimer();
+      }
     }
     function openRecorder() {
       if (!currentSession) return;
@@ -517,6 +580,7 @@ Output only the transcript.`;
         REC.segTexts = []; 
         REC.segBlobs = [];
         REC.segStatuses = [];
+        REC.segMarks = [];
         REC.segIdx = 0; 
         REC.processed = 0; 
         REC.failovers = 0; 
@@ -545,7 +609,7 @@ Output only the transcript.`;
         }).join('');
         const statusClass = part.status === SEG_STATUS.FAILED ? ' failed' : part.status === SEG_STATUS.IN_PROGRESS ? ' in-progress' : part.status === SEG_STATUS.NEEDS_RETRY ? ' needs-retry' : '';
         const statusLabel = part.status === SEG_STATUS.FAILED ? ' (Failed)' : part.status === SEG_STATUS.IN_PROGRESS ? ' (In progress)' : part.status === SEG_STATUS.NEEDS_RETRY ? ' (Needs retry)' : '';
-        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${(part.index + 1) * Math.round(REC_SEGMENT_MS() / 1000)}s</span></header>${lines}</section>`;
+        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${fmtClock(REC.segMarks[part.index] || (part.index + 1) * REC_SEGMENT_MS())}</span></header>${lines}</section>`;
       }).join('');
     }
     function recProviderStrip() {
@@ -592,7 +656,11 @@ Output only the transcript.`;
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
-        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
+        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <label class="nzai-label" for="rec-chunk">Transcript length</label>
+          <select class="nzai-field" id="rec-chunk">${REC_CHUNK_CHOICES.map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '60 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
+          <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
+          <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
@@ -621,7 +689,7 @@ Output only the transcript.`;
       if (REC.status !== 'idle') return;
       navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(stream => {
         REC.stream = stream; REC.mime = recMime(); REC.choice = $('#rec-enhance')?.value || 'auto';
-        REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
+        REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segMarks = []; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
         REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.status = REC_STATUS.RECORDING;
         const when = new Date();
         const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
