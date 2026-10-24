@@ -238,7 +238,21 @@ appear, a failed part costs a whole minute of retry, and the upload stops being 
 
 The first part is always capped at 20 seconds, whatever the setting, so the first words appear quickly and
 the chosen length only applies from the second part. Live notes refresh about once every 90 seconds of audio
-at any length (`REC_NOTES_EVERY`), so bigger parts do not double the number of note calls. That tail is what makes a cut-off sentence survive a part boundary: the model is told
+at any length (`REC_NOTES_EVERY`), so bigger parts do not double the number of note calls.
+
+The length is frozen when the recording starts and every part is closed on a deadline measured from **its
+own** start (`recSchedulePart`), not from a repeating timer, so a slow phone or a background tab cannot
+stretch a 60-second part into 70 seconds, and pausing or resuming cannot mix two lengths into one
+recording. A tab that is asleep is allowed to delay the timer that closes a part; on the way back
+`visibilitychange` closes the overdue part immediately and the next part starts again at the chosen length.
+A part that did overrun is reported as such rather than passed off as on time, and the timeline labels each
+part with its real length (`recLengthLabel`), not with a timestamp that reads like a duration.
+
+Once a recording stops, the panel offers **Continue recording** (same note; the clock and the part numbers
+carry on from where they stopped), **New session** (the finished note stays in the library and a fresh
+session begins) and **Discard** (asks first, stops the microphone, waits for parts in flight, then deletes
+the note the session created). A quiet discard icon sits in the recording controls too, so a wrong start
+does not have to be cleaned up in the library. That tail is what makes a cut-off sentence survive a part boundary: the model is told
 how the previous part ended, so it continues the sentence instead of starting cold, and any words it
 repeats are removed before the part is stored (`recTrimOverlap`). A part that ends mid-sentence tolerates a
 two-word echo; a part that ends at a full stop only trims an echo of three words or more, because there it
