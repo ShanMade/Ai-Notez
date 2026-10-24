@@ -295,7 +295,7 @@ async function openWikiLink(title) {
     const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0, segTimer: 0,
       status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, chunks: [], segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
       noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
-      firstTimer: 0, segMarks: [] };
+      firstTimer: 0, segMarks: [], speakerClips: {} };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
     const recElapsed = () => Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
     const fmtClock = ms => { const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
@@ -340,6 +340,34 @@ async function openWikiLink(title) {
         return lines.filter((line, i) => i > 0 || line).join('\n').trim();
       }
       return String(current || '').trim();
+    }
+    // The audio of a part is freed as soon as it is transcribed, but a voice can
+    // only be taught while its recording is still here. One clip per unnamed
+    // speaker label is kept for exactly that.
+    const REC_VOICE_CLIP_BYTES = 1000000;
+    const REC_VOICE_CLIPS_MAX = 8;
+    function recRememberVoiceClips(text, blob) {
+      if (!blob || !blob.size || blob.size > REC_VOICE_CLIP_BYTES) return;
+      const labels = new Set();
+      String(text || '').split('\n').forEach(line => { const speaker = recSpeakerOf(line); if (speaker) labels.add(speaker.name); });
+      for (const label of labels) {
+        if (!/^Voice\s+\d+$/i.test(label)) continue;              // a known name already has its identity
+        if (Object.keys(REC.speakerClips).length >= REC_VOICE_CLIPS_MAX) return;
+        if (REC.speakerClips[label]) continue;
+        REC.speakerClips[label] = { blob, at: Date.now() };
+      }
+    }
+    // Naming a speaker is the app learning who that voice is: the identity is
+    // saved in the background, with no extra prompt, no toast and nothing to
+    // dismiss. The clip kept during the recording becomes its reference.
+    async function recLearnNamedVoices(pairs) {
+      if (typeof nzVoiceLearn !== 'function') return;
+      for (const [label, name] of pairs) {
+        try {
+          await nzVoiceLearn(name, REC.speakerClips?.[label]?.blob || null);
+          if (REC.speakerClips?.[label]) delete REC.speakerClips[label];
+        } catch (error) { console.warn('Could not save the voice for', name, error); }
+      }
     }
     const recKnownNames = () => (typeof nzVoiceNames === 'function' ? nzVoiceNames() : []);
     const recVoiceCount = () => (typeof nzVoices === 'function' ? nzVoices().length : 0);
@@ -509,6 +537,7 @@ Output only the transcript.`;
           const cleaned = recCleanPart(await recTranscribePart(blob, index));
           const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
           if (!text) REC.notice = `Part ${index + 1} had no clear speech. Check the microphone and the room noise.`;
+          recRememberVoiceClips(text, blob);
           REC.segTexts[index] = text;
           REC.segBlobs[index] = null;
           REC.processed++;
@@ -581,6 +610,7 @@ Output only the transcript.`;
         REC.segBlobs = [];
         REC.segStatuses = [];
         REC.segMarks = [];
+        REC.speakerClips = {};
         REC.segIdx = 0; 
         REC.processed = 0; 
         REC.failovers = 0; 
@@ -689,7 +719,7 @@ Output only the transcript.`;
       if (REC.status !== 'idle') return;
       navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(stream => {
         REC.stream = stream; REC.mime = recMime(); REC.choice = $('#rec-enhance')?.value || 'auto';
-        REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segMarks = []; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
+        REC.startedAt = Date.now(); REC.pausedMs = 0; REC.pausedAt = 0; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
         REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.status = REC_STATUS.RECORDING;
         const when = new Date();
         const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
@@ -858,11 +888,16 @@ if (act === 'pause') return recPause();
           const act = event.target.closest('[data-names]')?.dataset.names; if (!act) return;
           if (act === 'apply') {
             let body = note.body;
+            const learned = [];
             dialog.querySelectorAll('[data-voice]').forEach(input => {
               const name = input.value.trim().replace(/[:\n]/g, ' ').slice(0, 40); if (!name) return;
               const label = input.dataset.voice.replace(/\s+/g, '\\s+');
               body = body.replace(new RegExp(`(^|\\n)((?:\\[[\\d:]+\\]\\s*)?\\s*\\**\\s*)${label}(\\s*\\**\\s*):`, 'gi'), (_, lead, pre, post) => `${lead}${pre}${name}${post}:`);
+              learned.push([input.dataset.voice, name]);
             });
+            // Taught in the background: future transcripts label this voice by
+            // name without asking again. No message, no extra step.
+            recLearnNamedVoices(learned);
             note.body = body; note.updatedAt = Date.now();
             persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
             renderEverything(); if (currentPage === 'reader') openNote(note.id);

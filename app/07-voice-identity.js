@@ -132,6 +132,40 @@ async function nzVoiceForget(id) {
   await nzVoiceDropSample(voice.id);
 }
 
+// Learning a name without asking: this is what runs when someone names a
+// speaker in a finished transcript. It never shows a message, and it never
+// replaces a voice that already has a reference clip with a weaker record.
+async function nzVoiceLearn(name, blob) {
+  const clean = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (!clean) return null;
+  const clip = blob && blob.size >= 1200 && blob.size <= 400000 ? blob : null;
+  const list = nzVoices();
+  const existing = list.find(voice => voice.name.toLowerCase() === clean.toLowerCase());
+  // The identity is written before the description is asked for: a closed tab
+  // must not lose the name that was just given.
+  const describe = async (id, sample) => {
+    try {
+      const about = await nzVoiceDescribe(sample);
+      if (!about) return;
+      nzVoiceStore(nzVoices().map(voice => voice.id === id ? { ...voice, about, updatedAt: Date.now() } : voice));
+    } catch { /* the clip still matches the voice without a description */ }
+  };
+  if (existing) {
+    if (!clip || await nzVoiceGetSample(existing.id)) return existing;   // already as good as it gets
+    await nzVoicePutSample(existing.id, clip);
+    existing.updatedAt = Date.now();
+    nzVoiceStore(list);
+    if (!existing.about) describe(existing.id, clip);
+    return existing;
+  }
+  const id = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (clip) await nzVoicePutSample(id, clip);
+  const entry = { id, name: clean, about: '', createdAt: Date.now(), updatedAt: Date.now() };
+  nzVoiceStore([entry, ...list]);
+  if (clip) describe(id, clip);
+  return entry;
+}
+
 // Text block for the transcription prompt. Sent with every part, so the names
 // survive even on the parts that carry no reference clip.
 function nzVoicePrompt() {
