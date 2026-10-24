@@ -114,7 +114,7 @@ async function nzVoiceEnroll(name, blob) {
   if (!clean) throw new Error('Give the voice a name first.');
   if (!blob || blob.size < 1200) throw new Error('That clip is too short — record about 8 seconds.');
   // The clip rides along with the recording part, so it has to stay small.
-  if (blob.size > 700000) throw new Error('That clip is too long — use a few seconds of speech.');
+  if (blob.size > 400000) throw new Error('That clip is too long — use a few seconds of speech.');
   let about = '';
   try { about = await nzVoiceDescribe(blob); } catch (error) { console.warn('Could not describe the voice sample:', error); }
   const id = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -143,13 +143,21 @@ function nzVoicePrompt() {
 
 // Reference clips, in the same order as nzVoicePrompt(). Only the model ever
 // sees them; they are capped in number and length to keep each part small.
+// A part carries the recording plus these clips, and the backend refuses a
+// request body over 8 MB, so the clips share a fixed budget instead of growing
+// with the library.
+const NZ_VOICE_BUDGET = 3_500_000;   // base64 characters, ~2.6 MB of audio
 async function nzVoiceSamples(limit = NZ_VOICE_MAX) {
   const out = [];
+  let used = 0;
   for (const voice of nzVoices().slice(0, limit)) {
     const blob = await nzVoiceGetSample(voice.id);
     if (!blob || !blob.size) continue;
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    out.push({ name: voice.name, mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) });
+    const data = bytesToB64Safe(bytes);
+    if (used + data.length > NZ_VOICE_BUDGET) continue;
+    used += data.length;
+    out.push({ name: voice.name, mime: blob.type || 'audio/webm', data });
   }
   return out;
 }

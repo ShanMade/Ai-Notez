@@ -636,7 +636,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     window.notezAiIndexNote = noteId => aiBackendRequest(`/v1/index/notes/${encodeURIComponent(noteId)}`, {});
     window.notezAiDeleteIndexedNote = noteId => aiBackendRequest(`/v1/index/notes/${encodeURIComponent(noteId)}`, undefined, 'DELETE');
     window.notezAiRebuildIndex = () => aiBackendRequest('/v1/index/rebuild', {}, 'POST', 600000);
-    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '' } = {}) {
+    // `timeout` is for the slow calls: one minute of audio takes longer to
+    // transcribe than a chat answer takes to write.
+    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '', timeout = 0 } = {}) {
       const key = aiKey(provider), temperature = typeof forced === 'number' ? forced : aiTemperature();
       // A caller can pin the model (Voice-to-Note pins its transcription model).
       // The backend honours the pair, so the managed path asks for it explicitly.
@@ -649,7 +651,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           temperature,
           json,
           images
-        }, 'POST', undefined, true);
+        }, 'POST', timeout || undefined, true);
         if (!result.text || !result.provider || !result.model) throw new Error('The Notez AI backend returned an incomplete response.');
         return { text: String(result.text), provider: String(result.provider), model: String(result.model), sources: Array.isArray(result.sources) ? result.sources : [] };
       }
