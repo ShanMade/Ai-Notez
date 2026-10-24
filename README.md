@@ -16,6 +16,7 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
 - Read notes in an editorial reader: no card, one 46rem column, a display-serif title, section numbers in the margin, a hairline header with reading progress, and the assistant behind a bottom command bar (⌘J / Ctrl+J) that opens as a sheet over the note instead of shrinking it. Body type switches between serif and sans, with a saved reading size.
 - Read answers comfortably: the assistant panel is resizable (drag its left edge, arrow keys, or double-click to reset) and has its own text-size control, both remembered per device. LaTeX (`\( … \)`, `\[ … \]`, `$$ … $$`) is rendered with KaTeX in answers and notes.
+- The NotezAi chat and Voice-to-Note panels share one surface: a two-tier masthead with a single action strip, an indexed empty state, an editorial answer column with a collapsible source card, a command-bar composer, and a recording console with a live clock, level meter, speaker-chipped transcript, and Continue / New session / Discard. Same hooks, ids and shortcuts as before; light and dark are both first-class, and the panel still resizes from 340px to the full dock width.
 - Install the app as a PWA; the service worker caches the app shell for improved repeat-load/offline behavior.
 - Use a standalone FastAPI backend for AI requests, indexing, and search.
 
