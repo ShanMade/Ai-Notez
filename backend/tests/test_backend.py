@@ -339,7 +339,7 @@ def test_groq_transcription_uses_the_whisper_endpoint(monkeypatch):
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
         captured["prompt"] = prompt
-        return {"text": "Voice 1: hello", "provider": "groq", "model": model}
+        return {"text": "Voice 1: hello world", "provider": "groq", "model": model}
 
     monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(providers, "generate", fake_generate)
@@ -353,7 +353,7 @@ def test_groq_transcription_uses_the_whisper_endpoint(monkeypatch):
     assert captured["files"]["file"][2] == "audio/webm"
     assert "hello world" in captured["prompt"]          # the raw transcript is formatted, not dropped
     assert result["provider"] == "groq"
-    assert result["text"] == "Voice 1: hello"
+    assert result["text"] == "Voice 1: hello world"
 
 
 def test_groq_transcription_walks_the_enabled_chat_models(monkeypatch):
@@ -385,7 +385,7 @@ def test_groq_transcription_walks_the_enabled_chat_models(monkeypatch):
         tried.append(model)
         if model == retired:
             raise HTTPException(status_code=502, detail="The requested model is decommissioned.")
-        return {"text": "Voice 1: hello", "provider": "groq", "model": model}
+        return {"text": "Voice 1: hello world", "provider": "groq", "model": model}
 
     monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(providers, "generate", fake_generate)
@@ -394,8 +394,107 @@ def test_groq_transcription_walks_the_enabled_chat_models(monkeypatch):
 
     assert tried[0] == retired
     assert len(tried) > 1            # a retired model does not fail the transcription
-    assert result["text"] == "Voice 1: hello"
+    assert result["text"] == "Voice 1: hello world"
     assert result["model"].endswith(tried[1])
+
+
+def test_whisper_defaults_to_the_full_model_not_turbo():
+    from app.config import settings
+
+    # turbo keeps 4 decoder layers of 32 and is what drops words on long audio.
+    assert settings.groq_transcribe_model == "whisper-large-v3"
+
+
+def test_whisper_retries_the_other_build_when_a_part_comes_back_empty(monkeypatch):
+    import app.providers as providers
+
+    asked = []
+
+    class FakeResponse:
+        is_success = True
+        status_code = 200
+        headers = {}
+
+        def __init__(self, text):
+            self._text = text
+
+        def json(self):
+            return {"text": self._text}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            asked.append(kwargs["data"]["model"])
+            # The full model returns nothing for this clip; the turbo build hears it.
+            return FakeResponse("" if len(asked) == 1 else "hello world")
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        return {"text": "Voice 1: hello world", "provider": "groq", "model": model}
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "generate", fake_generate)
+    result = asyncio.run(
+        providers.transcribe_audio("groq", "key", b"audio", "audio/webm", "Transcribe.")
+    )
+
+    assert asked == ["whisper-large-v3", "whisper-large-v3-turbo"]
+    assert result["text"] == "Voice 1: hello world"
+
+
+def test_a_labeller_that_drops_words_falls_back_to_the_raw_transcript(monkeypatch):
+    import app.providers as providers
+
+    raw = "the teacher explained osmosis and diffusion in detail"
+
+    class FakeResponse:
+        is_success = True
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"text": raw}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, **kwargs):
+            return FakeResponse()
+
+    async def summarizing_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        # A chat model that "relabels" by summarising.
+        return {"text": "Voice 1: osmosis and diffusion", "provider": "groq", "model": model}
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(providers, "generate", summarizing_generate)
+
+    result = asyncio.run(
+        providers.transcribe_audio("groq", "key", b"audio", "audio/webm", "Transcribe.")
+    )
+
+    assert result["text"] == raw                     # no spoken words were lost
+    assert "+" not in result["model"]
+
+
+def test_transcript_coverage_counts_repeated_words():
+    import app.providers as providers
+
+    assert providers.transcript_keeps_words("say it again and again", "Voice 1: say it again and again")
+    assert not providers.transcript_keeps_words("say it again and again", "Voice 1: say it again")
 
 
 def test_transcription_rejects_unsupported_providers_and_empty_audio(monkeypatch):

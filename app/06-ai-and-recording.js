@@ -317,7 +317,8 @@ async function openWikiLink(title) {
         const raw = await recTranscribeGroq(blob);
         if (!raw) return '';
         const typed = await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
-        return { text: typed.text.trim(), provider: typed.provider || 'groq' };
+        const labelled = typed.text.trim();
+        return { text: recKeepsWords(raw, labelled) ? labelled : raw, provider: typed.provider || 'groq' };
       } });
       if (!steps.length) {
         REC.segStatuses[index] = SEG_STATUS.FAILED;
@@ -633,13 +634,43 @@ if (act === 'pause') return recPause();
     // Recording keeps going if the dialog is hidden; reopen it from Import to see progress.
     function bytesToB64Safe(bytes) { let bin = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)); return btoa(bin); }
     const RECORD_LABEL_GROQ = `Below is a transcript of a classroom or meeting part with no speaker labels. Split it into turns and label each turn "Voice 1:", "Voice 2:" and so on, using context: who asks, who answers, greetings and changes of topic. Keep the same label for the same person. Do not change, correct or add any words. Output only the labelled transcript.`;
+    // Full large-v3 first, turbo second. Turbo keeps only 4 of the 32 decoder
+    // layers, which is why it drops words and whole sentences on real audio;
+    // both models share the same free allowance, so the slower build is free.
+    const GROQ_STT_MODELS = ['whisper-large-v3', 'whisper-large-v3-turbo'];
     async function recTranscribeGroq(blob) {
       const key = aiKey('groq'); if (!key) throw new Error('Add a Groq key to transcribe with Whisper.');
-      const form = new FormData(); form.append('file', blob, 'part.webm'); form.append('model', 'whisper-large-v3-turbo'); form.append('response_format', 'json'); form.append('temperature', '0');
-      const response = await aiFetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw Object.assign(new Error(data?.error?.message || `Transcription failed (${response.status})`), { status: response.status });
-      return String(data.text || '').trim();
+      let lastError = null;
+      for (const model of GROQ_STT_MODELS) {
+        const form = new FormData(); form.append('file', blob, 'part.webm'); form.append('model', model); form.append('response_format', 'json'); form.append('temperature', '0');
+        const response = await aiFetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = Object.assign(new Error(data?.error?.message || `Transcription failed (${response.status})`), { status: response.status });
+          // A rejected key or a rate limit says nothing about this clip, so the
+          // other build would fail the same way.
+          if ([401, 403, 429].includes(response.status)) throw error;
+          lastError = error; continue;
+        }
+        // An empty reply on a 30-second part means this build gave up on the
+        // clip, not that nobody spoke. The other build gets a turn.
+        const text = String(data.text || '').trim();
+        if (text) return text;
+      }
+      if (lastError) throw lastError;
+      return '';
+    }
+    const recWords = text => (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+    // The speaker-labelling pass is an LLM step, and one that summarises instead
+    // of relabelling silently deletes speech. Words matter more than labels.
+    function recKeepsWords(raw, labelled) {
+      const source = recWords(raw);
+      if (!source.length) return true;
+      const pool = new Map();
+      recWords(labelled).forEach(word => pool.set(word, (pool.get(word) || 0) + 1));
+      let kept = 0;
+      source.forEach(word => { const count = pool.get(word) || 0; if (count > 0) { kept++; pool.set(word, count - 1); } });
+      return kept / source.length >= 0.8;
     }
     const RECORD_MODES = {
       class: 'Write classroom study notes from this transcript: the topics covered in order, key definitions, facts and examples, formulas or dates, the questions the teacher asked, and a short list of things to revise. Use Markdown headings and bullets. Use only what is in the transcript.',

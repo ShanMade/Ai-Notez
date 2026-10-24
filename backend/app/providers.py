@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -48,6 +49,37 @@ MODEL_DEFAULTS = {
     "groq": settings.groq_models,
     "mistral": settings.mistral_models,
 }
+
+# Whisper builds Groq serves. The full large-v3 model keeps all 32 decoder layers;
+# ``whisper-large-v3-turbo`` keeps 4, which is what makes it fast and what makes it
+# drop words and whole sentences on long classroom audio. Both sit under the same
+# free-tier allowance, so there is no quota reason to prefer turbo.
+WHISPER_MODELS = ("whisper-large-v3", "whisper-large-v3-turbo")
+# A formatting pass that keeps fewer than this share of the spoken words has
+# silently summarised the transcript; the raw text is used instead.
+TRANSCRIPT_WORD_FLOOR = 0.8
+
+
+def _word_counts(text: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for word in re.findall(r"[^\W_]+", text.lower(), flags=re.UNICODE):
+        counts[word] = counts.get(word, 0) + 1
+    return counts
+
+
+def transcript_keeps_words(raw: str, formatted: str, floor: float = TRANSCRIPT_WORD_FLOOR) -> bool:
+    """True when ``formatted`` still contains the words spoken in ``raw``.
+
+    The speaker-labelling pass is an LLM step, and an LLM asked to "keep every
+    word" can still quietly summarise. Comparing the two word multisets catches
+    that, so a half-transcribed part is never written into a note.
+    """
+    source = _word_counts(raw)
+    if not source:
+        return True
+    available = _word_counts(formatted)
+    kept = sum(min(count, available.get(word, 0)) for word, count in source.items())
+    return kept / sum(source.values()) >= floor
 _cooldowns: dict[str, float] = {}
 _cooldown_lock = threading.Lock()
 
@@ -219,26 +251,51 @@ async def transcribe_audio(
     if not audio:
         raise HTTPException(status_code=422, detail="The audio part was empty.")
 
+    # One part is 30 seconds of audio, so an empty reply never means "nothing was
+    # said" — it means this Whisper build gave up on this clip. Try the other
+    # build before reporting a gap in the transcript.
+    models = [settings.groq_transcribe_model, *[item for item in WHISPER_MODELS if item != settings.groq_transcribe_model]]
+    raw = ""
+    used_model = settings.groq_transcribe_model
+    last_error: HTTPException | None = None
+    answered = False
     timeout = httpx.Timeout(settings.request_timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            files={"file": ("part.webm", audio, mime or "audio/webm")},
-            data={
-                "model": settings.groq_transcribe_model,
-                "response_format": "json",
-                "temperature": "0",
-            },
-        )
-        if not response.is_success:
-            raise _provider_error(response)
-        try:
-            raw = str(response.json().get("text") or "").strip()
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise HTTPException(status_code=502, detail="The transcriber returned an unreadable reply.") from exc
+        for whisper_model in [item for item in models if item]:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": ("part.webm", audio, mime or "audio/webm")},
+                data={
+                    "model": whisper_model,
+                    "response_format": "json",
+                    "temperature": "0",
+                },
+            )
+            if not response.is_success:
+                error = _provider_error(response)
+                # A rejected key or a rate limit says nothing about this clip, and
+                # the other Whisper build would fail the same way. Anything else
+                # (retired model, oversized part) is worth retrying on the other.
+                if error.status_code == 429 or (error.headers or {}).get("X-Notez-Provider-Error") == "credential":
+                    raise error
+                last_error = error
+                continue
+            answered = True
+            try:
+                raw = str(response.json().get("text") or "").strip()
+            except ValueError as exc:  # pragma: no cover - defensive
+                raise HTTPException(status_code=502, detail="The transcriber returned an unreadable reply.") from exc
+            used_model = whisper_model
+            if raw:
+                break
     if not raw:
-        raise HTTPException(status_code=502, detail="The transcriber returned an empty transcript.")
+        if not answered and last_error is not None:
+            raise last_error
+        raise HTTPException(
+            status_code=502,
+            detail=f"The transcriber returned an empty transcript ({used_model}).",
+        )
 
     # The formatting pass is the only place a retired Groq chat model can bite,
     # so walk the enabled models instead of failing the whole transcription.
@@ -268,10 +325,15 @@ async def transcribe_audio(
             if exc.status_code in {401, 403, 429}:
                 raise
             continue
+        labelled = formatted["text"]
+        if not transcript_keeps_words(raw, labelled):
+            # The labeller summarised instead of relabelling. Every spoken word
+            # matters more than speaker turns, so keep the raw transcript.
+            return {"text": raw, "provider": "groq", "model": used_model}
         return {
-            "text": formatted["text"],
+            "text": labelled,
             "provider": "groq",
-            "model": f"{settings.groq_transcribe_model} + {formatted['model']}",
+            "model": f"{used_model} + {formatted['model']}",
         }
     raise last_error or HTTPException(status_code=502, detail="Groq could not format the transcript.")
 
