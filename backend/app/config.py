@@ -63,7 +63,10 @@ class Settings:
     embedding_dimensions: int = _integer("AI_EMBEDDING_DIMENSIONS", 768, 64, 3072)
     groq_embedding_model: str = os.getenv("AI_GROQ_EMBEDDING_MODEL", "text-embedding-3-small")
     # Groq's Whisper endpoint transcribes audio when Gemini is rate limited or unavailable.
-    groq_transcribe_model: str = os.getenv("AI_GROQ_TRANSCRIBE_MODEL", "whisper-large-v3-turbo")
+    # Full large-v3, not the turbo build: turbo keeps only 4 of the 32 decoder layers
+    # and is known to drop words or whole sentences on real classroom audio, while
+    # both models share the same free-tier allowance (2,000 requests a day).
+    groq_transcribe_model: str = os.getenv("AI_GROQ_TRANSCRIBE_MODEL", "whisper-large-v3")
     request_timeout_seconds: int = _integer("AI_REQUEST_TIMEOUT_SECONDS", 60, 5, 180)
     max_prompt_chars: int = _integer("AI_MAX_PROMPT_CHARS", 60000, 1000, 200000)
     max_chunks_per_user: int = _integer("AI_MAX_CHUNKS_PER_USER", 20000, 100, 100000)

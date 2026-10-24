@@ -211,7 +211,7 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
-| `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model used for Voice-to-Note fallback transcription |
+| `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model for Voice-to-Note fallback transcription; defaults to `whisper-large-v3` (the full model, not turbo) |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
 Only set provider credentials for services you intend to use. Never commit real `.env` files, service-account JSON, or API keys.
@@ -222,11 +222,21 @@ output size); the backend refuses to start with a mismatched value instead of fa
 ### Voice-to-Note transcription
 
 Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
-endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3-turbo`) when Gemini is rate limited or
-rejects its credential — the resulting transcript is then formatted by a Groq chat model so speaker labels
-and structure stay the same. A provider that is cooling down after a rate limit is tried last rather than
-skipped, so a single 429 never becomes "all providers failed". The browser keeps each failed part's audio
-and offers a retry instead of discarding it.
+endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3`) when Gemini is rate limited or rejects its
+credential — the resulting transcript is then formatted by a Groq chat model so speaker labels and structure
+stay the same. A provider that is cooling down after a rate limit is tried last rather than skipped, so a
+single 429 never becomes "all providers failed". The browser keeps each failed part's audio and offers a
+retry instead of discarding it.
+
+The default is the full `whisper-large-v3`, not `whisper-large-v3-turbo`: turbo keeps 4 of the model's 32
+decoder layers and is known to drop words and whole sentences on long, noisy classroom audio, while both
+builds sit under the same free-tier allowance (2,000 requests and 28,800 audio-seconds a day). Two guards
+stop a fallback from quietly losing speech:
+
+- If a 30-second part comes back empty, the other Whisper build is asked before the part is reported as
+  having no speech.
+- If the speaker-labelling pass returns fewer than 80% of the spoken words (an LLM step can summarise
+  instead of relabelling), the raw transcript is kept and the labels are dropped.
 
 ### Retrieval settings
 
