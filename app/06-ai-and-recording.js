@@ -325,6 +325,25 @@ async function openWikiLink(title) {
     // lasts. Override it with localStorage['notez-stt-model-v1'].
     const REC_STT_MODEL_DEFAULT = 'gemini-3.5-flash-lite';
     const recSttModel = () => aiStore.get('notez-stt-model-v1', '') || REC_STT_MODEL_DEFAULT;
+    const recHasLabels = text => String(text || '').split('\n').some(line => recSpeakerOf(line));
+    // The transcription model is the cheapest Gemini that takes audio, and on
+    // some parts it returns a clean transcript with no speaker labels at all.
+    // That used to reach the note as plain paragraphs, so nothing could be
+    // named and the voices looked broken. A short text-only pass labels the
+    // part (no audio is sent again); it is kept only when every spoken word
+    // survives it, so a model that summarises instead of labelling cannot
+    // delete speech.
+    async function recLabelPart(raw, index) {
+      const text = String(raw || '').trim();
+      if (!text || text.length < 40 || recHasLabels(text)) return text;
+      try {
+        const typed = await recTextCall(`${RECORD_LABEL_PASS}\n\n<transcript>\n${text}\n</transcript>`, { temperature: 0 });
+        const labelled = String(typed || '').trim();
+        if (labelled && recHasLabels(labelled) && recKeepsWords(text, labelled)) return labelled;
+        if (labelled) console.warn(`Label pass on part ${index + 1} was rejected: labels or words did not survive.`);
+      } catch (error) { console.warn(`Label pass failed on part ${index + 1}:`, error); }
+      return text;
+    }
     const recNormWord = word => String(word || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
     const recWordList = text => (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
     // A part is 20 seconds, so a word or a sentence can straddle the cut. The
@@ -389,14 +408,35 @@ async function openWikiLink(title) {
     }
     const recKnownNames = () => (typeof nzVoiceNames === 'function' ? nzVoiceNames() : []);
     const recVoiceCount = () => (typeof nzVoices === 'function' ? nzVoices().length : 0);
-    // A line is a speaker turn when it starts with "Voice 3:" or a learned name.
+    const recFold = value => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    // A learned name is matched loosely: the model sometimes writes "Sir Ahmed."
+    // or changes the spelling of a name it was given, and losing the chip over a
+    // full stop is not a useful outcome.
+    function recKnownMatch(name) {
+      const wanted = recFold(name);
+      if (!wanted) return '';
+      return recKnownNames().find(known => recFold(known) === wanted) || '';
+    }
+    // Models label turns differently: Voice 2, Speaker 2, Speaker B (the usual
+    // Gemini output when it ignores the "Voice n" instruction), bold labels and
+    // a dash instead of a colon. All of them become a speaker turn, and the
+    // numbered forms share one numbering so colours and naming still line up.
+    function recLabelName(name) {
+      const raw = String(name || '').replace(/\*+/g, '').trim();
+      const numbered = /^(?:voice|speaker|person)\s*(\d{1,2})$/i.exec(raw);
+      if (numbered) return `Voice ${Number(numbered[1])}`;
+      const letter = /^(?:speaker|person)\s*([A-Za-z])$/i.exec(raw);
+      if (letter) return `Voice ${letter[1].toUpperCase().charCodeAt(0) - 64}`;
+      return recKnownMatch(raw) || raw;
+    }
+    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person)\s*(?:\d{1,2}|[A-Za-z])|[^:\n]{1,40}?)\s*\**\s*(?::\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
-      const match = String(line).match(/^\s*(?:\[([\d:]+)\]\s*)?\**\s*([^:\n]{1,40}?)\s*\**\s*:\s*(.*)$/);
+      const match = String(line).match(REC_LABEL_RE);
       if (!match) return null;
-      const name = match[2].trim();
-      if (/^Voice\s+\d+$/i.test(name)) return { stamp: match[1] || '', name, text: match[3] };
-      if (recKnownNames().some(known => known.toLowerCase() === name.toLowerCase())) return { stamp: match[1] || '', name, text: match[3] };
-      return null;
+      const name = recLabelName(match[2]);
+      const isVoice = /^Voice\s+\d+$/i.test(name);
+      if (!isVoice && !recKnownMatch(name)) return null;
+      return { stamp: match[1] || '', name, text: match[3] };
     }
     // A learned name keeps its colour; "Voice 3" keeps its number.
     function recSpeakerIndex(name) {
@@ -475,14 +515,16 @@ async function openWikiLink(title) {
         // chat call gets, or the client gives up while the backend is still
         // working and the part is retried for nothing.
         const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), { temperature: 0, model: recSttModel(), images, timeout: 150000 });
-        return { text: answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim(), provider: answer.provider || 'gemini' };
+        const transcript = answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        return { text: await recLabelPart(transcript, index), provider: answer.provider || 'gemini' };
       } });
       if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
         const raw = await recTranscribeGroq(blob, context);
         if (!raw) return '';
-        const typed = await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
+        const typed = await aiCall('groq', `${RECORD_LABEL_PASS}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
         const labelled = typed.text.trim();
-        return { text: recKeepsWords(raw, labelled) ? labelled : raw, provider: typed.provider || 'groq' };
+        const usable = recHasLabels(labelled) && recKeepsWords(raw, labelled);
+        return { text: usable ? labelled : await recLabelPart(raw, index), provider: typed.provider || 'groq' };
       } });
       if (!steps.length) {
         REC.segStatuses[index] = SEG_STATUS.FAILED;
@@ -500,8 +542,7 @@ Accuracy rules: write every sentence you can hear, in order. Never summarise, ne
 ${context ? `The part before this one ended with: "${context}"
 If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
 ` : ''}${typeof nzVoicePrompt === 'function' ? nzVoicePrompt() : ''}${attached.length ? `\nThe audio parts after this one are the reference clips for these voices, in this order: ${attached.join(', ')}.` : ''}
-Speaker labels: write "Name: words" when the voice matches a known voice above, otherwise "Voice 1:", "Voice 2:" and so on. Keep the same label for the same person, and keep the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}.
-Put a timestamp like [05:12] at the start of a turn when you can tell it.
+Speaker labels: every line of speech starts with a speaker label, exactly like "[00:12] Voice 1: words". Use the known name above when the voice matches one of them; otherwise use "Voice 1", "Voice 2" and so on. Keep the same label for the same person and continue the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}. If you cannot tell the voices apart, label every line "Voice 1:" — never write a line of speech without a label.
 Output only the transcript.`;
 
     function recKnownVoices() { return recDetectVoices(REC.segTexts.join('\n')).join(', '); }
@@ -557,6 +598,9 @@ Output only the transcript.`;
           const cleaned = recCleanPart(await recTranscribePart(blob, index));
           const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
           if (!text) REC.notice = `Part ${index + 1} had no clear speech. Check the microphone and the room noise.`;
+          // A part with no speaker turn used to look exactly like the feature
+          // being gone, because the transcript simply rendered as paragraphs.
+          else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `Part ${index + 1} came back without speaker labels. The words are kept as plain text.`;
           recRememberVoiceClips(text, blob);
           REC.segTexts[index] = text;
           REC.segBlobs[index] = null;
@@ -933,7 +977,7 @@ if (act === 'pause') return recPause();
     }
     // Recording keeps going if the dialog is hidden; reopen it from Import to see progress.
     function bytesToB64Safe(bytes) { let bin = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)); return btoa(bin); }
-    const RECORD_LABEL_GROQ = `Below is a transcript of a classroom or meeting part with no speaker labels. Split it into turns and label each turn "Voice 1:", "Voice 2:" and so on, using context: who asks, who answers, greetings and changes of topic. Keep the same label for the same person. Do not change, correct or add any words. Output only the labelled transcript.`;
+    const RECORD_LABEL_PASS = `Below is a transcript of a classroom or meeting part with no speaker labels. Split it into turns and put a label at the start of every turn: "Voice 1:", "Voice 2:" and so on, using context — who asks, who answers, greetings, who is addressed by name, and changes of topic. Keep the same label for the same person throughout. If only one person is speaking, label every turn "Voice 1:". Do not change, correct, merge, split or drop any spoken word, and do not translate. Output only the labelled transcript.`;
     // Full large-v3 first, turbo second. Turbo keeps only 4 of the 32 decoder
     // layers, which is why it drops words and whole sentences on real audio;
     // both models share the same free allowance, so the slower build is free.
@@ -1000,8 +1044,11 @@ if (act === 'pause') return recPause();
       return recTextCall(`Combine these partial notes from one recording into a single, well organised set of notes. Remove repeats. Keep every Voice label.\n\n${partials.join('\n\n---\n\n')}`, { temperature: 0.3 });
     }
     function recDetectVoices(text) {
-      const found = new Set(); const re = /(?:^|\n)\s*(?:\[[\d:]+\]\s*)?\**\s*(Voice\s+\d+)\s*\**\s*:/gi; let m;
-      while ((m = re.exec(String(text)))) found.add(m[1].replace(/\s+/g, ' '));
+      const found = new Set();
+      String(text || '').split('\n').forEach(line => {
+        const speaker = recSpeakerOf(line);
+        if (speaker && /^Voice\s+\d+$/i.test(speaker.name)) found.add(speaker.name);
+      });
       return [...found].sort((x, y) => Number(x.match(/\d+/)[0]) - Number(y.match(/\d+/)[0]));
     }
     function recOfferNames(noteId, voices) {

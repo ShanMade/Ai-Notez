@@ -263,6 +263,16 @@ Gemini that accepts audio. The prompt carries the accuracy rules that matter for
 sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word that
 cannot be heard.
 
+Speaker labels are asked for in the same prompt (`[00:12] Voice 1: words`), but a cheap audio model
+sometimes returns a clean transcript with no labels at all, and that part then rendered as plain
+paragraphs — no chips, and **Name speakers** found nothing to name. So a part that comes back without a
+recognised label gets one **text-only labelling pass** (`recLabelPart`, `RECORD_LABEL_PASS`): the audio is
+never sent again, the pass runs on the chat model, and it is kept only if it adds labels *and* keeps every
+spoken word (`recKeepsWords`, 80% floor). A model that summarises instead of labelling cannot delete
+speech. When even that fails, the panel says so instead of quietly showing a wall of text. Labels are
+parsed generously: `Voice 2`, `Speaker 2`, `Speaker B` (A=1), `**Voice 1:**`, `[00:12] Voice 1:`, a colon or
+a dash, and a learned name written with a trailing full stop or different case all count as a speaker turn.
+
 Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
 endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3`) when Gemini is rate limited or rejects its
 credential — the resulting transcript is then formatted by a Groq chat model so speaker labels and structure
