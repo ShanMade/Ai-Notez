@@ -285,6 +285,13 @@ The clip goes to a private IndexedDB store (`notez-voice-samples-v1`) and the pr
 - the live transcript renders a learned name as a speaker chip with the same colouring as a voice number,
   and the prompt forbids inventing a name that is not on the list.
 
+Naming a speaker is enough to teach the voice. When someone fills in **Name speakers** after a recording,
+each named voice is saved in the background — the audio of the part where that voice first spoke is kept
+during the recording for exactly this, so the identity is stored with a real reference clip. Nothing is
+asked, nothing is announced, and the name is written before the description is requested, so a closed tab
+never loses it. A voice already on the list keeps its stored clip instead of being overwritten, and a name
+given with no audio still becomes a text-only identity that later transcriptions respect.
+
 Open it from **Voices** in the recorder panel, or from **Voice settings** in the settings hub (both open the
 same library). Up to eight clips are attached to one request, and each clip is capped at 700 KB.
 
