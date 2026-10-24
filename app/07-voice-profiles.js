@@ -1517,7 +1517,10 @@ function initVoiceProfileListeners() {
         hubRow.innerHTML = `<div><b>Voice settings</b><small>Configure voice profiles and transcription.</small></div><button type="button" class="nzai-primary hub-btn" data-hub="voice-settings">Open</button>`;
         hubRow.querySelector('button').addEventListener('click', () => {
           closeAccountMenu();
-          showVoiceSettings();
+          // One voice system: the learned-voice library is the one the
+          // transcriber actually reads, so this entry opens that.
+          if (typeof nzVoiceLibrary === 'function') nzVoiceLibrary();
+          else showVoiceSettings();
         });
         const generalSection = document.querySelector('.hub-body');
         if (generalSection) {

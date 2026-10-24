@@ -234,6 +234,38 @@ function nzVoiceLibrary() {
   });
 }
 
+// The app shipped an older "Voice settings" screen that saved names and
+// descriptions but never used them for transcription. Those profiles are real
+// user data, so they are folded into the library once (the old screen stored no
+// audio, so these entries start text-only and the clip can be taught later).
+function nzVoiceImportLegacy() {
+  try {
+    if (localStorage.getItem('notez-voices-imported-v1')) return;
+    let legacy = [];
+    try { legacy = JSON.parse(localStorage.getItem('notez-voice-profiles-v1') || '[]'); } catch { legacy = []; }
+    if (Array.isArray(legacy) && legacy.length) {
+      const list = nzVoices();
+      const known = new Set(list.map(voice => voice.name.toLowerCase()));
+      for (const old of legacy) {
+        const name = String(old?.name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+        if (!name || known.has(name.toLowerCase())) continue;
+        known.add(name.toLowerCase());
+        list.push({
+          id: 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          name,
+          about: String(old?.description || old?.sampleText || '').replace(/\s+/g, ' ').slice(0, 220),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          legacy: true
+        });
+      }
+      nzVoiceStore(list);
+    }
+    localStorage.setItem('notez-voices-imported-v1', '1');
+  } catch { /* a broken legacy value must not stop the app */ }
+}
+nzVoiceImportLegacy();
+
 // The recorder panel and the voice library share one style block.
 const nzVoiceCss = document.createElement('style');
 nzVoiceCss.textContent = `.nz-voice-list{display:flex;flex-direction:column;gap:8px}.nz-voice-row{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:8px 10px;border-radius:10px;border:1px solid rgba(128,148,170,.28)}.nz-voice-row b{display:block;font-size:12.5px}.nz-voice-row small{display:block;opacity:.72;font-size:11.5px;line-height:1.45}.nz-voice-row button{flex:0 0 auto;border:0;background:none;color:#d9534f;font:600 11.5px system-ui,sans-serif;cursor:pointer;padding:4px 2px}`;
