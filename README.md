@@ -10,7 +10,8 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Create and organize notes in a focused web workspace.
 - Sign in through Firebase Authentication and sync user data with Firebase Realtime Database.
 - Use AI generation through configured Gemini and Groq providers; Mistral support can be enabled in backend configuration.
-- Work with voice-note and transcription workflows, including configurable voice profiles.
+- Record a lecture and watch it become notes: 20-second parts, each transcribed as it is recorded, with the tail of the previous part carried into the next one so a sentence cut by the boundary survives, and repeated words removed instead of duplicated.
+- Teach a voice once — record a name's owner for eight seconds — and every later transcript labels that person by name instead of "Voice 2".
 - Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
 - Read notes in an editorial reader: no card, one 46rem column, a display-serif title, section numbers in the margin, a hairline header with reading progress, and the assistant behind a bottom command bar (⌘J / Ctrl+J) that opens as a sheet over the note instead of shrinking it. Body type switches between serif and sans, with a saved reading size.
@@ -211,6 +212,7 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
+| `AI_GEMINI_TRANSCRIBE_MODEL` | Model used for Voice-to-Note audio; defaults to `gemini-3.5-flash-lite` (cheapest current-generation Gemini that accepts audio) |
 | `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model for Voice-to-Note fallback transcription; defaults to `whisper-large-v3` (the full model, not turbo) |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
@@ -220,6 +222,19 @@ When `AI_EMBEDDING_PROVIDER` is `groq` or `mistral`, `AI_EMBEDDING_DIMENSIONS` m
 output size); the backend refuses to start with a mismatched value instead of failing at retrieval time.
 
 ### Voice-to-Note transcription
+
+A recording is cut into **20-second parts**. Each part is transcribed as soon as it is recorded, so the
+transcript appears while the lecture is still running, and the next part always receives the tail of what
+was already heard. That tail is what makes a cut-off sentence survive a part boundary: the model is told
+how the previous part ended, so it continues the sentence instead of starting cold, and any words it
+repeats are removed before the part is stored (`recTrimOverlap`). A part that ends mid-sentence tolerates a
+two-word echo; a part that ends at a full stop only trims an echo of three words or more, because there it
+is far more likely to be real speech.
+
+Transcription uses `gemini-3.5-flash-lite` (`AI_GEMINI_TRANSCRIBE_MODEL`), the cheapest current-generation
+Gemini that accepts audio. The prompt carries the accuracy rules that matter for a transcript: every
+sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word that
+cannot be heard.
 
 Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
 endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3`) when Gemini is rate limited or rejects its
@@ -237,6 +252,28 @@ stop a fallback from quietly losing speech:
   having no speech.
 - If the speaker-labelling pass returns fewer than 80% of the spoken words (an LLM step can summarise
   instead of relabelling), the raw transcript is kept and the labels are dropped.
+
+### Learned voices
+
+`app/07-voice-identity.js` turns speaker labels from a guess into a name. Teaching a voice records (or
+accepts) a short clip, asks Gemini to describe it in one line, and stores the pair:
+
+```js
+{ id, name: 'Sir Ahmed', about: 'adult male, low pitch, measured pace, Urdu-accented English' }
+```
+
+The clip goes to a private IndexedDB store (`notez-voice-samples-v1`) and the profile to
+`localStorage['notez-voices-v1']`; both stay on this device and are never synced with notes. From then on:
+
+- every transcription prompt lists the known voices by name with their description, so turns are labelled
+  `Sir Ahmed:` instead of `Voice 2:`;
+- the first part and every thirtieth part (about once a minute) also carry the reference clips themselves,
+  which is what makes matching reliable rather than descriptive;
+- the live transcript renders a learned name as a speaker chip with the same colouring as a voice number,
+  and the prompt forbids inventing a name that is not on the list.
+
+Open it from **Voices** in the recorder panel. Up to eight clips are attached to one request, and each clip
+is capped at 700 KB.
 
 ### Retrieval settings
 

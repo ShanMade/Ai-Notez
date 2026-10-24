@@ -243,7 +243,7 @@ async function openWikiLink(title) {
     updateFaviconFromTheme();
 
     // ================= Live recording: real-time notes with provider failover =================
-    const REC_SEGMENT_MS = () => window.__REC_SEGMENT_MS || 30000;   // each part is transcribed as soon as it is recorded
+    const REC_SEGMENT_MS = () => window.__REC_SEGMENT_MS || 20000;   // 20s parts: short enough to transcribe live, long enough to keep the context
     const REC_NOTES_EVERY = 2;                                        // refresh the AI notes every 2 parts
     const REC_MAX_MS = 50 * 60 * 1000;
     // Segment status constants
@@ -259,6 +259,65 @@ async function openWikiLink(title) {
     const recTransient = error => error?.status === 429 || error?.status >= 500 || error instanceof TypeError || error?.name === 'AbortError' || error?.code === 'cut';
     const recLabel = provider => provider === 'gemini' ? 'Gemini' : 'Groq';
     const recSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    // The transcription model: the cheapest current-generation Gemini that takes
+    // audio, so a 20-second part costs a fraction of a cent and the free tier
+    // lasts. Override it with localStorage['notez-stt-model-v1'].
+    const REC_STT_MODEL_DEFAULT = 'gemini-3.5-flash-lite';
+    const recSttModel = () => aiStore.get('notez-stt-model-v1', '') || REC_STT_MODEL_DEFAULT;
+    const recNormWord = word => String(word || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    const recWordList = text => (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+    // A part is 20 seconds, so a word or a sentence can straddle the cut. The
+    // tail of what was already heard is handed to the next part, and whatever
+    // the model repeats from it is removed, so nothing is lost and nothing is
+    // said twice.
+    const recTail = (text, chars = 320) => {
+      const clean = String(text || '').replace(/\s+/g, ' ').trim();
+      return clean.length > chars ? '…' + clean.slice(-chars) : clean;
+    };
+    function recBoundaryTail(index) {
+      for (let i = index - 1; i >= 0; i--) { const text = REC.segTexts[i]; if (text && text.trim()) return recTail(text); }
+      return '';
+    }
+    function recTrimOverlap(previous, current) {
+      const lines = String(current || '').split('\n');
+      const first = lines[0] || '';
+      const label = (first.match(/^(\s*(?:\[[\d:]+\]\s*)?[^:\n]{1,40}:\s*)/) || [''])[0];
+      const body = first.slice(label.length);
+      const before = recWordList(recTail(previous, 600));
+      const words = body.split(/\s+/).filter(Boolean);
+      // A sentence that clearly finished is not expected to continue, so only a
+      // longer echo there is real repetition. A sentence cut in the middle can
+      // repeat as little as two words and still be the same thought.
+      const finished = /[.!?…]["')\]]?\s*$/.test(String(previous || '').trim());
+      for (let size = Math.min(16, before.length, words.length); size >= (finished ? 3 : 2); size--) {
+        const head = words.slice(0, size).map(recNormWord).join(' ');
+        if (!head || head !== before.slice(-size).join(' ')) continue;
+        const rest = words.slice(size).join(' ');
+        lines[0] = rest ? label + rest : '';
+        return lines.filter((line, i) => i > 0 || line).join('\n').trim();
+      }
+      return String(current || '').trim();
+    }
+    const recKnownNames = () => (typeof nzVoiceNames === 'function' ? nzVoiceNames() : []);
+    const recVoiceCount = () => (typeof nzVoices === 'function' ? nzVoices().length : 0);
+    // A line is a speaker turn when it starts with "Voice 3:" or a learned name.
+    function recSpeakerOf(line) {
+      const match = String(line).match(/^\s*(?:\[([\d:]+)\]\s*)?\**\s*([^:\n]{1,40}?)\s*\**\s*:\s*(.*)$/);
+      if (!match) return null;
+      const name = match[2].trim();
+      if (/^Voice\s+\d+$/i.test(name)) return { stamp: match[1] || '', name, text: match[3] };
+      if (recKnownNames().some(known => known.toLowerCase() === name.toLowerCase())) return { stamp: match[1] || '', name, text: match[3] };
+      return null;
+    }
+    // A learned name keeps its colour; "Voice 3" keeps its number.
+    function recSpeakerIndex(name) {
+      const voice = /^Voice\s+(\d+)$/i.exec(name);
+      if (voice) return Math.max(0, Number(voice[1]) - 1);
+      const found = recKnownNames().findIndex(known => known.toLowerCase() === name.toLowerCase());
+      if (found >= 0) return found;
+      let hash = 0; for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 997;
+      return hash;
+    }
 
     // Runs the steps in order. A step that fails (network cut, rate limit, server error, cut-off reply) hands over to the next one.
     // A step can return a plain string or { text, provider }. The provider the
@@ -307,14 +366,27 @@ async function openWikiLink(title) {
       return text;
     }
     async function recTranscribePart(blob, index) {
+      const context = recBoundaryTail(index);
+      // Reference clips are only attached to the first part and then once a
+      // minute: they cost bandwidth and the model keeps the names from the
+      // carried prompt, so every part does not need them.
+      const withSamples = index % 30 === 0 && typeof nzVoiceSamples === 'function' && recVoiceCount() > 0;
       const steps = [];
       if (aiUsesManaged() || aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
         const bytes = new Uint8Array(await blob.arrayBuffer());
-        const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index), { temperature: 0, images: [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }] });
+        // The recording part always comes first: the backend transcribes the
+        // first audio part and treats the rest as reference voices. The prompt
+        // names the clips in the order they are actually attached, so a clip
+        // that has been evicted can never shift the mapping between a name and
+        // the wrong voice.
+        const samples = withSamples ? await nzVoiceSamples() : [];
+        const images = [{ mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) }];
+        for (const sample of samples) images.push({ mime: sample.mime, data: sample.data });
+        const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, samples.map(sample => sample.name)), { temperature: 0, model: recSttModel(), images });
         return { text: answer.text.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim(), provider: answer.provider || 'gemini' };
       } });
       if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
-        const raw = await recTranscribeGroq(blob);
+        const raw = await recTranscribeGroq(blob, context);
         if (!raw) return '';
         const typed = await aiCall('groq', `${RECORD_LABEL_GROQ}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
         const labelled = typed.text.trim();
@@ -331,11 +403,15 @@ async function openWikiLink(title) {
       REC.segStatuses[index] = SEG_STATUS.COMPLETED;
       return text;
     }
-    const RECORD_TRANSCRIBE_GEMINI_PART = index => `Transcribe this short part (number ${index + 1}) of a classroom or meeting recording, completely and accurately.
-Label every turn "Voice 1:", "Voice 2:" and so on. Keep the same numbers for the same people as in the earlier parts: ${recKnownVoices() || 'none yet, number them in order of first speaking'}.
-One turn per line, in the form "Voice N: words", with a timestamp like [05:12] at the start when you can.
-Transcribe the words exactly as spoken, in their original language (English, Urdu or others). Do not translate. Write [inaudible] for anything you cannot hear.
+    const RECORD_TRANSCRIBE_GEMINI_PART = (index, context = '', attached = []) => `Transcribe audio part ${index + 1} of a classroom or meeting recording, word for word.
+Accuracy rules: write every sentence you can hear, in order. Never summarise, never skip a sentence, never paraphrase and never correct the speaker's grammar. Keep the original language (English, Urdu or a mix of both) and never translate. Use [inaudible] only for a word you truly cannot hear.
+${context ? `The part before this one ended with: "${context}"
+If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
+` : ''}${typeof nzVoicePrompt === 'function' ? nzVoicePrompt() : ''}${attached.length ? `\nThe audio parts after this one are the reference clips for these voices, in this order: ${attached.join(', ')}.` : ''}
+Speaker labels: write "Name: words" when the voice matches a known voice above, otherwise "Voice 1:", "Voice 2:" and so on. Keep the same label for the same person, and keep the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}.
+Put a timestamp like [05:12] at the start of a turn when you can tell it.
 Output only the transcript.`;
+
     function recKnownVoices() { return recDetectVoices(REC.segTexts.join('\n')).join(', '); }
     function recLiveTranscript() { return REC.segTexts.filter(Boolean).join('\n'); }
     function recNoteBody(transcript, notesText, finishing) {
@@ -383,7 +459,8 @@ Output only the transcript.`;
       REC.queue = REC.queue.then(async () => {
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
         try {
-          const text = recCleanPart(await recTranscribePart(blob, index));
+          const cleaned = recCleanPart(await recTranscribePart(blob, index));
+          const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
           if (!text) REC.notice = `Part ${index + 1} had no clear speech. Check the microphone and the room noise.`;
           REC.segTexts[index] = text;
           REC.segBlobs[index] = null;
@@ -461,10 +538,10 @@ Output only the transcript.`;
       const lastIndex = parts[parts.length - 1].index;
       return parts.map(part => {
         const lines = part.text.split('\n').filter(line => line.trim()).map(line => {
-          const m = line.match(/^\s*(?:\[([\d:]+)\]\s*)?\**\s*(Voice\s+(\d+))\s*\**\s*:\s*(.*)$/i);
-          if (!m) return `<p class="rec-line"><span class="rec-text">${esc(line.trim())}</span></p>`;
-          const n = Number(m[3]) - 1;
-          return `<p class="rec-line"><span class="rec-stamp">${esc(m[1] || '')}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">Voice ${m[3]}</span><span class="rec-text">${esc(m[4])}</span></p>`;
+          const speaker = recSpeakerOf(line);
+          if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(line.trim())}</span></p>`;
+          const n = recSpeakerIndex(speaker.name);
+          return `<p class="rec-line"><span class="rec-stamp">${esc(speaker.stamp)}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">${esc(speaker.name)}</span><span class="rec-text">${esc(speaker.text)}</span></p>`;
         }).join('');
         const statusClass = part.status === SEG_STATUS.FAILED ? ' failed' : part.status === SEG_STATUS.IN_PROGRESS ? ' in-progress' : part.status === SEG_STATUS.NEEDS_RETRY ? ' needs-retry' : '';
         const statusLabel = part.status === SEG_STATUS.FAILED ? ' (Failed)' : part.status === SEG_STATUS.IN_PROGRESS ? ' (In progress)' : part.status === SEG_STATUS.NEEDS_RETRY ? ' (Needs retry)' : '';
@@ -515,9 +592,9 @@ Output only the transcript.`;
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
-        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><p class="rec-muted">Tell everyone you are recording, and get their agreement first.</p>`;
+        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
-        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
+        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
       return `${intro}${stage}<div id="rec-live" class="rec-live">${recLiveHtml()}</div>${tail}`;
@@ -594,7 +671,7 @@ Output only the transcript.`;
           REC.segStatuses[idx] = SEG_STATUS.IN_PROGRESS;
           updateRecLive();
           
-          const text = recCleanPart(await recTranscribePart(REC.segBlobs[idx], idx));
+          const text = recTrimOverlap(idx > 0 ? REC.segTexts[idx - 1] : '', recCleanPart(await recTranscribePart(REC.segBlobs[idx], idx)));
           if (text) {
             REC.segTexts[idx] = text;
             REC.segBlobs[idx] = null;
@@ -624,6 +701,7 @@ Output only the transcript.`;
 if (act === 'pause') return recPause();
       if (act === 'resume') return recResume();
       if (act === 'stop') return recStop();
+      if (act === 'voices') { if (typeof nzVoiceLibrary === 'function') nzVoiceLibrary(); return; }
       if (act === 'names') { const note = notes.find(item => item.id === REC.noteId); const voices = note ? recDetectVoices(note.body) : []; if (voices.length) recOfferNames(REC.noteId, voices); else toast('No speaker labels found in this note yet.'); return; }
       if (act === 'open') { const note = notes.find(item => item.id === REC.noteId); nzaiClose(); if (note) openNote(note.id); return; }
       if (act === 'close') {
@@ -638,11 +716,14 @@ if (act === 'pause') return recPause();
     // layers, which is why it drops words and whole sentences on real audio;
     // both models share the same free allowance, so the slower build is free.
     const GROQ_STT_MODELS = ['whisper-large-v3', 'whisper-large-v3-turbo'];
-    async function recTranscribeGroq(blob) {
+    async function recTranscribeGroq(blob, hint = '') {
       const key = aiKey('groq'); if (!key) throw new Error('Add a Groq key to transcribe with Whisper.');
       let lastError = null;
       for (const model of GROQ_STT_MODELS) {
         const form = new FormData(); form.append('file', blob, 'part.webm'); form.append('model', model); form.append('response_format', 'json'); form.append('temperature', '0');
+        // Whisper takes 224 tokens of context. The tail of the previous part
+        // makes it continue a cut-off sentence instead of starting cold.
+        if (hint) form.append('prompt', hint.slice(-600));
         const response = await aiFetch('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -652,7 +733,7 @@ if (act === 'pause') return recPause();
           if ([401, 403, 429].includes(response.status)) throw error;
           lastError = error; continue;
         }
-        // An empty reply on a 30-second part means this build gave up on the
+        // An empty reply on a 20-second part means this build gave up on the
         // clip, not that nobody spoke. The other build gets a turn.
         const text = String(data.text || '').trim();
         if (text) return text;

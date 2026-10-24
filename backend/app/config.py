@@ -39,9 +39,13 @@ class Settings:
     gemini_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GEMINI_MODELS",
-            "gemini-2.5-flash,gemini-2.5-flash-lite",
+            "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.5-flash-lite",
         ).split(",") if item.strip()
     )
+    # Voice-to-Note has its own model. 3.5 Flash-Lite takes audio at $0.30/M
+    # tokens (a third of 2.5 Flash) and is the cheapest current-generation
+    # Gemini, so 20-second parts stay inside the free tier for much longer.
+    gemini_transcribe_model: str = os.getenv("AI_GEMINI_TRANSCRIBE_MODEL", "gemini-3.5-flash-lite")
     groq_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GROQ_MODELS",

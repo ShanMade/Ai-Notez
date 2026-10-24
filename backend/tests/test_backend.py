@@ -233,6 +233,70 @@ def test_managed_audio_transcribes_with_gemini_when_it_is_healthy(monkeypatch):
     assert bad.status_code == 422
 
 
+def test_voice_to_note_uses_the_dedicated_transcription_model(monkeypatch):
+    from app.config import settings
+
+    seen = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        seen.append(model)
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        client = TestClient(app)
+        client.post("/v1/ai/generate", json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}]})
+        client.post("/v1/ai/generate", json={"prompt": "Explain osmosis."})
+    finally:
+        app.dependency_overrides.clear()
+
+    # Audio gets the cheap transcription model; text keeps the chat model.
+    assert seen[0] == settings.gemini_transcribe_model
+    assert seen[1] != settings.gemini_transcribe_model
+
+
+def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
+    seen = []
+
+    async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images):
+        seen.append(model)
+        if model == "gemini-3.5-flash-lite":
+            raise HTTPException(status_code=404, detail="models/gemini-3.5-flash-lite is not found for API version v1beta")
+        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+
+    monkeypatch.setattr(main_module, "generate", fake_generate)
+    monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
+    monkeypatch.setattr(main_module, "provider_key", lambda name: f"{name}-managed-key")
+    monkeypatch.setattr(main_module, "provider_cooling_down", lambda name: False)
+    monkeypatch.setattr(main_module, "cool_down", lambda provider, seconds=45: None)
+    app.dependency_overrides[current_user] = lambda: {"uid": "guest-user"}
+    try:
+        response = TestClient(app).post(
+            "/v1/ai/generate",
+            json={"prompt": "Transcribe.", "images": [{"mime": "audio/webm", "data": "AAAA"}]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert seen[0] == "gemini-3.5-flash-lite"
+    assert len(seen) > 1 and seen[1] != "gemini-3.5-flash-lite"
+
+
+def test_a_part_can_carry_its_recording_plus_eight_voice_samples():
+    # One recording part + eight learned voices fit in one request.
+    parts = [{"mime": "audio/webm", "data": "AAAA"}] + [
+        {"mime": "audio/webm", "data": "AAAA"} for _ in range(8)
+    ]
+    request = main_module.GenerateRequest(prompt="Transcribe.", images=parts)
+    assert len(request.images) == 9
+
+
 def test_managed_audio_falls_back_to_groq_when_gemini_is_rate_limited(monkeypatch):
     # The screenshot case: Gemini rate-limited, the request was refused instead
     # of being handed to the provider that can still transcribe.

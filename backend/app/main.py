@@ -122,7 +122,9 @@ class GenerateRequest(BaseModel):
     system_prompt: str = Field(default="", max_length=4000)
     temperature: float = Field(default=0.4, ge=0, le=2)
     json_mode: bool = Field(default=False, alias="json")
-    images: list[ImagePayload] = Field(default_factory=list, max_length=4)
+    # A Voice-to-Note part may carry a recording clip plus up to eight learned
+    # voice samples, so the cap is one recording + NZ_VOICE_MAX references.
+    images: list[ImagePayload] = Field(default_factory=list, max_length=10)
     api_key: SecretStr | None = Field(default=None, repr=False)
 
 
@@ -235,34 +237,54 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
 
     last_error: HTTPException | None = None
     for index, provider in enumerate(ordered):
-        model = body.model if provider == body.provider and body.model else MODEL_DEFAULTS[provider][0]
-        try:
-            if audio and provider != "gemini":
-                result = await transcribe_audio(
-                    provider,
-                    provider_key(provider),
-                    audio_bytes,
-                    audio.mime,
-                    body.prompt,
+        explicit = body.model if provider == body.provider and body.model else ""
+        if audio and provider == "gemini":
+            # Voice-to-Note gets its own model — the cheapest current-generation
+            # Gemini that accepts audio — with the chat models behind it in case
+            # this key cannot reach that model yet.
+            models = list(dict.fromkeys([explicit or settings.gemini_transcribe_model, *MODEL_DEFAULTS["gemini"]]))
+        else:
+            models = [explicit or MODEL_DEFAULTS[provider][0]]
+        for model_index, model in enumerate(models):
+            try:
+                if audio and provider != "gemini":
+                    result = await transcribe_audio(
+                        provider,
+                        provider_key(provider),
+                        audio_bytes,
+                        audio.mime,
+                        body.prompt,
+                    )
+                else:
+                    result = await generate(provider, model, provider_key(provider), prompt, system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
+                result["sources"] = rag_sources
+                return result
+            except HTTPException as exc:
+                last_error = exc
+                detail = str(exc.detail or "").lower()
+                model_missing = exc.status_code == 404 or any(
+                    marker in detail for marker in ("not found", "not supported", "decommissioned", "does not exist")
                 )
-            else:
-                result = await generate(provider, model, provider_key(provider), prompt, system_prompt, body.temperature, body.json_mode, [image.model_dump() for image in body.images])
-            result["sources"] = rag_sources
-            return result
-        except HTTPException as exc:
-            last_error = exc
-            if exc.status_code in {429, 503}:
-                cool_down(provider, seconds=45 if exc.status_code == 429 else 15)
-            # Any provider left in the chain gets a turn, whatever the failure
-            # was: a rejected credential or a bad model on one provider says
-            # nothing about the next one.
-            if index == len(ordered) - 1:
-                if len(ordered) > 1:
-                    raise HTTPException(
-                        status_code=exc.status_code,
-                        detail=f"{exc.detail} (tried {', '.join(ordered)}).",
-                    ) from exc
-                raise
+                # Only a missing transcription model walks to the next Gemini
+                # model; a rate limit or a bad prompt is not a model problem.
+                if model_index < len(models) - 1 and audio and provider == "gemini" and model_missing:
+                    continue
+                if exc.status_code in {429, 503}:
+                    cool_down(provider, seconds=45 if exc.status_code == 429 else 15)
+                break
+        # Any provider left in the chain gets a turn, whatever the failure was:
+        # a rejected credential or a bad model on one provider says nothing
+        # about the next one.
+        if index == len(ordered) - 1:
+            failure = last_error
+            if failure is None:
+                break
+            if len(ordered) > 1:
+                raise HTTPException(
+                    status_code=failure.status_code,
+                    detail=f"{failure.detail} (tried {', '.join(ordered)}).",
+                ) from failure
+            raise failure
     raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
 
 
