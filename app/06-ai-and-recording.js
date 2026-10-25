@@ -461,9 +461,21 @@ async function openWikiLink(title) {
       return recKnownMatch(raw) || raw;
     }
     let recSpkZero = false;   // true while the current transcript labels its voices from 0
+    // A model writing Urdu or Hebrew often puts an invisible direction mark
+    // (U+200F, U+200E …) in front of a line: "\u200Fspk0: …". The mark is not
+    // part of the label, but it stopped the label regex from matching at the
+    // start of the line, so a transcript showed raw "spk0:" and every voice
+    // collapsed into the same colour. Marks are dropped before a line is read.
+    const REC_BIDI_HEAD = /^[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/;
+    const REC_BIDI_ANY = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/g;
+    // Marks are removed wherever they sit (a model can also put one after a
+    // timestamp or after bold asterisks), but a mark that opened the line is put
+    // back afterwards, because that is what keeps a mixed Urdu line right-to-left.
+    const recUnmark = line => String(line ?? '').replace(REC_BIDI_ANY, '');
+    const recLeadMark = line => (String(line ?? '').match(REC_BIDI_HEAD) || [''])[0];
     const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
-      const match = String(line).match(REC_LABEL_RE);
+      const match = String(recUnmark(line)).match(REC_LABEL_RE);
       if (!match) return null;
       const name = recLabelName(match[2]);
       const isVoice = /^Voice\s+\d+$/i.test(name);
@@ -655,7 +667,7 @@ Output only the transcript.`;
     // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
     // label in the note. A real name ("Ayesha:") is left exactly as written.
     function recNormalizeLabels(text) {
-      return String(text || '').split('\n').map(line => line.replace(
+      return String(text || '').split('\n').map(raw => recLeadMark(raw) + recUnmark(raw).replace(
         /^(\s*(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i,
         (all, stamp, label) => `${stamp}${recLabelName(label)}: `
       )).join('\n');
@@ -666,7 +678,7 @@ Output only the transcript.`;
     function recCleanPart(raw) {
       const lines = String(raw || '').split('\n').filter(line => line.trim());
       const kept = lines.filter(line => {
-        const words = line.replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
+        const words = recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
         return words.length > 0;
       });
       return kept.join('\n').trim();
