@@ -7458,3 +7458,117 @@ html[data-theme] #nz-ai .nzai-src.on {
   border-color: color-mix(in srgb, var(--p-accent) 46%, transparent);
   background: var(--p-soft);
 }
+
+/* ---- 8. voice notes: a clock, and the sessions you already recorded ------ */
+/* The transcript used to say "Part 45 · 46 s", which told the reader how the
+   audio was cut up rather than when anything was said. Every stamp is now the
+   time of day on this device, and the part header is a clock range. */
+html[data-theme] #nz-ai .rec-part header {
+  gap: 7px;
+  letter-spacing: .04em;
+  text-transform: none;
+  font-size: 9.5px;
+}
+html[data-theme] #nz-ai .rec-part header b { color: var(--p-ink); font-weight: 650; }
+html[data-theme] #nz-ai .rec-part header span { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+html[data-theme] #nz-ai .rec-part header i {
+  margin-left: 6px;
+  font: 700 8px/1 var(--p-mono);
+  font-style: normal;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--p-warn);
+}
+html[data-theme] #nz-ai .rec-part.failed header i { color: var(--p-danger); }
+html[data-theme] #nz-ai .rec-stamp { font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+
+/* Voice-note history: every session the recorder saved, newest first, each one
+   opening into its full transcript and the notes written from it. */
+html[data-theme] #nz-ai .rec-hist { display: grid; gap: 8px; margin: 18px 0 4px; }
+html[data-theme] #nz-ai .rec-hist-top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 0 2px;
+}
+html[data-theme] #nz-ai .rec-hist-top b {
+  font: 700 9px/1 var(--p-mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .rec-hist-top span { font-size: 10.5px; color: var(--p-faint); }
+html[data-theme] #nz-ai .rec-hist-item {
+  border: 1px solid var(--p-line);
+  border-radius: 13px;
+  background: var(--p-card);
+  box-shadow: var(--p-elev-1);
+  overflow: hidden;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+html[data-theme] #nz-ai .rec-hist-item:hover { border-color: var(--p-line-2); }
+html[data-theme] #nz-ai .rec-hist-item.open {
+  border-color: color-mix(in srgb, var(--p-accent) 32%, transparent);
+  box-shadow: var(--p-elev-1), 0 10px 26px -22px color-mix(in srgb, var(--p-accent) 90%, transparent);
+}
+html[data-theme] #nz-ai .rec-hist-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--p-ink);
+  text-align: left;
+  cursor: pointer;
+}
+html[data-theme] #nz-ai .rec-hist-head:focus-visible { outline: 2px solid var(--p-accent); outline-offset: -2px; }
+html[data-theme] #nz-ai .rec-hist-when {
+  display: grid;
+  gap: 1px;
+  padding-right: 11px;
+  border-right: 1px solid var(--p-line);
+  font-family: var(--p-mono);
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme] #nz-ai .rec-hist-when b { font-size: 9.5px; font-weight: 600; letter-spacing: .02em; color: var(--p-muted); }
+html[data-theme] #nz-ai .rec-hist-when span { font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-hist-meta { display: grid; gap: 2px; min-width: 0; }
+html[data-theme] #nz-ai .rec-hist-meta b {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600; letter-spacing: -.008em; color: var(--p-ink);
+}
+html[data-theme] #nz-ai .rec-hist-meta small {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; color: var(--p-faint);
+}
+html[data-theme] #nz-ai .rec-hist-chev {
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  border-radius: 7px;
+  color: var(--p-faint);
+  transition: transform .18s ease, background .16s ease, color .16s ease;
+}
+html[data-theme] #nz-ai .rec-hist-head:hover .rec-hist-chev { background: var(--p-well); color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-hist-item.open .rec-hist-chev { transform: rotate(180deg); color: var(--p-accent); }
+html[data-theme] #nz-ai .rec-hist-body { border-top: 1px solid var(--p-line); animation: nz-menu-in .16s ease-out; }
+html[data-theme] #nz-ai .rec-hist-scroll { max-height: 320px; overflow: auto; padding: 11px 12px 4px; }
+html[data-theme] #nz-ai .rec-hist-scroll .rec-line:last-child { margin-bottom: 4px; }
+html[data-theme] #nz-ai .rec-hist-notes {
+  margin-top: 4px;
+  padding: 11px 12px;
+  border-top: 1px solid var(--p-line);
+  background: color-mix(in srgb, var(--p-bg) 60%, transparent);
+}
+html[data-theme] #nz-ai .rec-hist-notes > :first-child { margin-top: 0; }
+html[data-theme] #nz-ai .rec-hist-notes > :last-child { margin-bottom: 0; }
+html[data-theme] #nz-ai .rec-hist .rec-actions { padding: 8px 12px 11px; }
+html[data-theme] #nz-ai .rec-hist .rec-actions .ai-action { font-size: 11.5px; }
+
+@media (max-width: 900px) {
+  html[data-theme] #nz-ai .rec-hist-head { gap: 9px; padding: 10px 11px; }
+  html[data-theme] #nz-ai .rec-hist-when { padding-right: 9px; }
+  html[data-theme] #nz-ai .rec-hist-when span { font-size: 12px; }
+  html[data-theme] #nz-ai .rec-hist-scroll { max-height: 260px; }
+}
