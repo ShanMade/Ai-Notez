@@ -146,6 +146,16 @@ def diarized_text(parts: list[dict[str, Any]]) -> str:
     ``Voice 1`` so the browser can match it to its own speaker chips, and
     consecutive turns of the same voice are merged into one line.
     """
+    # A whole transcript is numbered one way. If any label counts from zero the
+    # speaker labels are shifted, so spk_0 reads "Voice 1" and spk_1 "Voice 2"
+    # instead of both landing on the first voice.
+    raw_labels = [
+        str((part.get("audioTranscription") or {}).get("speakerLabel") or "")
+        for part in parts
+        if isinstance(part, dict) and isinstance(part.get("audioTranscription"), dict)
+    ]
+    zero_based = any(re.fullmatch(r"spk[\s_-]*0", label.strip(), re.IGNORECASE) for label in raw_labels)
+
     turns: list[tuple[str, str]] = []
     for part in parts:
         if not isinstance(part, dict):
@@ -162,8 +172,16 @@ def diarized_text(parts: list[dict[str, Any]]) -> str:
             if not body:
                 continue
             raw = str(transcription.get("speakerLabel") or "").strip()
-            match = re.fullmatch(r"(?:spk|speaker|voice)[\s_-]*([0-9]{1,2})", raw, re.IGNORECASE)
-            label = f"Voice {int(match.group(1))}" if match else raw
+            # ``spk_1`` is Gemini's first voice. A transcript that counts from
+            # zero instead (``spk0``, ``spk1``) is shifted above, so either way
+            # the labels read "Voice 1", "Voice 2" and never the raw form.
+            match = re.fullmatch(r"(spk|speaker|voice|person)[\s_-]*([0-9]{1,2})", raw, re.IGNORECASE)
+            if match:
+                number = int(match.group(2))
+                shifted = number + 1 if zero_based and match.group(1).lower() == "spk" else number
+                label = f"Voice {max(1, shifted)}"
+            else:
+                label = raw
             if turns and turns[-1][0] == label:
                 turns[-1] = (label, f"{turns[-1][1]} {body}".strip())
             else:

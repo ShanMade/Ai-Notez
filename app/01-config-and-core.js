@@ -463,6 +463,20 @@
       $('#auth-status').textContent = '';
       $('#auth-status').classList.remove('show');
     }
+    // A provider's own refusal ("credential rejected", "(tried groq, mistral)",
+    // a raw upstream body) is never shown to the user. Anything that looks like
+    // infrastructure noise becomes one plain sentence; the detail is logged.
+    function nzSafeError(error, fallback = 'The AI is busy right now. Try again in a moment.') {
+      const raw = String(error?.message || error || '').replace(/\s*\(tried[^)]*\)/gi, '').trim();
+      if (!raw) return fallback;
+      if (/credential|api[ _-]?key|unauthori[sz]ed|forbidden|quota|rate.?limit|resource[ _-]?exhausted|overload|temporarily|unavailable|internal server|bad gateway|gateway timeout|\b(401|403|408|429|5\d\d)\b|model.{0,24}(not|unsup|decommiss|retir)|decommiss|unsupported provider|no credential/i.test(raw)) {
+        console.warn('AI detail (not shown to the user):', error);
+        return fallback;
+      }
+      return raw;
+    }
+    window.nzSafeError = nzSafeError;
+
     function friendlyFirebaseError(error) {
       const code = String(error?.code || '').toLowerCase();
       if (code.includes('api-key-not-valid')) return 'Firebase rejected the web API key. Recopy apiKey from Firebase Console → Project settings → General → Your apps for this same project, and check that the Google Cloud key is active and not restricted away from Firebase Authentication. If the key is valid but sign-in still fails, add this app’s hostname under Authentication → Settings → Authorized domains.';

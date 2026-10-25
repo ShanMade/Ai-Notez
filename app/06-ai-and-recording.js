@@ -443,15 +443,25 @@ async function openWikiLink(title) {
     // Gemini output when it ignores the "Voice n" instruction), bold labels and
     // a dash instead of a colon. All of them become a speaker turn, and the
     // numbered forms share one numbering so colours and naming still line up.
+    // Arabic-Indic digits are digits too: a model writing Urdu can label a voice
+    // "spk_١", and that still has to read as Voice 1.
+    const recDigits = text => String(text || '').replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
     function recLabelName(name) {
       const raw = String(name || '').replace(/\*+/g, '').trim();
-      const numbered = /^(?:voice|speaker|person|spk)[\s_-]*(\d{1,2})$/i.exec(raw);
-      if (numbered) return `Voice ${Number(numbered[1])}`;
+      // Gemini says spk_1, spk_2 … and a chat model told to label turns often
+      // says spk0, spk1, spk2. `recSpkZero` is set from the whole transcript, so
+      // one recording is numbered one way and the first voice always reads
+      // "Voice 1". A label is never shown raw.
+      const spk = /^spk[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      if (spk) return `Voice ${Math.max(1, Number(recDigits(spk[1])) + (recSpkZero ? 1 : 0))}`;
+      const numbered = /^(?:voice|speaker|person)[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      if (numbered) return `Voice ${Math.max(1, Number(recDigits(numbered[1])))}`;
       const letter = /^(?:speaker|person)\s*([A-Za-z])$/i.exec(raw);
       if (letter) return `Voice ${letter[1].toUpperCase().charCodeAt(0) - 64}`;
       return recKnownMatch(raw) || raw;
     }
-    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:\d{1,2}|[A-Za-z])|[^:\n]{1,40}?)\s*\**\s*(?::\s*|\s+[-–—]\s+)(.*)$/i;
+    let recSpkZero = false;   // true while the current transcript labels its voices from 0
+    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
       const match = String(line).match(REC_LABEL_RE);
       if (!match) return null;
@@ -494,7 +504,9 @@ async function openWikiLink(title) {
             if (attempt === 0) await recSleep(700);
           }
         }
-        if (i < steps.length - 1) { REC.notice = `${recLabel(step.name)} stopped (${aiErrorMessage(last)}). ${recLabel(steps[i + 1].name)} is taking over.`; REC.failovers++; updateRecLive(); }
+        // The reason a provider refused is a backend detail: it is logged for
+        // support, never printed. The panel only says who is carrying on.
+        if (i < steps.length - 1) { REC.notice = `${recLabel(steps[i + 1].name)} is taking over ${tag}.`; REC.failovers++; updateRecLive(); }
       }
       throw last || new Error('No AI provider is available.');
     }
@@ -559,7 +571,7 @@ async function openWikiLink(title) {
             // because the chat models take the same audio with a prompt.
             const rejected = diarize && [400, 404, 422, 501].includes(error?.status);
             if (i === order.length - 1 || !(recModelExhausted(error) || rejected)) throw error;
-            REC.notice = `${recModelLabel(model)} could not take this part (${aiErrorMessage(error)}). Switching to ${recModelLabel(order[i + 1])}.`;
+            REC.notice = `Switching to ${recModelLabel(order[i + 1])} for this part.`;
             updateRecLive();
           }
         }
@@ -592,8 +604,15 @@ If this part starts in the middle of a word or a sentence, continue it from ther
 Speaker labels: every line of speech starts with a speaker label, exactly like "[00:12] Voice 1: words". Use the known name above when the voice matches one of them; otherwise use "Voice 1", "Voice 2" and so on. Keep the same label for the same person and continue the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}. If you cannot tell the voices apart, label every line "Voice 1:" — never write a line of speech without a label.
 Output only the transcript.`;
 
-    function recKnownVoices() { return recDetectVoices(REC.segTexts.join('\n')).join(', '); }
-    function recLiveTranscript() { return REC.segTexts.filter(Boolean).join('\n'); }
+    function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
+    // The one place a transcript is read from: the raw parts are joined, the
+    // speaker numbering is decided for the whole recording, and every label is
+    // rewritten to "Voice n" before anything renders or saves it.
+    function recLiveTranscript() {
+      const text = REC.segTexts.filter(Boolean).join('\n');
+      recSpkZero = /(?:^|\n)\s*(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(text);
+      return recNormalizeLabels(text);
+    }
     function recNoteBody(transcript, notesText, finishing) {
       const when = new Date(REC.startedAt);
       const providerLine = REC.provider ? `${recLabel(REC.provider)}` : 'AI';
@@ -624,14 +643,30 @@ Output only the transcript.`;
           const prior = REC.liveNotes ? `Current notes:\n${REC.liveNotes}\n\n` : '';
           REC.liveNotes = await recTextCall(`${instruction}\n\n${prior}Update the notes with the newest part of this recording. Keep earlier points, add new ones, and remove repeats. Keep every Voice label.\n\n<transcript>\n${transcript.slice(-14000)}\n</transcript>`);
         }
-      } catch (error) { console.warn('Live notes update failed:', error); REC.notice = `Notes will refresh with the next part (${aiErrorMessage(error)}).`; }
+      } catch (error) {
+        // A notes refresh is retried on the next part, so a failed one needs no
+        // message at all. The reason stays in the console for support.
+        console.warn('Live notes update failed:', error);
+        if (final) REC.notice = 'The notes summary could not be written this time. The transcript is saved.';
+      }
       REC.lastNotesAt = Date.now();
     }
+    // Rewrites a leading speaker label to its canonical "Voice n" spelling, so a
+    // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
+    // label in the note. A real name ("Ayesha:") is left exactly as written.
+    function recNormalizeLabels(text) {
+      return String(text || '').split('\n').map(line => line.replace(
+        /^(\s*(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i,
+        (all, stamp, label) => `${stamp}${recLabelName(label)}: `
+      )).join('\n');
+    }
     // Keeps the words that were heard. Runs of [inaudible] or [unclear] lines are dropped; a part with no words becomes empty.
+    // Labels are left as the model wrote them: they are rewritten once, for the
+    // whole transcript, so every part shares one Voice numbering.
     function recCleanPart(raw) {
       const lines = String(raw || '').split('\n').filter(line => line.trim());
       const kept = lines.filter(line => {
-        const words = line.replace(/^\s*(\[[\d:]+\]\s*)?\**\s*Voice\s+\d+\s*\**\s*:/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
+        const words = line.replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
         return words.length > 0;
       });
       return kept.join('\n').trim();
@@ -648,8 +683,9 @@ Output only the transcript.`;
           // A part with no speaker turn used to look exactly like the feature
           // being gone, because the transcript simply rendered as paragraphs.
           else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `Part ${index + 1} came back without speaker labels. The words are kept as plain text.`;
-          recRememberVoiceClips(text, blob);
           REC.segTexts[index] = text;
+          recLiveTranscript();          // settles the Voice numbering before any label is read
+          recRememberVoiceClips(text, blob);
           REC.segBlobs[index] = null;
           REC.processed++;
           const isLast = REC.status === REC_STATUS.FINALIZING && REC.processed >= REC.expectedParts;
@@ -661,10 +697,10 @@ Output only the transcript.`;
           REC.segStatuses[index] = SEG_STATUS.FAILED;
           REC.segBlobs[index] = blob;
           const noSpare = !aiUsesManaged() && recAudioProviders().length < 2;
-          REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}). `
+          REC.notice = `Part ${index + 1} could not be transcribed. `
             + (noSpare
-              ? 'Add a Groq key in NotezAi settings so a rate limit on one provider cannot stop the recording.'
-              : 'The audio is kept — retry the part when a provider is free.');
+              ? 'Add your own key in NotezAi settings so a rate limit cannot stop the recording.'
+              : 'The audio is kept — retry the part when the AI is free.');
           updateRecLive();
         }
         updateRecLive();
@@ -767,11 +803,12 @@ Output only the transcript.`;
     }
     const REC_VOICE_CLASS = ['voice-a', 'voice-b', 'voice-c', 'voice-d'];
     function recTimeline() {
+      recLiveTranscript();   // decides the Voice numbering; only the flag is used here
       const parts = REC.segTexts.map((text, index) => ({ index, text: text || '', status: REC.segStatuses[index] || SEG_STATUS.PENDING })).filter(part => part.text.trim() || part.status === SEG_STATUS.FAILED || part.status === SEG_STATUS.NEEDS_RETRY);
       if (!parts.length) return `<div class="rec-empty">${REC.status === REC_STATUS.IDLE ? 'The live transcript appears here as you record.' : 'Listening… the first part appears within about 30 seconds.'}</div>`;
       const lastIndex = parts[parts.length - 1].index;
       return parts.map(part => {
-        const lines = part.text.split('\n').filter(line => line.trim()).map(line => {
+        const lines = recNormalizeLabels(part.text).split('\n').filter(line => line.trim()).map(line => {
           const speaker = recSpeakerOf(line);
           if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(line.trim())}</span></p>`;
           const n = recSpeakerIndex(speaker.name);
@@ -946,12 +983,31 @@ Output only the transcript.`;
       REC.stoppedMs = recElapsed();
       if (REC.status === REC_STATUS.RECORDING) { REC.pausedAt = 0; }
       REC.status = REC_STATUS.FINALIZING; clearRecTimers(); recRender();
-      await endPart();                                     // the last part is finalised before the microphone is released
-      recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop());
-      await Promise.race([REC.queue, recSleep(180000)]);  // parts are transcribed first; a stuck part cannot block the note for more than 3 minutes
-      recSaveNote(true, REC.liveNotes);
-      if (recLiveTranscript() && REC.choice !== 'none') {
-        try { await recRefreshNotes(true); recSaveNote(true, REC.liveNotes); } catch (error) { REC.notice = `Full notes could not be written (${aiErrorMessage(error)}). The transcript is saved.`; }
+      // Finishing must always end: whatever fails on the way (a recorder that
+      // will not close, a transcript that is still in flight, an AI route that
+      // is out of reach) is logged, and the panel still lands on Saved with
+      // whatever was transcribed. It never sits on "Finishing" forever.
+      try {
+        await endPart();                                   // the last part is finalised before the microphone is released
+        recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop()); REC.stream = null;
+        await Promise.race([REC.queue, recSleep(180000)]); // parts are transcribed first; a stuck part cannot block the note for more than 3 minutes
+        recSaveNote(true, REC.liveNotes);
+        if (recLiveTranscript() && REC.choice !== 'none') {
+          try {
+            // A summary is a nicety, the transcript is the record: never let it
+            // hold the panel on "Finishing" for longer than a minute and a half.
+            await Promise.race([
+              recRefreshNotes(true),
+              recSleep(90000).then(() => { throw Object.assign(new Error('The notes summary timed out.'), { code: 'timeout' }); })
+            ]);
+            recSaveNote(true, REC.liveNotes);
+          } catch (error) { console.warn('Final notes failed:', error); REC.notice = 'The notes summary could not be written this time. The transcript is saved.'; }
+        }
+      } catch (error) {
+        console.warn('Finishing the recording hit an error:', error);
+      } finally {
+        try { recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop()); REC.stream = null; } catch { /* released already */ }
+        try { recSaveNote(true, REC.liveNotes); } catch (error) { console.warn('Saving the finished note failed:', error); }
       }
       const note = notes.find(item => item.id === REC.noteId);
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
