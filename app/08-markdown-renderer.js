@@ -431,7 +431,13 @@
           }
           const rawItem = (bullet || numbered)[1];
           const check = rawItem.match(/^\[([ xX])\]\s+(.*)$/);
-          output.push(`<li>${check ? `<span aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${check[1].trim() ? '\u2611' : '\u2610'}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
+          const taskIcon = done => {
+            const shape = done
+              ? '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><path d="m15.4 15.9 1.7 1.8 3.2-4"/>'
+              : '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><rect x="15" y="14.6" width="5.2" height="5.2" rx="1.2"/>';
+            return `<svg class="icon md-task" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${shape}</svg>`;
+          };
+          output.push(`<li>${check ? `<span class="md-task-slot" aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${taskIcon(check[1].trim())}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
           continue;
         }
         

@@ -998,7 +998,7 @@ function renderIndexStatus(container) {
       <div class="ki-backfill">
         <div class="ki-backfill-label">Backfill Status</div>
         <div class="ki-backfill-value">
-          ${status.backfillCompleted ? '✓ Completed' : '⏳ In Progress'}
+          ${status.backfillCompleted ? `${typeof svgIcon === 'function' ? svgIcon('check', 13) : ''} Completed` : `${typeof svgIcon === 'function' ? svgIcon('clock', 13) : ''} In Progress`}
           ${status.lastBackfillAt ? ` (${new Date(status.lastBackfillAt).toLocaleString()})` : ''}
         </div>
       </div>

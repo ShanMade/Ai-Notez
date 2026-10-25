@@ -20,7 +20,7 @@ function openNotezAi(note = null, preset = '') {
     document.body.appendChild(nzaiFab);
     nzaiFab.addEventListener('click', () => { if (nzai.open) nzaiClose(); else openNotezAi(currentPage === 'reader' ? notes.find(item => item.id === activeId) || null : null); });
     const nzaiFabStyle = document.createElement('style');
-    nzaiFabStyle.textContent = `#nzai-fab{position:fixed;right:20px;bottom:20px;width:60px;height:60px;border-radius:50%;border:1px solid rgba(128,148,170,.25);background:#ffffff;box-shadow:0 10px 28px rgba(0,0,0,.18);display:grid;place-items:center;cursor:pointer;z-index:1550;padding:0;transition:transform .15s ease,box-shadow .15s ease}#nzai-fab:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(0,0,0,.22)}#nzai-fab:focus-visible{outline:3px solid var(--nz-accent);outline-offset:3px}html[data-theme="dark"] #nzai-fab{background:#101b29;border-color:rgba(173,194,220,.2)}.nzai-fab-logo{width:44px;height:44px;background:var(--nz-logo) center/contain no-repeat}html.nzai-open #nzai-fab{display:none}#nzai-fab[hidden]{display:none!important}`;
+    nzaiFabStyle.textContent = `#nzai-fab{position:fixed;right:20px;bottom:20px;width:54px;height:54px;border-radius:16px;border:1px solid color-mix(in srgb, var(--ink, #1a2b3a) 12%, transparent);background:var(--panel,#fff);box-shadow:0 12px 28px -12px rgba(8,16,12,.42),0 2px 6px rgba(8,16,12,.08);display:grid;place-items:center;cursor:pointer;z-index:1550;padding:0;transition:transform .16s ease,box-shadow .16s ease}#nzai-fab:hover{transform:translateY(-2px);box-shadow:0 18px 34px -14px rgba(8,16,12,.5),0 2px 6px rgba(8,16,12,.1)}#nzai-fab:active{transform:none}#nzai-fab:focus-visible{outline:2px solid var(--nz-accent);outline-offset:3px}html[data-theme="dark"] #nzai-fab{background:#131513;border-color:rgba(240,241,239,.12)}.nzai-fab-logo{width:40px;height:40px;background:var(--nz-logo) center/contain no-repeat}html.nzai-open #nzai-fab{display:none}#nzai-fab[hidden]{display:none!important}@media(max-width:760px){#nzai-fab{display:none!important}}`;
     document.head.appendChild(nzaiFabStyle);
     setInterval(() => { nzaiFab.hidden = !currentSession; }, 500);
     document.addEventListener('keydown', event => {
@@ -71,7 +71,7 @@ function openNotezAi(note = null, preset = '') {
         if (start?.empty) extra = cls ? `<button type="button" class="week-start muted" data-week-start="import">No ${esc(day.name)} notes yet · import a folder</button>` : '';
         else if (start && cls) {
           const text = start.mode === 'start' ? `Start at ${start.label} · ${start.count} note${start.count === 1 ? '' : 's'}` : start.mode === 'continue' ? `Continue: ${start.note.title} · ${start.noteProgress}% read` : `All covered · revise from ${start.label}`;
-          extra = `<button type="button" class="week-start" data-week-start="open" title="${esc(start.mode === 'start' ? 'Open this folder' : 'Open this note')}">▶ ${esc(text)}</button><div class="week-progress">${start.percent}% of ${esc(day.name)} covered · ${start.done} of ${start.total} notes complete</div>`;
+          extra = `<button type="button" class="week-start" data-week-start="open" title="${esc(start.mode === 'start' ? 'Open this folder' : 'Open this note')}">${typeof svgIcon === 'function' ? svgIcon('play', 13) : ''} ${esc(text)}</button><div class="week-progress">${start.percent}% of ${esc(day.name)} covered · ${start.done} of ${start.total} notes complete</div>`;
         } else if (start) extra = `<div class="week-progress">${start.mode === 'start' ? 'Starts at' : 'Next'}: ${esc(start.label)}</div>`;
         return `<div class="week-slot ${cls}"><small>${title} · ${DAY_NAMES[index].toUpperCase()}</small><strong>${esc(dayLabel(day))}</strong><span>${esc(day.note || (day.off ? 'No study planned' : 'Study day'))}</span>${extra}</div>`;
       };
@@ -152,7 +152,7 @@ function openNotezAi(note = null, preset = '') {
         const name = path.split('/').pop(), previous = document.activeElement;
         const overlay = document.createElement('div');
         overlay.className = 'nz-modal-overlay';
-        const rows = items.map(item => `<li class="fd-row"><label><input type="checkbox" data-keep="${esc(item.key)}" aria-label="Keep ${esc(item.label)}"><span class="fd-kind">${item.kind === 'folder' ? '📁' : '📄'}</span><span class="fd-name">${esc(item.label)}</span><small>${esc(item.meta)}</small></label></li>`).join('');
+        const rows = items.map(item => `<li class="fd-row"><label><input type="checkbox" data-keep="${esc(item.key)}" aria-label="Keep ${esc(item.label)}"><span class="fd-kind">${svgIcon(item.kind === 'folder' ? 'folder' : 'file', 16)}</span><span class="fd-name">${esc(item.label)}</span><small>${esc(item.meta)}</small></label></li>`).join('');
         overlay.innerHTML = `<div class="nz-modal fd-modal" role="alertdialog" aria-modal="true" aria-labelledby="fd-title">
           <div class="nz-modal-head"><span class="nz-modal-icon danger" aria-hidden="true">!</span><h3 id="fd-title">Delete “${esc(name)}”?</h3></div>
           <p class="nz-modal-msg">This removes the folder with ${notesCount} note${notesCount === 1 ? '' : 's'}${subCount ? ` and ${subCount} subfolder${subCount === 1 ? '' : 's'}` : ''}. Tick anything you want to keep. Kept items move to ${keepTarget === 'General' ? '“General”' : `“${esc(keepTarget)}”`}.</p>
