@@ -155,8 +155,8 @@
   // "spk0:" reached the page. Marks are removed before matching (and before
   // the zero-based test), then a mark that opened the line is put back, because
   // it is what keeps a mixed right-to-left line in the right order.
-  const REC_INVISIBLE = /[\u200b-\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]/g;
-  const recInvisibleLead = /^[\u200b-\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/;
+  const REC_INVISIBLE = /[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  const recInvisibleLead = /^[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/;
   function normalizeSpeakerLabels(text) {
     const source = String(text || '');
     // A transcript line can also arrive as a list item ("- spk0: …") once a
