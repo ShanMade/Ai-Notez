@@ -925,15 +925,20 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const screen = nzai.dock === 'voice' ? 'voice' : nzai.view;
       const scopeButton = panel.querySelector('#dock-scope');
       if (scopeButton) {
+        // The capsule is always visible on the chat screen: the one thing a
+        // person needs before trusting an answer is what it was allowed to read.
         const note = nzaiScopeNote();
-        scopeButton.style.display = screen === 'chat' && note ? 'inline-flex' : 'none';
-        const toLibrary = nzai.scope === 'note';
-        scopeButton.title = toLibrary ? 'Answer from every note instead' : 'Answer from this note only';
+        const scoped = nzai.scope === 'note' && Boolean(note);
+        scopeButton.style.display = screen === 'chat' ? 'inline-flex' : 'none';
+        scopeButton.classList.toggle('is-note', scoped);
+        scopeButton.classList.toggle('is-static', !note);
+        scopeButton.disabled = !note;
+        scopeButton.title = scoped ? 'Answer from every note instead' : note ? 'Answer from this note only' : 'Answers come from every note in your library';
         scopeButton.setAttribute('aria-label', scopeButton.title);
         const name = panel.querySelector('#dock-scope-name');
-        if (name) name.textContent = nzai.scope === 'note' && note ? note.title : 'All notes';
+        if (name) name.textContent = scoped ? note.title : 'All notes';
         const swap = panel.querySelector('#dock-scope-swap');
-        if (swap) swap.textContent = toLibrary ? 'Switch' : 'This note';
+        if (swap) swap.textContent = scoped ? 'This note' : note ? 'Switch' : 'Library';
       }
       const lead = panel.querySelector('#dock-lead');
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
@@ -992,10 +997,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <button type="button" class="nzai-btn nzai-more" data-nzai="sheet" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="currentColor"><circle cx="5.4" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18.6" cy="12" r="1.5"/></svg></button>
           </div>
         </header>
-        <button type="button" class="ai-ctx-chip" id="dock-scope" data-nzai="scope-toggle" aria-label="Switch answer scope" style="display:none">
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.6 8.2 4.3-8.2 4.3-8.2-4.3z"/><path d="m3.8 12.4 8.2 4.3 8.2-4.3M3.8 16.5l8.2 4.3 8.2-4.3"/></svg>
-          <span class="ai-ctx-name" id="dock-scope-name">This note</span>
-          <span class="ai-ctx-pill" id="dock-scope-swap">Switch</span>
+        <button type="button" class="ai-ctx-chip" id="dock-scope" data-nzai="scope-toggle" aria-label="What this chat can read" title="What this chat can read" style="display:none">
+          <span class="ai-ctx-ic" aria-hidden="true">
+            <svg class="ic-note" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.75 3.75h6.9L18 8.1v12.15H6.75z"/><path d="M13.4 3.9v4.35h4.35M9.6 12.7h5.6M9.6 16.1h5.6"/></svg>
+            <svg class="ic-lib" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.6 8.2 4.3-8.2 4.3-8.2-4.3z"/><path d="m3.8 12.4 8.2 4.3 8.2-4.3M3.8 16.5l8.2 4.3 8.2-4.3"/></svg>
+          </span>
+          <span class="ai-ctx-name" id="dock-scope-name">All notes</span>
+          <span class="ai-ctx-pill" id="dock-scope-swap">Library</span>
         </button>
         <div class="nzai-scrim" id="nzai-scrim" data-nzai="sheet-close" hidden></div>
         <nav class="nzai-sheet" id="nzai-sheet" aria-label="Chat actions" hidden>
@@ -1041,7 +1049,10 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       panel.addEventListener('input', event => {
         if (event.target.id !== 'nzai-input') return;
         event.target.style.height = 'auto'; event.target.style.height = Math.min(160, event.target.scrollHeight) + 'px';
-        const v = event.target.value; if (v.startsWith('/') && !/\s/.test(v)) nzaiSlash(v.toLowerCase()); else { const m = $('#ai-slash'); if (m) m.hidden = true; }
+        const v = event.target.value;
+        // The send button only lights up when there is something to send.
+        event.target.closest('.ai-composer')?.classList.toggle('has-text', Boolean(v.trim()));
+        if (v.startsWith('/') && !/\s/.test(v)) nzaiSlash(v.toLowerCase()); else { const m = $('#ai-slash'); if (m) m.hidden = true; }
       });
       panel.addEventListener('change', event => {
         if (event.target.name === 'rec-mode' && REC.status === 'idle') { REC.mode = event.target.value; recRender(); }
@@ -1326,26 +1337,59 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const disabled = busy ? 'disabled' : '';
       const provider = aiUsesManaged() ? 'NotezAi' : aiReady() ? `${AI_PROVIDERS[aiActive()]?.label || 'AI'} · ${aiModelPref(aiActive()) || 'auto model'}` : 'No key yet';
       const scope = '';
-      const sugIcons = { summarize: '<path d="M4 6h16M4 12h16M4 18h10"/>', keypoints: '<path d="M5 12l4 4 10-10"/>', quiz: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17v.01"/>', mcq: '<path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/>', plan: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', due: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', record: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>', ask: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>' };
       const suggestIds = inNote ? ['summarize', 'keypoints', 'quiz', 'mcq'] : ['plan', 'due', 'record', 'ask'];
-      const suggestCards = suggestIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd => `<button type="button" class="ai-card" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)}"><span class="ai-card-ic" aria-hidden="true">${nzaiIcon(cmd.icon, 18)}</span><span class="ai-card-tx"><b>${esc(cmd.label)}</b><small>${esc(cmd.hint)}</small></span></button>`).join('');
-      const welcome = `<div class="ai-welcome"><div class="ai-welcome-head"><span class="ai-orb" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 20) : ''}</span><p class="ai-welcome-kicker">${inNote ? 'THIS NOTE' : 'YOUR LIBRARY'}</p><h3>${inNote ? 'What should we<br><em>work through?</em>' : 'What do you want<br><em>to know?</em>'}</h3><p class="ai-welcome-sub">${inNote ? `Reading <b>${esc(note.title)}</b>. Answers come from this note unless you switch scope.` : 'Answers come from your notes, and every answer cites the notes it used.'}</p></div><div class="ai-suggest">${suggestCards}</div><p class="ai-hint"><span class="ai-hint-key">/</span> opens every command<span class="ai-hint-dot" aria-hidden="true">·</span><span class="ai-hint-key">⌘K</span> finds a note</p></div>`;
+      const cardGo = '<span class="ai-card-go" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.8 12h13.2M12.6 6.6 18 12l-5.4 5.4"/></svg></span>';
+      const suggestCards = suggestIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd =>
+        `<button type="button" class="ai-card" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)} · ${esc(cmd.hint)}">` +
+        `<span class="ai-card-ic" aria-hidden="true">${nzaiIcon(cmd.icon, 17)}</span>` +
+        `<span class="ai-card-tx"><b>${esc(cmd.label)}</b><small>${esc(cmd.hint)}</small></span>${cardGo}</button>`).join('');
+      // What this chat can read, counted from the real data it will send — no
+      // decorative numbers. A note reports its own size, the library its shelf.
+      const statBits = (inNote
+        ? (() => {
+            const words = String(note.body || '').trim().split(/\s+/).filter(Boolean).length;
+            const bits = words ? [`<b>${words.toLocaleString('en-US')}</b> words`] : [];
+            if (words > 60) bits.push(`<b>${Math.max(1, Math.round(words / 200))}</b> min read`);
+            const kind = String(note.fileName || '').split('.').pop().toUpperCase();
+            if (note.folderPath) bits.push(esc(note.folderPath));
+            else if (kind && kind.length <= 5) bits.push(kind);
+            return bits.length ? bits : ['Ready to read'];
+          })()
+        : (() => {
+            const folders = new Set(notes.map(item => item.folderPath).filter(Boolean)).size;
+            const bits = [`<b>${notes.length.toLocaleString('en-US')}</b> note${notes.length === 1 ? '' : 's'}`];
+            if (folders) bits.push(`<b>${folders}</b> folder${folders === 1 ? '' : 's'}`);
+            if (aiBackendSession()) bits.push('indexed');
+            return bits;
+          })()).map(bit => `<span class="ai-stat">${bit}</span>`).join('');
+      const welcome = `<div class="ai-welcome">` +
+        `<div class="ai-welcome-head">` +
+          `<span class="ai-orb" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 21) : ''}</span>` +
+          `<p class="ai-welcome-kicker">${inNote ? 'READING THIS NOTE' : 'YOUR WHOLE LIBRARY'}</p>` +
+          `<h3>${inNote ? 'What should we<br><em>work through?</em>' : 'What do you want<br><em>to know?</em>'}</h3>` +
+          `<p class="ai-welcome-sub">${inNote ? `Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.` : 'Answers come from your notes. Every answer shows you which notes it used.'}</p>` +
+          (statBits ? `<div class="ai-stats">${statBits}</div>` : '') +
+        `</div>` +
+        `<div class="ai-suggest">${suggestCards}</div>` +
+        `<p class="ai-hint"><span class="ai-hint-key">/</span> every command<span class="ai-hint-dot" aria-hidden="true">·</span><span class="ai-hint-key">⌘K</span> jump to a note</p>` +
+      `</div>`;
       let thread = '';
       if (!messages.length) thread = welcome;
       else {
         messages.forEach((msg, index) => { thread += nzaiBubble(msg, index); });
       }
-      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><div class="ai-typing" data-nzai="thinking"><span></span><span></span><span></span><em id="nzai-thinking-msg">Thinking…</em></div></div>` : '';
+      const thinking = busy ? `<div class="ai-msg ai thinking-row" aria-live="polite"><span class="ai-avatar is-live" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 13) : ''}</span><div class="ai-think" data-nzai="thinking"><span class="ai-think-tx" id="nzai-thinking-msg">Thinking…</span><span class="ai-think-dots" aria-hidden="true"><i></i><i></i><i></i></span></div></div>` : '';
       const quizStop = nzai.quiz && inNote ? '<button type="button" class="ai-action danger" data-nzai="stop-quiz">Stop quiz</button>' : '';
       const notice = nzai.notice ? `<div class="ai-notice" role="status">${esc(nzai.notice)}</div>` : '';
       const editing = nzai.editAt != null ? `<div class="ai-editing"><span>Editing a question. Sending replaces it and everything after it.</span><button type="button" class="ai-action" data-nzai="cancel-edit">Cancel</button></div>` : '';
       const quickIds = inNote ? ['summarize', 'keypoints', 'mcq', 'flashcards', 'explain', 'improve'] : ['plan', 'due', 'record'];
-      const quick = `<div class="ai-quickbar" aria-label="Quick actions" role="toolbar">${quickIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd => `<button type="button" class="ai-qchip" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)} · ${esc(cmd.hint)}">${nzaiIcon(cmd.icon, 14)}<span>${esc(cmd.label)}</span></button>`).join('')}<button type="button" class="ai-qchip ai-qchip-more" data-nzai="slash-open" ${disabled} aria-label="All commands" title="All commands"><b>/</b><span>All</span></button></div>`;
+      const quick = `<div class="ai-quickbar" aria-label="Quick actions" role="toolbar">${quickIds.map(id => NZAI_COMMAND_MAP[id]).filter(Boolean).map(cmd => `<button type="button" class="ai-qchip" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)} · ${esc(cmd.hint)}">${nzaiIcon(cmd.icon, 14)}<span>${esc(cmd.label)}</span></button>`).join('')}<button type="button" class="ai-qchip ai-qchip-more" data-nzai="slash-open" ${disabled} aria-label="All commands" title="All commands (/)"><span class="ai-qchip-key" aria-hidden="true">/</span><span>All</span></button></div>`;
       const footLine = `${aiUsesManaged() ? 'NotezAi' : (AI_PROVIDERS[aiActive()]?.label || 'AI') + ' (your key)'} can make mistakes. Check important facts.`;
       const slash = `<div class="ai-slash" id="ai-slash" role="listbox" aria-label="Commands" hidden></div>`;
       const sendIcon = busy
         ? '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>'
         : '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      body.classList.toggle('is-empty', !messages.length);
       body.innerHTML = `${scope}${quizStop ? `<div class="ai-quizbar">Quiz in progress${quizStop}</div>` : ''}${notice}
         <div class="ai-thread-wrap"><div class="ai-thread" id="nzai-messages" aria-live="polite" role="region">${thread}${thinking}</div><button type="button" class="ai-jump" id="ai-jump" hidden data-nzai="jump" aria-label="Scroll to latest"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="ai-jump-t">Latest</span></button></div>
         ${editing}
