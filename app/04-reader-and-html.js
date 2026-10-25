@@ -607,6 +607,33 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     };
     const aiFail = (data, response) => Object.assign(new Error(data?.error?.message || data?.message || `Request failed (${response.status})`), { status: response.status, code: String(data?.error?.code || data?.error?.status || '') });
     const aiModelMissing = error => error.status === 404 || /model_not_found|model_decommissioned|NOT_FOUND/i.test(error.code || '') || (error.status === 400 && /decommission|does not exist|not found|not supported/i.test(error.message));
+    // A model can be busy rather than gone: "high demand" comes back as a 503,
+    // and free-tier quotas are counted per model, so a 429 on one model says
+    // nothing about the next. Both walk down the queue instead of ending the
+    // message on the model that happened to rank first.
+    const aiModelBusy = error => {
+      if (!error) return false;
+      const status = Number(error.status) || 0;
+      if (status === 429 || status === 503 || status === 529 || status === 502 || status === 504) return true;
+      return /high demand|overload|temporarily unavailable|service unavailable|UNAVAILABLE|RESOURCE_EXHAUSTED|try again later/i.test(`${error.message || ''} ${error.code || ''}`);
+    };
+    const aiModelFallthrough = error => aiModelMissing(error) || aiModelBusy(error);
+    // A model that just said "busy" is asked last for a couple of minutes, so
+    // the second attempt of one message does not spend itself on the same
+    // overloaded model while its neighbours are free.
+    const AI_BUSY_TTL = 120000;
+    function aiBusyMap(provider) {
+      try {
+        const map = JSON.parse(aiStore.get(`notez-ai-busy-${provider}`, '{}'));
+        const now = Date.now(), live = {};
+        for (const [model, until] of Object.entries(map || {})) if (Number(until) > now) live[model] = Number(until);
+        return live;
+      } catch { return {}; }
+    }
+    function aiMarkBusy(provider, model) {
+      if (!model) return;
+      try { aiStore.set(`notez-ai-busy-${provider}`, JSON.stringify({ ...aiBusyMap(provider), [model]: Date.now() + AI_BUSY_TTL })); } catch {}
+    }
     // Every AI request has a time limit. A request that hangs is treated as failed, so the other provider takes over.
     function aiFetch(url, options = {}, ms = window.__AI_TIMEOUT || 60000) {
       const controller = new AbortController();
@@ -733,7 +760,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // first; then the model that last worked. The built-in list is the
       // offline fallback.
       const builtin = live.length ? [] : AI_PROVIDERS[provider].models.filter(aiChatModel);
+      const busy = aiBusyMap(provider);
+      const warm = model => !busy[model] || model === pinned;
       let queue = [...new Set([pinned, prefUsable ? pref : '', lastGood, ...live, ...builtin].filter(Boolean))];
+      // Stable partition: a model that just answered "high demand" is tried
+      // after its neighbours, not before them.
+      queue = [...queue.filter(warm), ...queue.filter(model => !warm(model))];
       const tried = new Set();
       let last = new Error(`No ${AI_PROVIDERS[provider].label} model is available for this key.`);
       let anyModelMissing = false;
@@ -769,6 +801,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         // Remember the model that worked, so the next message starts there
         // instead of walking the list again.
         if (!pinned) aiStore.set(`notez-ai-model-last-${provider}`, model);
+        try { const map = aiBusyMap(provider); if (map[model]) { delete map[model]; aiStore.set(`notez-ai-busy-${provider}`, JSON.stringify(map)); } } catch {}
         return { text, model, provider };
       };
 
@@ -777,8 +810,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           if (tried.has(model)) continue;
           try { return await attemptOnce(model); }
           catch (error) {
-            if (!aiModelMissing(error)) throw error;
-            last = error; anyModelMissing = true;
+            if (!aiModelFallthrough(error)) throw error;
+            if (aiModelBusy(error)) aiMarkBusy(provider, model);
+            if (aiModelMissing(error)) anyModelMissing = true;
+            // A busy model stays in `last`, so the caller still gets a truthful
+            // status if every model in the queue is busy.
+            last = error;
           }
         }
         // Every model this key was offered is gone. Ask the provider which
@@ -788,6 +825,10 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         queue = fresh.filter(model => !tried.has(model));
         if (!queue.length) break;
       }
+      // Every model was merely busy. Repeating the same queue two more times
+      // only adds load to a service that already said it is full, so the caller
+      // is told at once and the message ends with one honest sentence.
+      if (last && !anyModelMissing) last.allBusy = true;
       throw last;
     }
     async function aiGenerate(prompt, options = {}) {
@@ -807,6 +848,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             const isRateLimited = error.status === 429;
             const isTransient = error.status >= 500 || error instanceof TypeError || error.name === 'AbortError';
             if (!isRateLimited && !isTransient) throw error;
+            if (error.allBusy) continue;
           }
         }
         throw lastError;
@@ -823,7 +865,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             const isRateLimited = error.status === 429;
             const isTransient = error.status >= 500 || error instanceof TypeError || error.name === 'AbortError';
             if (!isRateLimited && !isTransient) throw error;
-            if (isRateLimited) break;
+            if (isRateLimited || error.allBusy) break;
             attempt++;
             if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1) + Math.random() * 300));
           }

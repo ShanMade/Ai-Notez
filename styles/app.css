@@ -5690,8 +5690,10 @@ html[data-theme] #nz-ai .nzai-sheet-split .nzai-sheet-row .ic { width: 24px; hei
 html[data-theme] #nz-ai .nzai-sheet-split .nzai-sheet-row b { font-size: 12px; font-weight: 550; }
 @keyframes p-sheet-in { from { transform: translateY(14px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
 
+/* Above 700px the action list is a dropdown, so only its scrim is retired.
+   Hiding the list here (as this layer first did, when the bar carried every
+   control) left the ⋯ button with nothing to open. */
 @media (min-width: 701px) {
-  html[data-theme] #nz-ai .nzai-sheet,
   html[data-theme] #nz-ai .nzai-scrim { display: none; }
 }
 
@@ -7263,16 +7265,30 @@ html[data-theme] #nz-ai .nzai-scrim {
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
+/* The ⋯ menu has to open at every width. An older layer hid the list above
+   700px, from when the bar carried every control; the bar now keeps three and
+   the rest live behind ⋯, so the list is a dropdown on a desktop and a sheet
+   on a phone. Without this the button was visible and its menu never was. */
+html[data-theme] #nz-ai .nzai-sheet { display: block; }
+html[data-theme] #nz-ai .nzai-sheet[hidden] { display: none; }
 html[data-theme] #nz-ai .nzai-sheet {
+  top: 62px;
+  right: 10px;
+  left: auto;
+  bottom: auto;
+  z-index: 45;
+  max-height: calc(100% - 76px);
+  overflow: auto;
+  padding: 6px;
   border: 1px solid var(--p-line-2);
-  border-bottom: 0;
-  border-radius: 20px 20px 0 0;
-  background: color-mix(in srgb, var(--p-card) 92%, transparent);
+  border-radius: 16px;
+  background: var(--p-card);
   backdrop-filter: saturate(1.4) blur(20px);
   -webkit-backdrop-filter: saturate(1.4) blur(20px);
-  box-shadow: 0 -30px 70px -34px rgba(4, 10, 7, .62);
+  box-shadow: 0 26px 54px -26px rgba(4, 10, 7, .6), 0 2px 8px rgba(4, 10, 7, .1);
+  animation: nz-menu-in .14s ease-out;
 }
-html[data-theme] #nz-ai .nzai-sheet-grab { background: var(--p-line-2); }
+html[data-theme] #nz-ai .nzai-sheet-grab { display: none; }
 html[data-theme] #nz-ai .nzai-sheet-grp {
   margin: 14px 4px 7px;
   font: 700 9px/1 var(--p-mono);
@@ -7293,6 +7309,16 @@ html[data-theme] #nz-ai .nzai-sheet-row .ic {
 }
 html[data-theme] #nz-ai .nzai-sheet-row b { font-weight: 600; letter-spacing: -.01em; color: var(--p-ink); }
 html[data-theme] #nz-ai .nzai-sheet-row small { color: var(--p-faint); }
+@media (max-width: 700px) {
+  html[data-theme] #nz-ai .nzai-sheet {
+    top: 62px;
+    right: 10px;
+    left: 10px;
+    max-height: calc(100% - 80px);
+    border-radius: 16px;
+  }
+  html[data-theme] #nz-ai .nzai-sheet-row { min-height: 48px; padding: 8px 11px; }
+}
 
 html[data-theme] #nz-ai .nzai-label {
   margin: 14px 0 6px;
