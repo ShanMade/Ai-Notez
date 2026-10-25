@@ -563,7 +563,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
 
     // ================= NotezAi (bring your own key: Gemini or Groq) =================
     const AI_PROVIDERS = {
-      gemini: { label: 'Gemini', keyUrl: 'https://aistudio.google.com/apikey', keyHost: 'aistudio.google.com/apikey', placeholder: 'AIza…', maxChars: 60000, models: ['gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite'], privacy: 'On Google\u2019s free tier, what you send may be used to improve Google products.' },
+      gemini: { label: 'Gemini', keyUrl: 'https://aistudio.google.com/apikey', keyHost: 'aistudio.google.com/apikey', placeholder: 'AIza…', maxChars: 60000, models: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'], privacy: 'On Google\u2019s free tier, what you send may be used to improve Google products.' },
       groq: { label: 'Groq', keyUrl: 'https://console.groq.com/keys', keyHost: 'console.groq.com/keys', placeholder: 'gsk_…', maxChars: 12000, models: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'meta-llama/llama-4-scout-17b-16e-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant'], privacy: 'Check Groq\u2019s terms for how free-tier data is handled; the free tier has a small per-minute token limit, so long notes are trimmed.' }
     };
     const aiStore = { get(key, fallback = '') { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }, set(key, value) { try { localStorage.setItem(key, value); } catch {} }, del(key) { try { localStorage.removeItem(key); } catch {} } };
@@ -574,7 +574,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (aiStore.get('notez-ai-model')) aiStore.set('notez-ai-model-gemini', aiStore.get('notez-ai-model'));
     }
     aiStore.del('notez-ai-key'); aiStore.del('notez-ai-model');
-    const aiKey = provider => aiStore.get(`notez-ai-key-${provider}`);
+    const aiKey = provider => String(aiStore.get(`notez-ai-key-${provider}`) || '').trim();
     const aiModelPref = provider => aiStore.get(`notez-ai-model-${provider}`);
     const aiBackendSession = () => aiBackendConfigured() && currentSession?.mode === 'cloud';
     // AI source: 'managed' = the NotezAi backend (default, works for guests and signed-in users); 'byok' = the user's own Gemini/Groq key.
@@ -701,48 +701,92 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           console.warn('Managed AI route failed; retrying with the saved key.', error);
         }
       }
-      // Groq retires models over time. The live list from the account is used as a fallback, filtered to chat models.
-      if (provider === 'groq') {
-        try {
-          if (!JSON.parse(localStorage.getItem('notez-ai-models-groq') || '[]').length) {
-            const live = await aiListModels('groq', key);
-            localStorage.setItem('notez-ai-models-groq', JSON.stringify(live));
-          }
-        } catch { /* keep the built-in list */ }
+      // Providers retire model names. A device with no cached list, or one that
+      // has not been refreshed for a while, asks the account which models it can
+      // use before spending a request on a name that may already be gone; the
+      // built-in list is only the offline path.
+      const AI_MODEL_TTL = 6 * 60 * 60 * 1000;
+      let refreshed = false, listBlocked = false;
+      const refreshList = async () => {
+        if (!key || refreshed || listBlocked) return [];
+        refreshed = true;
+        try { return await aiRefreshModels(provider, key); }
+        catch (error) { listBlocked = true; console.warn('Could not list models for', provider, error); return []; }
+      };
+      if (key) {
+        const age = Date.now() - (Number(aiStore.get(`notez-ai-models-at-${provider}`, '0')) || 0);
+        if (!aiModelCache(provider).length || age > AI_MODEL_TTL) await refreshList();
       }
-      const liveGroq = provider === 'groq' ? (() => { try { return (JSON.parse(localStorage.getItem('notez-ai-models-groq') || '[]')).filter(id => !/whisper|tts|guard|embed|prompt|vision/i.test(id)); } catch { return []; } })() : [];
-      const candidates = [...new Set([pinned, aiModelPref(provider), ...AI_PROVIDERS[provider].models, ...liveGroq].filter(Boolean))];
+      // Models are retired and renamed. The list this key can actually reach is
+      // the only reliable source, so it is cached per device and a key spent on
+      // a model the API no longer serves falls through to the next one instead
+      // of ending the message with an error.
+      const known = aiModelCache(provider);
+      const live = known.filter(aiChatModel).sort((a, b) => aiModelRank(b) - aiModelRank(a));
+      const lastGood = aiStore.get(`notez-ai-model-last-${provider}`, '');
+      const pref = aiModelPref(provider);
+      // A saved choice that the provider no longer lists for this key is stale;
+      // it is skipped instead of costing a failed request on every message.
+      const listFresh = Date.now() - (Number(aiStore.get(`notez-ai-models-at-${provider}`, '0')) || 0) < AI_MODEL_TTL;
+      const prefUsable = !pref || !listFresh || !known.length || known.includes(pref);
+      // A pinned model (Voice-to-Note) and the user's own choice always go
+      // first; then the model that last worked. The built-in list is the
+      // offline fallback.
+      const builtin = live.length ? [] : AI_PROVIDERS[provider].models.filter(aiChatModel);
+      let queue = [...new Set([pinned, prefUsable ? pref : '', lastGood, ...live, ...builtin].filter(Boolean))];
+      const tried = new Set();
       let last = new Error(`No ${AI_PROVIDERS[provider].label} model is available for this key.`);
-      for (const model of candidates) {
-        try {
-          let text = '';
-          if (provider === 'groq') {
-            const response = await aiFetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature, messages: [{ role: 'system', content: aiSystem(provider, model) }, { role: 'user', content: prompt }] }) });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw aiFail(data, response);
-            text = String(data.choices?.[0]?.message?.content || '').trim();
-            if (text && data.choices?.[0]?.finish_reason === 'length') throw Object.assign(new Error('The answer was cut off.'), { status: 0, code: 'cut' });
-          } else {
-            // A transcription model takes the audio on its own: a text part next
-            // to it reads as a question about the audio, not as instructions.
-            const parts = [...(partsOnly ? [] : [{ text: prompt }]), ...images.map(image => ({ inlineData: { mimeType: image.mime, data: image.data } }))];
-            // A transcription model is not a chat model: it takes no system
-            // instruction and no temperature, only the audio and its config.
-            const payload = audioTranscription
-              ? { contents: [{ role: 'user', parts }], generationConfig: { audioTranscriptionConfig: audioTranscription } }
-              : { systemInstruction: { parts: [{ text: aiSystem(provider, model) }] }, contents: [{ role: 'user', parts }], generationConfig: { temperature, ...(json ? { responseMimeType: 'application/json' } : {}) } };
-            const response = await aiFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw aiFail(data, response);
-            const answerParts = data.candidates?.[0]?.content?.parts || [];
-            text = audioTranscription ? aiSpeakerText(answerParts) : answerParts.map(part => part.text || '').join('').trim();
-            const geminiFinish = data.candidates?.[0]?.finishReason;
-            if (text && geminiFinish && geminiFinish !== 'STOP') throw Object.assign(new Error('The answer was cut off.'), { status: 0, code: 'cut' });
-            if (!text && data.promptFeedback?.blockReason) throw new Error('Gemini blocked this request with its safety filters.');
+      let anyModelMissing = false;
+
+      const attemptOnce = async model => {
+        tried.add(model);
+        let text = '';
+        if (provider === 'groq') {
+          const response = await aiFetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature, messages: [{ role: 'system', content: aiSystem(provider, model) }, { role: 'user', content: prompt }] }) });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw aiFail(data, response);
+          text = String(data.choices?.[0]?.message?.content || '').trim();
+          if (text && data.choices?.[0]?.finish_reason === 'length') throw Object.assign(new Error('The answer was cut off.'), { status: 0, code: 'cut' });
+        } else {
+          // A transcription model takes the audio on its own: a text part next
+          // to it reads as a question about the audio, not as instructions.
+          const parts = [...(partsOnly ? [] : [{ text: prompt }]), ...images.map(image => ({ inlineData: { mimeType: image.mime, data: image.data } }))];
+          // A transcription model is not a chat model: it takes no system
+          // instruction and no temperature, only the audio and its config.
+          const payload = audioTranscription
+            ? { contents: [{ role: 'user', parts }], generationConfig: { audioTranscriptionConfig: audioTranscription } }
+            : { systemInstruction: { parts: [{ text: aiSystem(provider, model) }] }, contents: [{ role: 'user', parts }], generationConfig: { temperature, ...(json ? { responseMimeType: 'application/json' } : {}) } };
+          const response = await aiFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw aiFail(data, response);
+          const answerParts = data.candidates?.[0]?.content?.parts || [];
+          text = audioTranscription ? aiSpeakerText(answerParts) : answerParts.map(part => part.text || '').join('').trim();
+          const geminiFinish = data.candidates?.[0]?.finishReason;
+          if (text && geminiFinish && geminiFinish !== 'STOP') throw Object.assign(new Error('The answer was cut off.'), { status: 0, code: 'cut' });
+          if (!text && data.promptFeedback?.blockReason) throw new Error('Gemini blocked this request with its safety filters.');
+        }
+        if (!text) throw new Error('The model returned an empty answer.');
+        // Remember the model that worked, so the next message starts there
+        // instead of walking the list again.
+        if (!pinned) aiStore.set(`notez-ai-model-last-${provider}`, model);
+        return { text, model, provider };
+      };
+
+      for (let pass = 0; pass < 2; pass++) {
+        for (const model of queue) {
+          if (tried.has(model)) continue;
+          try { return await attemptOnce(model); }
+          catch (error) {
+            if (!aiModelMissing(error)) throw error;
+            last = error; anyModelMissing = true;
           }
-          if (!text) throw new Error('The model returned an empty answer.');
-          return { text, model, provider };
-        } catch (error) { if (aiModelMissing(error)) { last = error; continue; } throw error; }
+        }
+        // Every model this key was offered is gone. Ask the provider which
+        // models the key can use now, then try that fresh list once.
+        if (!anyModelMissing || pass === 1) break;
+        const fresh = (await refreshList()).filter(aiChatModel).sort((a, b) => aiModelRank(b) - aiModelRank(a));
+        queue = fresh.filter(model => !tried.has(model));
+        if (!queue.length) break;
       }
       throw last;
     }
@@ -787,6 +831,38 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       throw lastError;
     }
+    // A cached, per-device list of the models this account can actually use.
+    // Google retires model names regularly, so a hard-coded list alone ends in
+    // 404s; the live list is the source of truth and the built-in list is only
+    // the offline fallback.
+    function aiModelCache(provider) { try { const list = JSON.parse(aiStore.get(`notez-ai-models-${provider}`, '[]')); return Array.isArray(list) ? list.filter(item => typeof item === 'string') : []; } catch { return []; } }
+    async function aiRefreshModels(provider, key) {
+      const list = await aiListModels(provider, key);
+      if (Array.isArray(list) && list.length) {
+        aiStore.set(`notez-ai-models-${provider}`, JSON.stringify(list));
+        aiStore.set(`notez-ai-models-at-${provider}`, String(Date.now()));
+      }
+      return list || [];
+    }
+    // Chat-capable models only: audio, images and embeddings answer a different
+    // request and would fail a chat turn.
+    // Anything that is not a text chat model is skipped: audio, image, embedding
+    // and moderation endpoints reject a chat turn with a 404 of their own.
+    const AI_NOT_CHAT = /tts|text-to-speech|image|imagine|live|transcri|speech|audio|embed|robotics|computer|nano-banana|veo|imagen|omni|rerank|guard|whisper|orpheus|playai|moderation|distil-whisper/i;
+    const aiChatModel = id => typeof id === 'string' && id.length > 0 && !AI_NOT_CHAT.test(id);
+    // Newer generations first, plain "flash" before "flash-lite", previews after
+    // their stable equivalent, and the slow flagship models last: this is a
+    // study chat, so a fast general model answers best.
+    function aiModelRank(id) {
+      const version = /gemini-(\d+)(?:\.(\d+))?/.exec(id);
+      const major = version ? Number(version[1]) : 0, minor = version ? Number(version[2] || 0) : 0;
+      let score = major * 100 + minor * 10;
+      if (/lite/.test(id)) score -= 1;
+      if (/pro|ultra|argon/.test(id)) score -= 60;
+      if (/preview|exp/.test(id)) score -= 3;
+      if (/\d{4}-\d{2}-\d{2}|latest/.test(id)) score -= 2;
+      return score;
+    }
     async function aiListModels(provider, key) {
       if (provider === 'groq') {
         const response = await fetch('https://api.groq.com/openai/v1/models', { headers: { Authorization: `Bearer ${key}` } });
@@ -808,6 +884,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (error?.status === 403) return 'The provider rejected this key. Make sure it is active and allowed to use this model.';
       if (error?.status === 413 || /request too large|reduce your message size/i.test(message)) return 'This note is too long for the free-tier per-minute limit. Try a shorter note or another provider.';
       if (error?.status === 429) return 'Free-tier limit reached. Wait a minute, or add a second provider key and enable auto-switch.';
+      if (error?.status === 404 || /not found for api version|is not supported for|model[_ ]?not[_ ]?found|decommissioned/i.test(message)) return 'This key cannot use any of the models NotezAi tried — that usually means the model was retired. Open NotezAi settings → Load models, pick one from the list and save.';
       if (error?.status >= 500) return 'The AI is busy right now. Try again in a moment.';
       if (error instanceof TypeError) return 'Could not reach the AI provider. Check your internet connection.';
       // No provider name, key hint or "(tried a, b)" suffix ever reaches the UI.
@@ -1478,10 +1555,14 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
 
     async function nzaiAsk(question, { task = '', editAt = null, note: forcedNote = null } = {}) {
       if (nzai.busy) return;
+      // The lock is taken here, before the first await: retrieval can take a
+      // second, and a second Enter or a double-click used to start a second
+      // answer that pushed the same question twice.
+      nzai.busy = true;
       nzaiStopReveal();
       const run = nzai.run = (nzai.run || 0) + 1;
       nzai.editAt = null;
-      if (!aiReady()) { nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
+      if (!aiReady()) { nzai.busy = false; nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = forcedNote || (nzai.scope === 'note' ? nzaiScopeNote() : null);
       const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+(?:notes|files)\b(?![^?.!]*\b(?:about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
       const chatBefore = nzaiChat();
@@ -1586,7 +1667,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (note && nzai.quiz === note.id && !task) {
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
       }
-      nzai.busy = true; nzai.notice = ''; nzai.stick = true; nzai.unread = false;
+      nzai.notice = ''; nzai.stick = true; nzai.unread = false;
       nzaiUpdateThinking();
       if (nzai.thinkingInterval) clearInterval(nzai.thinkingInterval);
       nzai.thinkingInterval = setInterval(nzaiUpdateThinking, 2000);
@@ -1775,8 +1856,20 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'save-key') {
         const key = ($('#nzai-key')?.value || '').trim();
         if (!key) return say('Paste your key first.');
-        aiStore.set(`notez-ai-key-${nzai.tab}`, key); aiStore.set('notez-ai-provider', nzai.tab);
-        nzai.notice = `Key saved for ${AI_PROVIDERS[nzai.tab].label}. You won't be asked again.`; nzai.view = 'chat'; return nzaiRender();
+        const provider = nzai.tab;
+        aiStore.set(`notez-ai-key-${provider}`, key); aiStore.set('notez-ai-provider', provider);
+        // The key is checked once, here, so a retired model name or a rejected
+        // key is reported before the first question is typed.
+        say('Checking the key…');
+        try {
+          const list = (await aiRefreshModels(provider, key)).filter(aiChatModel);
+          nzai.notice = list.length
+            ? `Key saved for ${AI_PROVIDERS[provider].label}. ${list.length} chat models found.`
+            : `Key saved for ${AI_PROVIDERS[provider].label}, but it has no chat model available.`;
+        } catch (error) {
+          nzai.notice = `Key saved for ${AI_PROVIDERS[provider].label}. ${aiErrorMessage(error)}`;
+        }
+        nzai.view = 'chat'; return nzaiRender();
       }
       if (act === 'change-key') { aiStore.del(`notez-ai-key-${nzai.tab}`); return nzaiRender(); }
       if (act === 'remove-key') { if (!(await uiConfirm({ title: 'Remove this key?', message: `You will need to paste your ${AI_PROVIDERS[nzai.tab].label} key again to use NotezAi with it.`, confirmLabel: 'Remove key', danger: true }))) return; aiStore.del(`notez-ai-key-${nzai.tab}`); aiStore.del(`notez-ai-model-${nzai.tab}`); return nzaiRender(); }
@@ -1800,8 +1893,11 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'load-models') {
         const key = aiKey(nzai.tab); if (!key) return say('Save a key first.');
         say('Loading models…');
-        try { const list = await aiListModels(nzai.tab, key); aiStore.set(`notez-ai-models-${nzai.tab}`, JSON.stringify(list)); say(`${list.length} models loaded.`); nzaiRenderSettings($('#nzai-body')); }
-        catch (error) { say(aiErrorMessage(error)); }
+        try {
+          const list = (await aiRefreshModels(nzai.tab, key)).filter(aiChatModel);
+          say(list.length ? `${list.length} chat models found. Pick one below.` : 'This key has no chat model available.');
+          nzaiRenderSettings($('#nzai-body'));
+        } catch (error) { say(aiErrorMessage(error)); }
         return;
       }
       if (act === 'save-model') {
