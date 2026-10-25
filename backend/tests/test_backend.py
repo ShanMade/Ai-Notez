@@ -353,6 +353,25 @@ def test_a_transcription_request_asks_for_diarization(monkeypatch):
     assert result["text"] == "Voice 1: Good morning. Today we\nVoice 2: A question?"
 
 
+def test_diarized_labels_never_leak_the_provider_spelling():
+    import app.providers as providers
+
+    # Gemini numbers from one, but a model that numbers from zero must still
+    # read as "Voice 1" instead of showing "spk0" or "Voice 0" in a transcript.
+    parts = [
+        {"audioTranscription": {"speakerLabel": "spk_0", "text": "salam"}},
+        {"audioTranscription": {"speakerLabel": "spk_1", "text": "haan"}},
+    ]
+    assert providers.diarized_text(parts) == "Voice 1: salam\nVoice 2: haan"
+
+    merged = [
+        {"audioTranscription": {"speakerLabel": "spk_1", "text": "one"}},
+        {"audioTranscription": {"speakerLabel": "spk_1", "text": "two"}},
+        {"audioTranscription": {"speakerLabel": "Speaker 2", "text": "three"}},
+    ]
+    assert providers.diarized_text(merged) == "Voice 1: one two\nVoice 2: three"
+
+
 def test_an_exhausted_transcription_model_falls_back_to_the_next_one(monkeypatch):
     from app.config import settings
 

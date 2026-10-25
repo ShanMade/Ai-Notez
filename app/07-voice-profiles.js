@@ -512,7 +512,8 @@ async function startEnhancedRecording(mode = 'class') {
               updateRecordingStatus(RECORDING_STATUS.NEEDS_ATTENTION);
             }
             
-            SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Error transcribing segment ${segmentIndex + 1}: ${error.message || 'Unknown error'}]`;
+            SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Part ${segmentIndex + 1} could not be transcribed]`;
+            console.warn('Segment transcription failed:', error);
             SPEAKER_STATE.rawTranscriptSegments[segmentIndex] = '';
             updateRecordingUI();
           }

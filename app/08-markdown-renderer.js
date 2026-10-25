@@ -143,7 +143,33 @@
   }
 
   // Main markdown to HTML function
+  // A transcript part can arrive with the provider's own speaker label
+  // ("spk0:", "spk_1:", "Speaker B:") when a model ignores the "Voice n"
+  // instruction. Rendering rewrites those at the start of a line, so an older
+  // note that already stored one reads as "Voice 1:" instead of leaking the
+  // raw label into the reader.
+  function normalizeSpeakerLabels(text) {
+    const source = String(text || '');
+    // A recording is numbered one way throughout: if any part says "spk0" the
+    // labels count from zero, otherwise Gemini's "spk_1" already starts at one.
+    const zeroBased = /(?:^|\n)\s*(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(source);
+    return source.split('\n').map(line => {
+      const numbered = /^(\s*(?:\[[\d:]+\]\s*)?)\**\s*(spk|voice|speaker|person)[\s_-]*([0-9\u0660-\u0669]{1,2})\s*\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+      const lettered = /^(\s*(?:\[[\d:]+\]\s*)?)\**\s*(?:speaker|person|voice)\s*([A-Za-z])\s*\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+      let match = line.match(numbered);
+      if (match) {
+        const digits = String(match[3]).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
+        const shift = /^spk$/i.test(match[2]) && zeroBased ? 1 : 0;
+        return `${match[1]}Voice ${Math.max(1, Number(digits) + shift)}: ${line.slice(match[0].length)}`;
+      }
+      match = line.match(lettered);
+      if (match) return `${match[1]}Voice ${match[2].toUpperCase().charCodeAt(0) - 64}: ${line.slice(match[0].length)}`;
+      return line;
+    }).join('\n');
+  }
+  window.nzNormalizeSpeakerLabels = normalizeSpeakerLabels;
   window.markdownToHtmlSafe = function markdownToHtmlSafe(markdown) {
+    markdown = normalizeSpeakerLabels(markdown);
     const inline = source => {
       if (!source) return '';
       let text = source;  // Do NOT escape here - escape matched content in replacements
