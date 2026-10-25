@@ -115,7 +115,7 @@
   askBar.id = 'rv2-ask';
   askBar.setAttribute('aria-controls', 'nz-ai');
   askBar.setAttribute('aria-expanded', 'false');
-  askBar.innerHTML = '<span class="spark" aria-hidden="true">✦</span><span class="ph">Ask about this note…</span><kbd>⌘J</kbd>';
+  askBar.innerHTML = `<span class="spark" aria-hidden="true">${typeof svgIcon === 'function' ? svgIcon('spark', 16) : ''}</span><span class="ph">Ask about this note…</span><kbd>⌘J</kbd>`;
 
   const scrim = document.createElement('div');
   scrim.className = 'rv2-scrim';
@@ -161,7 +161,7 @@
     } else {
       closeSheets();
       document.body.classList.remove('rv2-sheet-open');
-      if ($('#nz-ai')) { root.classList.remove('nzai-sheet'); scrim.classList.remove('on'); }
+      if ($('#nz-ai')) { root.classList.remove('nzai-sheet'); scrim.classList.remove('on'); document.body.classList.remove('rv2-sheet-open'); }
     }
   }
 
@@ -300,14 +300,15 @@
 
   function closeSheets() {
     contentsSheet.classList.remove('open');
-    const assistantSheet = root.classList.contains('nzai-sheet');
-    if (assistantSheet) scrim.classList.add('on');
-    else { scrim.classList.remove('on'); document.body.classList.remove('rv2-sheet-open'); }
+    scrim.classList.remove('on');
+    document.body.classList.remove('rv2-sheet-open');
   }
 
   // ----------------------------------------------------------- the assistant
-  // The panel is the app's own NotezAi dock; while the reader is open it is
-  // presented as a sheet over the note instead of a column beside it.
+  // The panel is the app's own NotezAi dock and it stays a dock while a note is
+  // open: a column beside the page on a desktop, the page itself on a phone.
+  // Only the Contents sheet uses the scrim — opening the assistant never covers
+  // the note and never traps the pointer behind an overlay.
   let panelWatch = null;
   let panelEl = null;
 
@@ -316,11 +317,9 @@
     if (!panelEl) return false;
     const open = !panelEl.hidden;
     askBar.setAttribute('aria-expanded', String(open));
-    const sheet = open && reading;
-    root.classList.toggle('nzai-sheet', sheet);
-    document.body.classList.toggle('rv2-sheet-open', sheet || contentsSheet.classList.contains('open'));
-    if (sheet) scrim.classList.add('on');
-    else if (!contentsSheet.classList.contains('open')) scrim.classList.remove('on');
+    root.classList.remove('nzai-sheet');   // legacy state, never re-applied
+    document.body.classList.toggle('rv2-sheet-open', contentsSheet.classList.contains('open'));
+    if (!contentsSheet.classList.contains('open')) scrim.classList.remove('on');
     return true;
   }
 
@@ -360,10 +359,7 @@
     mountChrome();
 
     askBar.addEventListener('click', () => openAssistant(''));
-    scrim.addEventListener('click', () => {
-      if (root.classList.contains('nzai-sheet')) $('#nz-ai [data-nzai="close"]')?.click();
-      closeSheets();
-    });
+    scrim.addEventListener('click', closeSheets);   // the scrim belongs to Contents only
     contentsSheet.addEventListener('click', event => {
       if (event.target.closest('[data-rv2-close]')) closeSheets();
     });

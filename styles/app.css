@@ -5790,3 +5790,477 @@ html[data-theme] #nz-ai .nzai-sheet-split .nzai-sheet-row b { font-size: 12px; f
   html[data-theme] #nz-ai .ai-send:active:not(:disabled),
   html[data-theme] #nz-ai .ai-card:active { transform: none; }
 }
+
+/* =========================================================
+   NotezAi panel v5: a calm, modern chat surface.
+
+   The panel keeps its place in the layout — it is a column on desktop and the
+   page itself on a phone — so opening the assistant never covers the note and
+   never traps focus behind a scrim. The header is one row of quiet icon
+   buttons; everything rarer lives in a popover under the ⋯ button instead of
+   a crowded toolbar. Appended last on purpose: these rules are the newest
+   layer and must win over the earlier ones.
+   ========================================================= */
+
+/* ---- header ------------------------------------------------------------- */
+html[data-theme] #nz-ai .dock-chrome {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 56px;
+  padding: 8px 10px 8px 8px;
+  border-bottom: 1px solid var(--p-line);
+  background: color-mix(in srgb, var(--p-bg) 86%, var(--p-card));
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+html[data-theme] #nz-ai .dock-title { gap: 9px; }
+html[data-theme] #nz-ai .dock-title-mark {
+  width: 30px; height: 30px; flex: 0 0 30px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  color: var(--p-accent-ink);
+  background:
+    radial-gradient(120% 120% at 20% 0%, color-mix(in srgb, var(--p-accent) 70%, #ffffff) 0%, transparent 60%),
+    var(--p-accent);
+  box-shadow: 0 1px 2px rgba(10, 14, 11, .18), inset 0 1px 0 rgba(255, 255, 255, .22);
+}
+html[data-theme] #nz-ai .dock-title-mark svg { width: 17px; height: 17px; }
+html[data-theme] #nz-ai .dock-title-tx { min-width: 0; }
+html[data-theme] #nz-ai .dock-title b { font-size: 14px; font-weight: 650; letter-spacing: -.014em; }
+html[data-theme] #nz-ai .dock-title small { font-size: 11px; color: var(--p-muted); }
+
+html[data-theme] #nz-ai .dock-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+html[data-theme] #nz-ai .nzai-btn {
+  position: relative;
+  width: 34px; height: 34px; flex: 0 0 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 10px;
+  background: transparent; color: var(--p-muted);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, transform .1s ease;
+}
+html[data-theme] #nz-ai .nzai-btn:hover { background: var(--p-well); color: var(--p-ink); }
+html[data-theme] #nz-ai .nzai-btn:active { transform: scale(.94); }
+html[data-theme] #nz-ai .nzai-btn:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+html[data-theme] #nz-ai .nzai-btn svg { display: block; }
+html[data-theme] #nz-ai .nzai-new {
+  background: var(--p-accent); color: var(--p-accent-ink);
+  box-shadow: 0 1px 2px rgba(10, 14, 11, .16);
+}
+html[data-theme] #nz-ai .nzai-new:hover { background: color-mix(in srgb, var(--p-accent) 88%, var(--p-ink)); color: var(--p-accent-ink); }
+html[data-theme] #nz-ai .nzai-btn[aria-current="page"],
+html[data-theme] #nz-ai .nzai-btn.on { background: var(--p-soft-2); color: var(--p-accent); }
+html[data-theme] #nz-ai .dock-badge {
+  position: absolute; top: 7px; right: 7px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #e2564a; box-shadow: 0 0 0 2px var(--p-bg);
+  animation: nz-rec-pulse 1.4s ease-in-out infinite;
+}
+html[data-theme] #nz-ai .dock-badge[hidden] { display: none; }
+@keyframes nz-rec-pulse { 50% { opacity: .35; } }
+html[data-theme] #nz-ai .nzai-lead .ic-down,
+html[data-theme] #nz-ai .nzai-lead .ic-back { display: none; }
+html[data-theme] #nz-ai .nzai-lead.is-back .ic-x,
+html[data-theme] #nz-ai .nzai-lead.is-back .ic-down { display: none; }
+html[data-theme] #nz-ai .nzai-lead.is-back .ic-back { display: block; }
+
+/* ---- scope bar: which notes this chat may use --------------------------- */
+html[data-theme] #nz-ai .ai-ctx-chip {
+  flex: 0 0 auto;
+  margin: 10px 14px 0;
+  height: 34px;
+  padding: 0 6px 0 11px;
+  border: 1px solid var(--p-line);
+  border-radius: 10px;
+  background: var(--p-card);
+  color: var(--p-ink);
+  font-family: var(--p-ui);
+  font-size: 12px;
+  font-weight: 550;
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .ai-ctx-chip:hover { border-color: var(--p-line-2); background: var(--p-well); }
+html[data-theme] #nz-ai .ai-ctx-chip svg { color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-ctx-name { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-theme] #nz-ai .ai-ctx-pill {
+  height: 24px; padding: 0 9px; border-radius: 7px;
+  background: var(--p-well); color: var(--p-muted);
+  font-size: 11px; font-weight: 600; letter-spacing: 0;
+}
+
+/* ---- thread ------------------------------------------------------------- */
+html[data-theme] #nz-ai .nzai-body { padding: 0 14px 10px; gap: 8px; }
+html[data-theme] #nz-ai .ai-thread { gap: 22px; padding: 16px 2px 12px; }
+html[data-theme] #nz-ai .ai-msg { position: relative; }
+html[data-theme] #nz-ai .ai-msg.ai { display: block; padding-left: 30px; }
+html[data-theme] #nz-ai .ai-avatar {
+  position: absolute; top: 1px; left: 0;
+  width: 22px; height: 22px; border-radius: 7px;
+  display: grid; place-items: center;
+  color: var(--p-accent);
+  background: var(--p-soft-2);
+}
+html[data-theme] #nz-ai .ai-avatar svg { width: 13px; height: 13px; }
+html[data-theme] #nz-ai .ai-md { font-size: 14px; line-height: 1.68; color: var(--p-ink); letter-spacing: -.003em; }
+html[data-theme] #nz-ai .ai-md > :first-child { margin-top: 0; }
+html[data-theme] #nz-ai .ai-md > :last-child { margin-bottom: 0; }
+html[data-theme] #nz-ai .ai-md h1,
+html[data-theme] #nz-ai .ai-md h2,
+html[data-theme] #nz-ai .ai-md h3 { font-weight: 650; letter-spacing: -.015em; line-height: 1.3; margin: 18px 0 6px; }
+html[data-theme] #nz-ai .ai-md h1 { font-size: 18px; }
+html[data-theme] #nz-ai .ai-md h2 { font-size: 16px; }
+html[data-theme] #nz-ai .ai-md h3 { font-size: 14.5px; }
+html[data-theme] #nz-ai .ai-md p { margin: 0 0 10px; }
+html[data-theme] #nz-ai .ai-md ul,
+html[data-theme] #nz-ai .ai-md ol { margin: 0 0 10px; padding-left: 20px; }
+html[data-theme] #nz-ai .ai-md li { margin: 3px 0; }
+html[data-theme] #nz-ai .ai-md li::marker { color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-md code { font-size: .9em; padding: 1px 5px; border-radius: 5px; background: var(--p-well); }
+html[data-theme] #nz-ai .ai-md blockquote { margin: 10px 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--p-line-2); color: var(--p-muted); }
+html[data-theme] #nz-ai .ai-bubble-user {
+  max-width: 86%;
+  padding: 9px 13px;
+  border-radius: 14px 14px 5px 14px;
+  background: var(--p-well);
+  color: var(--p-ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+html[data-theme] #nz-ai .ai-msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+html[data-theme] #nz-ai .ai-user-tools { margin-top: 4px; opacity: 0; transition: opacity .15s ease; }
+html[data-theme] #nz-ai .ai-msg.user:hover .ai-user-tools,
+html[data-theme] #nz-ai .ai-msg.user:focus-within .ai-user-tools { opacity: 1; }
+@media (hover: none) { html[data-theme] #nz-ai .ai-user-tools { opacity: 1; } }
+html[data-theme] #nz-ai .ai-model { margin-top: 8px; font-size: 10.5px; color: var(--p-faint); letter-spacing: .01em; }
+
+/* ---- welcome ------------------------------------------------------------ */
+html[data-theme] #nz-ai .ai-welcome { padding: 26px 2px 6px; margin: 0; }
+html[data-theme] #nz-ai .ai-welcome-head { display: flex; flex-direction: column; align-items: flex-start; }
+html[data-theme] #nz-ai .ai-orb {
+  width: 44px; height: 44px; margin-bottom: 16px;
+  display: grid; place-items: center;
+  border-radius: 14px;
+  color: var(--p-accent);
+  background:
+    radial-gradient(120% 120% at 18% 0%, var(--p-soft-2) 0%, transparent 65%),
+    var(--p-card);
+  border: 1px solid var(--p-line);
+  box-shadow: var(--p-shadow-sm);
+}
+html[data-theme] #nz-ai .ai-orb svg { width: 21px; height: 21px; }
+html[data-theme] #nz-ai .ai-welcome-kicker {
+  margin: 0 0 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .ai-welcome h3 {
+  margin: 0 0 8px;
+  font: 600 27px/1.1 var(--p-ui);
+  letter-spacing: -.028em;
+  color: var(--p-ink);
+}
+html[data-theme] #nz-ai .ai-welcome h3 em { font-style: normal; color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-welcome-sub {
+  margin: 0 0 18px;
+  max-width: 34ch;
+  font-size: 13px; line-height: 1.55;
+  color: var(--p-muted);
+}
+html[data-theme] #nz-ai .ai-welcome-sub b { color: var(--p-ink); font-weight: 600; }
+html[data-theme] #nz-ai .ai-suggest { display: grid; grid-template-columns: 1fr; gap: 8px; border: 0; }
+html[data-theme] #nz-ai .ai-card {
+  position: relative;
+  display: flex; flex-direction: row; align-items: center; gap: 11px;
+  min-height: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--p-line);
+  border-radius: 12px;
+  background: var(--p-card);
+  text-align: left;
+  box-shadow: none;
+  transition: border-color .14s ease, background .14s ease, transform .12s ease;
+}
+html[data-theme] #nz-ai .ai-card:hover:not(:disabled) { border-color: var(--p-line-2); background: var(--p-card); transform: translateY(-1px); }
+html[data-theme] #nz-ai .ai-card:active { transform: none; }
+html[data-theme] #nz-ai .ai-card:focus-visible { outline: 2px solid var(--p-accent); outline-offset: 1px; }
+html[data-theme] #nz-ai .ai-card::after { content: none; }
+html[data-theme] #nz-ai .ai-card-ic {
+  width: 34px; height: 34px; flex: 0 0 34px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: var(--p-soft);
+  color: var(--p-accent);
+}
+html[data-theme] #nz-ai .ai-card-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+html[data-theme] #nz-ai .ai-card b { font-size: 13px; font-weight: 600; color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-card small { font-size: 11.5px; color: var(--p-muted); }
+html[data-theme] #nz-ai .ai-card:disabled { opacity: .5; cursor: default; }
+html[data-theme] #nz-ai .ai-hint {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 18px 0 0;
+  font-size: 11.5px; color: var(--p-faint);
+}
+html[data-theme] #nz-ai .ai-hint-key {
+  display: inline-grid; place-items: center;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  border: 1px solid var(--p-line); border-radius: 5px;
+  background: var(--p-card);
+  font-family: var(--p-mono); font-size: 10.5px; color: var(--p-muted);
+}
+html[data-theme] #nz-ai .ai-hint-dot { opacity: .5; }
+
+/* ---- quick commands and composer ---------------------------------------- */
+html[data-theme] #nz-ai .ai-quickbar { gap: 6px; padding: 2px 0 8px; }
+html[data-theme] #nz-ai .ai-qchip {
+  min-height: 30px; gap: 6px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--p-line);
+  border-radius: 9px;
+  background: var(--p-card);
+  color: var(--p-muted);
+  font-size: 12px; font-weight: 550;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+html[data-theme] #nz-ai .ai-qchip svg { color: var(--p-accent); }
+html[data-theme] #nz-ai .ai-qchip:hover:not(:disabled) { background: var(--p-well); color: var(--p-ink); border-color: var(--p-line-2); }
+html[data-theme] #nz-ai .ai-composer-wrap { padding-top: 2px; }
+html[data-theme] #nz-ai .ai-composer {
+  display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  padding: 10px 10px 8px 14px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 16px;
+  background: var(--p-card);
+  box-shadow: 0 4px 18px -12px rgba(10, 14, 11, .45);
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+html[data-theme] #nz-ai .ai-composer:focus-within {
+  border-color: color-mix(in srgb, var(--p-accent) 55%, transparent);
+  box-shadow: 0 0 0 3px var(--p-soft), 0 4px 18px -12px rgba(10, 14, 11, .45);
+}
+html[data-theme] #nz-ai .ai-composer textarea {
+  width: 100%;
+  padding: 2px 0 8px;
+  border: 0; background: transparent; color: var(--p-ink);
+  font: 400 14px/1.55 var(--p-ui);
+  resize: none;
+}
+html[data-theme] #nz-ai .ai-composer textarea::placeholder { color: var(--p-faint); }
+html[data-theme] #nz-ai .ai-composer textarea:focus { outline: none; }
+html[data-theme] #nz-ai .ai-composer-tools { display: flex; align-items: center; gap: 2px; }
+html[data-theme] #nz-ai .ai-composer-gap { flex: 1 1 auto; }
+html[data-theme] #nz-ai .ai-composer-model {
+  max-width: 44%;
+  padding-right: 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+  color: var(--p-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+html[data-theme] #nz-ai .ai-ibtn {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  color: var(--p-muted);
+}
+html[data-theme] #nz-ai .ai-ibtn:hover:not(:disabled) { background: var(--p-well); color: var(--p-ink); }
+html[data-theme] #nz-ai .ai-ibtn-slash { font-family: var(--p-mono); font-size: 14px; font-weight: 600; line-height: 1; }
+html[data-theme] #nz-ai .ai-send {
+  width: 32px; height: 32px; flex-basis: 32px;
+  border-radius: 9px;
+  background: var(--p-accent); color: var(--p-accent-ink);
+  box-shadow: 0 1px 2px rgba(10, 14, 11, .18);
+  transition: filter .14s ease, transform .1s ease;
+}
+html[data-theme] #nz-ai .ai-send:hover:not(:disabled) { filter: brightness(1.06); }
+html[data-theme] #nz-ai .ai-send:active:not(:disabled) { transform: scale(.95); }
+html[data-theme] #nz-ai .ai-send:disabled { opacity: .45; box-shadow: none; }
+html[data-theme] #nz-ai .ai-send.stop { background: var(--p-ink); color: var(--p-bg); }
+html[data-theme] #nz-ai .ai-foot { justify-content: flex-start; padding: 6px 2px 0; font-size: 10.5px; color: var(--p-faint); }
+
+/* ---- popover menu (the ⋯ button), never a modal ------------------------- */
+html[data-theme] #nz-ai .nzai-scrim { display: none !important; }
+html[data-theme] #nz-ai .nzai-sheet {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  left: auto;
+  bottom: auto;
+  z-index: 40;
+  width: min(286px, calc(100% - 20px));
+  max-height: min(70vh, calc(100% - 76px));
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--p-line-2);
+  border-radius: 14px;
+  background: var(--p-card);
+  box-shadow: 0 24px 48px -24px rgba(6, 10, 8, .55), 0 2px 8px rgba(6, 10, 8, .08);
+  animation: nz-menu-in .14s ease-out;
+}
+html[data-theme] #nz-ai .nzai-sheet[hidden] { display: none; }
+html[data-theme] #nz-ai .nzai-sheet-grab { display: none; }
+html[data-theme] #nz-ai .nzai-sheet-grp {
+  margin: 8px 8px 4px;
+  padding: 0;
+  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--p-faint);
+}
+html[data-theme] #nz-ai .nzai-sheet-grp:first-of-type { margin-top: 2px; }
+html[data-theme] #nz-ai .nzai-sheet-rows { display: grid; gap: 1px; }
+html[data-theme] #nz-ai .nzai-sheet-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-areas: "ic t s";
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--p-ink);
+  text-align: left;
+  cursor: pointer;
+}
+html[data-theme] #nz-ai .nzai-sheet-row:hover,
+html[data-theme] #nz-ai .nzai-sheet-row:focus-visible { background: var(--p-well); outline: none; }
+html[data-theme] #nz-ai .nzai-sheet-row .ic {
+  grid-area: ic;
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border-radius: 7px;
+  background: var(--p-soft);
+  color: var(--p-accent);
+  font: 600 10.5px/1 var(--p-ui);
+}
+html[data-theme] #nz-ai .nzai-sheet-row b { grid-area: t; font-size: 12.5px; font-weight: 560; }
+html[data-theme] #nz-ai .nzai-sheet-row small { grid-area: s; font-size: 11px; color: var(--p-faint); text-align: right; }
+html[data-theme] #nz-ai .nzai-sheet-split { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 2px; }
+html[data-theme] #nz-ai .nzai-sheet-split .nzai-sheet-row {
+  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-areas: "ic t";
+  min-height: 38px;
+  padding: 5px 8px;
+  border: 1px solid var(--p-line);
+  border-radius: 9px;
+  background: var(--p-bg);
+}
+html[data-theme] #nz-ai .nzai-sheet-split .nzai-sheet-row .ic { background: transparent; width: 24px; height: 24px; }
+@keyframes nz-menu-in { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* the sheet is a popover at every width, so the phone keeps it inline too */
+@media (max-width: 700px) {
+  html[data-theme] #nz-ai .nzai-sheet { top: 60px; right: 12px; }
+}
+
+/* ---- history + settings inside the panel -------------------------------- */
+html[data-theme] #nz-ai .hist-row { border-radius: 10px; border-bottom: 0; margin-bottom: 2px; }
+html[data-theme] #nz-ai .hist-row:hover { background: var(--p-well); }
+html[data-theme] #nz-ai .hist-day { padding: 16px 2px 6px; font-size: 10.5px; letter-spacing: .09em; color: var(--p-faint); }
+html[data-theme] #nz-ai .nzai-section-head { margin: 2px 0 0; }
+
+/* ---- phone: the assistant is a page, not a sheet ------------------------ */
+@media (max-width: 900px) {
+  html[data-theme] #nz-ai {
+    top: 0; right: 0; bottom: 0; left: 0;
+    width: 100vw;
+    height: 100vh; height: 100dvh;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  html[data-theme] #nz-ai .dock-grab { display: none; }
+  html[data-theme] #nz-ai .nzai-resizer { display: none; }
+  html[data-theme] #nz-ai .dock-chrome {
+    position: sticky; top: 0; z-index: 6;
+    min-height: 58px;
+    padding: 8px 10px;
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  }
+  html[data-theme] #nz-ai .nzai-btn { width: 40px; height: 40px; flex-basis: 40px; border-radius: 11px; }
+  html[data-theme] #nz-ai .nzai-lead .ic-x { display: none; }
+  html[data-theme] #nz-ai .nzai-lead .ic-back { display: block; }
+  html[data-theme] #nz-ai .nzai-lead.is-back .ic-back { display: block; }
+  html[data-theme] #nz-ai .ai-ctx-chip { margin: 10px 14px 0; height: 40px; }
+  html[data-theme] #nz-ai .nzai-body { padding: 0 0 calc(10px + env(safe-area-inset-bottom, 0px)); }
+  html[data-theme] #nz-ai .ai-thread { padding-left: 16px; padding-right: 16px; }
+  html[data-theme] #nz-ai .ai-quickbar,
+  html[data-theme] #nz-ai .ai-composer-wrap { margin-left: 16px; margin-right: 16px; }
+  html[data-theme] #nz-ai .ai-md,
+  html[data-theme] #nz-ai .ai-bubble-user { font-size: 15px; }
+  html[data-theme] #nz-ai .ai-welcome { padding: 22px 16px 6px; }
+  html[data-theme] #nz-ai .ai-welcome h3 { font-size: 30px; }
+  html[data-theme] #nz-ai .ai-hint { padding: 0 16px; }
+  html[data-theme] #nz-ai .ai-card { min-height: 60px; }
+  html[data-theme] #nz-ai .ai-composer textarea { font-size: 16px; }
+  html[data-theme] #nz-ai .ai-ibtn { width: 40px; height: 40px; }
+  html[data-theme] #nz-ai .ai-send { width: 40px; height: 40px; flex-basis: 40px; }
+  html[data-theme] #nz-ai .ai-composer-model { display: none; }
+}
+@container (min-width: 470px) {
+  #nz-ai .ai-suggest { grid-template-columns: 1fr 1fr; }
+  #nz-ai .ai-welcome-sub { max-width: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] #nz-ai .nzai-sheet,
+  html[data-theme] #nz-ai .dock-badge { animation: none; }
+  html[data-theme] #nz-ai .ai-card:hover:not(:disabled) { transform: none; }
+}
+
+/* ---- icon plumbing ------------------------------------------------------
+   index.html and the menus draw from the same 24px set as the app scripts, so
+   a slot that used to hold a text glyph keeps the same optical alignment. */
+.menu-ico { width: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; color: currentColor; opacity: .85; }
+.account-menu button { display: flex; align-items: center; gap: 9px; }
+.account-menu .menu-ico svg { display: block; }
+.sort-caret, .outline-caret { display: inline-flex; align-items: center; justify-content: center; }
+.sort-caret svg, .outline-caret svg { display: block; }
+.outline-caret { transition: transform .16s ease; }
+.reader-outline-toggle[aria-expanded="true"] .outline-caret { transform: rotate(180deg); }
+.icon { flex: 0 0 auto; }
+
+/* icon slots that used to hold a text glyph */
+.nz-modal-icon svg, .empty-mark svg, .fc-ico svg, .stat-mark svg, .profile-icon svg, .fd-kind svg, .fp-ico svg { display: block; }
+.fp-ico, .fd-kind, .fc-ico, .profile-icon, .nz-modal-icon { display: inline-flex; align-items: center; justify-content: center; }
+.dashboard-empty .empty-mark { color: color-mix(in srgb, var(--nz-accent) 55%, var(--ink, #1a2b3a)); }
+.folder-card .fc-ico { color: var(--nz-accent, #1d8f6e); }
+.spotlight-open svg, .quiet-link svg, .group-more svg, .folder-card-arrow svg, .study-launch-arrow svg { vertical-align: -2px; }
+
+/* inline glyph slots that now hold a shared icon */
+.week-start svg { width: 13px; height: 13px; flex: 0 0 13px; }
+.focus-glyph { display: inline-flex; align-items: center; }
+.focus-glyph svg { width: 14px; height: 14px; }
+
+/* markdown task rows and the toast mark now draw a shared icon */
+.md-task-slot { display: inline-flex; align-items: center; margin-right: 2px; color: color-mix(in srgb, var(--nz-accent, #1d8f6e) 80%, var(--ink, #1a2b3a)); vertical-align: -2px; }
+.md-task { display: block; }
+.toast-mark { display: inline-flex; align-items: center; }
+.toast-mark svg { width: 15px; height: 15px; display: block; }
+
+/* small inline icon marks */
+.acct-verified { display: inline-flex; align-items: center; gap: 4px; }
+.acct-verified svg, .spotlight-side-mark svg, .nz-modal-icon svg { display: block; }
+.spotlight-side-mark { display: inline-flex; align-items: center; }
+.nzai-chip svg { width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; }
+.ki-backfill-value { display: inline-flex; align-items: center; gap: 5px; }
+
+/* the recording status dot is drawn, not typed */
+.rec-indicator {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #e2574c;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #e2574c 22%, transparent);
+  vertical-align: 1px;
+  margin-right: 6px;
+  animation: rec-dot 1.6s ease-in-out infinite;
+}
+@keyframes rec-dot { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .rec-indicator { animation: none; } }
+
+/* arrows that used to be typed characters */
+.demo-mark, .study-launch-arrow, .quiet-link span, .sync-now { display: inline-flex; align-items: center; justify-content: center; }
+.demo-mark svg, .study-launch-arrow svg, .quiet-link span svg, .sync-now svg { display: block; }
+.quiet-link:hover span { transform: translateX(2px); }
+.quiet-link span svg { width: 14px; height: 14px; }
+.study-launch-arrow svg { width: 15px; height: 15px; }
+.sync-now svg { width: 14px; height: 14px; }
+.demo-mark { margin-right: 7px; color: var(--mint); }
+.demo-mark svg { width: 15px; height: 15px; }
