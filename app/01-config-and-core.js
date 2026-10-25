@@ -1569,7 +1569,10 @@ const noteSearchCache = new WeakMap();
       if (!raw && cachedHtmlText) raw = cachedHtmlText;
       if (!raw && isHtmlSource(note.body)) raw = extractReadableHtml(note.body);
       if (!raw) raw = note.fileName || '';
-      let text = String(raw || '').replace(/\r/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^#{1,6}\s*/gm, '').replace(/[`*_~]/g, '').replace(/^>\s*/gm, '').replace(/\s+/g, ' ').trim();
+      // A recording note stores speaker labels on their own lines; the excerpt
+      // reads them like the note does ("Voice 1:"), never as a raw "spk0:".
+      const labelled = typeof window.nzNormalizeSpeakerLabels === 'function' ? window.nzNormalizeSpeakerLabels(raw) : raw;
+      let text = String(labelled || '').replace(/\r/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^#{1,6}\s*/gm, '').replace(/[`*_~]/g, '').replace(/^>\s*/gm, '').replace(/\[\d{2}:\d{2}(?::\d{2})?\]\s*/g, '').replace(/\s+/g, ' ').trim();
       if (!text) return '';
       const terms = String(query || '').replace(/"([^"]+)"/g, '$1').split(/\s+/).map(term => term.trim()).filter(term => term.length > 1);
       let hit = -1;
