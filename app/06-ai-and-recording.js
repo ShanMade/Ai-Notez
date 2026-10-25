@@ -468,7 +468,7 @@ async function openWikiLink(title) {
     // "spk_١", and that still has to read as Voice 1.
     const recDigits = text => String(text || '').replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
     function recLabelName(name) {
-      const raw = String(name || '').replace(/\*+/g, '').trim();
+      const raw = recUnmark(String(name || '')).replace(/\*+/g, '').trim();
       // Gemini says spk_1, spk_2 … and a chat model told to label turns often
       // says spk0, spk1, spk2. `recSpkZero` is set from the whole transcript, so
       // one recording is numbered one way and the first voice always reads
@@ -491,8 +491,8 @@ async function openWikiLink(title) {
     // part of the label, but it stopped the label regex from matching at the
     // start of the line, so a transcript showed raw "spk0:" and every voice
     // collapsed into the same colour. Marks are dropped before a line is read.
-    const REC_BIDI_HEAD = /^[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/;
-    const REC_BIDI_ANY = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/g;
+    const REC_BIDI_HEAD = /^[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/;
+    const REC_BIDI_ANY = /[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/g;
     // Marks are removed wherever they sit (a model can also put one after a
     // timestamp or after bold asterisks), but a mark that opened the line is put
     // back afterwards, because that is what keeps a mixed Urdu line right-to-left.
@@ -714,11 +714,18 @@ Output only the transcript.`;
     // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
     // label in the note. A real name ("Ayesha:") is left exactly as written.
     const REC_LABEL_HEAD = /^(\s*(?:[-*•–]\s+)?(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+    // Nothing above can be trusted to catch every model quirk forever, so the
+    // raw provider spelling is also swept out of whatever is about to be shown.
+    // This is the guarantee: no surface ever prints "spk0:".
+    const recScrubSpk = line => String(line ?? '').replace(
+      /(^|[^\p{L}\p{N}])(?:spk)[\s_-]*([0-9\u0660-\u0669]{1,2})(?![0-9\u0660-\u0669])/giu,
+      (all, lead, digits) => `${lead}Voice ${Math.max(1, Number(recDigits(digits)) + (recSpkZero ? 1 : 0))}`
+    );
     function recNormalizeLabels(text) {
-      return String(text || '').split('\n').map(raw => recLeadMark(raw) + recUnmark(raw).replace(
+      return String(text || '').split('\n').map(raw => recScrubSpk(recLeadMark(raw) + recUnmark(raw).replace(
         REC_LABEL_HEAD,
         (all, stamp, label) => `${stamp}${recLabelName(label)}: `
-      )).join('\n');
+      ))).join('\n');
     }
     // Keeps the words that were heard. Runs of [inaudible] or [unclear] lines are dropped; a part with no words becomes empty.
     // Labels are left as the model wrote them: they are rewritten once, for the
@@ -875,7 +882,7 @@ Output only the transcript.`;
         let lastClock = recClockOf(recWallOf(part.index));
         const lines = recNormalizeLabels(part.text).split('\n').filter(line => line.trim()).map(line => {
           const speaker = recSpeakerOf(line);
-          if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recUnmark(line).trim())}</span></p>`;
+          if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recScrubSpk(recUnmark(line)).trim())}</span></p>`;
           const n = recSpeakerIndex(speaker.name);
           const clock = recStampWall(part.index, speaker.stamp) || lastClock;
           lastClock = clock;
@@ -975,7 +982,7 @@ Output only the transcript.`;
     function recHistoryLine(line, note) {
       const speaker = recSpeakerOf(line);
       const clock = recSavedClock(line, note);
-      if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recUnmark(line).replace(/^\[[\d:]{3,12}\]\s*/, ''))}</span></p>`;
+      if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recScrubSpk(recUnmark(line).replace(/^\[[\d:]{3,12}\]\s*/, '')))}</span></p>`;
       const n = recSpeakerIndex(speaker.name);
       return `<p class="rec-line"><span class="rec-stamp">${esc(clock)}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">${esc(speaker.name)}</span><span class="rec-text">${esc(speaker.text)}</span></p>`;
     }
