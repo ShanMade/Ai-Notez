@@ -482,6 +482,10 @@ async function openWikiLink(title) {
       return recKnownMatch(raw) || raw;
     }
     let recSpkZero = false;   // true while the current transcript labels its voices from 0
+    // A saved note carries no live state, so its numbering is worked out from its
+    // own words: one recording numbered from zero, the next from one.
+    const recSpkZeroIn = text => /(?:^|\n)\s*(?:[-*•]\s+)?(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(recUnmark(String(text || '')));
+    const recWithSpkZero = (zero, run) => { const previous = recSpkZero; recSpkZero = zero; try { return run(); } finally { recSpkZero = previous; } };
     // A model writing Urdu or Hebrew often puts an invisible direction mark
     // (U+200F, U+200E …) in front of a line: "\u200Fspk0: …". The mark is not
     // part of the label, but it stopped the label regex from matching at the
@@ -494,7 +498,9 @@ async function openWikiLink(title) {
     // back afterwards, because that is what keeps a mixed Urdu line right-to-left.
     const recUnmark = line => String(line ?? '').replace(REC_BIDI_ANY, '');
     const recLeadMark = line => (String(line ?? '').match(REC_BIDI_HEAD) || [''])[0];
-    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
+    // A model writing notes often puts a turn in a list item ("- Voice 1: …"),
+    // so a bullet is allowed in front of the label and kept.
+    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
       const match = String(recUnmark(line)).match(REC_LABEL_RE);
       if (!match) return null;
@@ -643,7 +649,7 @@ Output only the transcript.`;
     // rewritten to "Voice n" before anything renders or saves it.
     function recLiveTranscript() {
       const text = REC.segTexts.filter(Boolean).join('\n');
-      recSpkZero = /(?:^|\n)\s*(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(text);
+      recSpkZero = recSpkZeroIn(text);
       return recNormalizeLabels(text);
     }
     // The transcript that goes into the note: every part joined, and every
@@ -707,9 +713,10 @@ Output only the transcript.`;
     // Rewrites a leading speaker label to its canonical "Voice n" spelling, so a
     // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
     // label in the note. A real name ("Ayesha:") is left exactly as written.
+    const REC_LABEL_HEAD = /^(\s*(?:[-*•–]\s+)?(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
     function recNormalizeLabels(text) {
       return String(text || '').split('\n').map(raw => recLeadMark(raw) + recUnmark(raw).replace(
-        /^(\s*(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i,
+        REC_LABEL_HEAD,
         (all, stamp, label) => `${stamp}${recLabelName(label)}: `
       )).join('\n');
     }
@@ -892,15 +899,21 @@ Output only the transcript.`;
     // never lost just because the panel was closed: the transcript, the AI
     // notes, the speakers and the times are all still there.
     const recIsSession = note => /^>\s*Recording\b/m.test(String(note?.body || ''));
+    // A heading is matched loosely: an older build, or a model writing the note
+    // body, can produce "### Transcript" or a trailing space.
+    const REC_HEADING = name => new RegExp(`^#{1,6}\\s*${name}\\s*$`, 'm');
     function recSavedParts(note) {
       const body = String(note?.body || '');
-      const at = body.search(/^##\s*Transcript\s*$/m);
+      const at = body.search(REC_HEADING('Transcript'));
       if (at < 0) return { lines: [], notes: '' };
-      const rest = body.slice(at).replace(/^##\s*Transcript[^\n]*\n?/, '');
-      const notesAt = rest.search(/^##\s*AI notes\s*$/m);
+      const rest = body.slice(at).replace(/^#{1,6}\s*Transcript[^\n]*\n?/, '');
+      const notesAt = rest.search(REC_HEADING('AI notes'));
       const transcript = notesAt < 0 ? rest : rest.slice(0, notesAt);
-      const aiNotes = notesAt < 0 ? '' : rest.slice(notesAt).replace(/^##\s*AI notes[^\n]*\n?/, '').trim();
-      return { lines: transcript.split('\n').map(line => line.trim()).filter(Boolean), notes: aiNotes };
+      const aiNotes = notesAt < 0 ? '' : rest.slice(notesAt).replace(/^#{1,6}\s*AI notes[^\n]*\n?/, '').trim();
+      // "_Listening…_" is what an empty transcript holds; it is not a line.
+      const lines = transcript.split('\n').map(line => line.trim())
+        .filter(line => line && !/^_?\s*Listening/.test(line) && !/^_?\s*The live transcript/.test(line));
+      return { lines, notes: aiNotes };
     }
     // A saved line starts with "[14:05:12]" (this build) or "[00:12]" (sessions
     // saved before the clock change). The short form is turned into a real time
@@ -933,13 +946,14 @@ Output only the transcript.`;
     }
     function recSessionOf(note) {
       const { lines, notes: aiNotes } = recSavedParts(note);
+      const zero = recSpkZeroIn(lines.join('\n') || aiNotes);
       const voices = new Set(), clocks = [];
-      lines.forEach(line => {
+      recWithSpkZero(zero, () => lines.forEach(line => {
         const speaker = recSpeakerOf(line);
         if (speaker) voices.add(speaker.name);
         const clock = recSavedClock(line, note);
         if (clock) clocks.push(clock);
-      });
+      }));
       const first = clocks[0] || '', last = clocks[clocks.length - 1] || '';
       const start = recClockMs(first), end = recClockMs(last);
       const span = start != null && end != null && end > start ? recLengthLabel(end - start) : '';
@@ -953,7 +967,7 @@ Output only the transcript.`;
       return {
         note, lines, aiNotes,
         title: autoTitle ? `${autoTitle[1]} recording` : rawTitle || 'Recording',
-        day, time, span,
+        day, time, span, zero,
         voices: [...voices].length,
         mode: /· Meeting ·/.test(String(note.body)) || /^Meeting recording/i.test(String(note.title)) ? 'Meeting' : 'Class'
       };
@@ -971,13 +985,16 @@ Output only the transcript.`;
       if (!sessions.length) return '';
       const rows = sessions.map(session => {
         const open = REC.histOpen.has(session.note.id);
-        const meta = [session.mode, session.span, `${session.lines.length} line${session.lines.length === 1 ? '' : 's'}`,
+        const words = session.lines.length || session.aiNotes.split('\n').filter(line => line.trim()).length;
+        const meta = [session.mode, session.span, `${words} line${words === 1 ? '' : 's'}`,
           session.voices ? `${session.voices} voice${session.voices === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
-        const body = open ? `<div class="rec-hist-body">
-            ${session.lines.length ? `<div class="rec-hist-scroll">${session.lines.map(line => recHistoryLine(line, session.note)).join('')}</div>` : `<p class="rec-muted">This session has no transcript lines yet.</p>`}
+        const empty = !session.lines.length && !session.aiNotes;
+        const body = open ? recWithSpkZero(session.zero, () => `<div class="rec-hist-body">
+            ${session.lines.length ? `<div class="rec-hist-scroll">${session.lines.map(line => recHistoryLine(line, session.note)).join('')}</div>` : ''}
+            ${empty ? `<p class="rec-muted rec-hist-empty">This session has no words in it yet.</p>` : ''}
             ${session.aiNotes ? `<div class="rec-hist-notes ai-md">${markdownToHtml(session.aiNotes)}</div>` : ''}
             <div class="rec-actions"><button type="button" class="ai-action" data-rec="open-sess" data-id="${esc(session.note.id)}">Open the note</button></div>
-          </div>` : '';
+          </div>`) : '';
         return `<article class="rec-hist-item${open ? ' open' : ''}">
             <button type="button" class="rec-hist-head" data-rec="sess" data-id="${esc(session.note.id)}" aria-expanded="${open}" aria-label="${esc(`${session.day} ${session.time}, ${session.title}`)}">
               <span class="rec-hist-when"><b>${esc(session.day)}</b><span>${esc(session.time)}</span></span>

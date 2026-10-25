@@ -148,23 +148,39 @@
   // instruction. Rendering rewrites those at the start of a line, so an older
   // note that already stored one reads as "Voice 1:" instead of leaking the
   // raw label into the reader.
+  // Invisible characters are not part of a label, but a model writing Urdu or
+  // Hebrew puts a direction mark in front of a line (\u200F \u200E \u202B …)
+  // and a model writing anything can leave a zero-width space behind. Those
+  // stopped the pattern from matching at the start of the line, so the raw
+  // "spk0:" reached the page. Marks are removed before matching (and before
+  // the zero-based test), then a mark that opened the line is put back, because
+  // it is what keeps a mixed right-to-left line in the right order.
+  const REC_INVISIBLE = /[\u200b-\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]/g;
+  const recInvisibleLead = /^[\u200b-\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]+/;
   function normalizeSpeakerLabels(text) {
     const source = String(text || '');
+    // A transcript line can also arrive as a list item ("- spk0: …") once a
+    // model has been asked for notes; the bullet is kept and the label inside
+    // it is rewritten like any other.
+    const bullet = '(?:[-*\u2022\u2013]\\s+)?';
     // A recording is numbered one way throughout: if any part says "spk0" the
     // labels count from zero, otherwise Gemini's "spk_1" already starts at one.
-    const zeroBased = /(?:^|\n)\s*(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(source);
-    return source.split('\n').map(line => {
-      const numbered = /^(\s*(?:\[[\d:]+\]\s*)?)\**\s*(spk|voice|speaker|person)[\s_-]*([0-9\u0660-\u0669]{1,2})\s*\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
-      const lettered = /^(\s*(?:\[[\d:]+\]\s*)?)\**\s*(?:speaker|person|voice)\s*([A-Za-z])\s*\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+    const zeroBased = new RegExp(`(?:^|\\n)\\s*${bullet}(?:\\[[\\d:]{3,12}\\]\\s*)?\\**\\s*spk[\\s_-]*0\\s*\\**\\s*[:\\uFF1A]`, 'i')
+      .test(source.replace(REC_INVISIBLE, ''));
+    const numbered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(spk|voice|speaker|person)[\\s_-]*([0-9\\u0660-\\u0669]{1,2})\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
+    const lettered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(?:speaker|person|voice)\\s*([A-Za-z])\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
+    return source.split('\n').map(raw => {
+      const lead = (raw.match(recInvisibleLead) || [''])[0];
+      const line = raw.replace(REC_INVISIBLE, '');
       let match = line.match(numbered);
       if (match) {
         const digits = String(match[3]).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
         const shift = /^spk$/i.test(match[2]) && zeroBased ? 1 : 0;
-        return `${match[1]}Voice ${Math.max(1, Number(digits) + shift)}: ${line.slice(match[0].length)}`;
+        return `${lead}${match[1]}Voice ${Math.max(1, Number(digits) + shift)}: ${line.slice(match[0].length)}`;
       }
       match = line.match(lettered);
-      if (match) return `${match[1]}Voice ${match[2].toUpperCase().charCodeAt(0) - 64}: ${line.slice(match[0].length)}`;
-      return line;
+      if (match) return `${lead}${match[1]}Voice ${match[2].toUpperCase().charCodeAt(0) - 64}: ${line.slice(match[0].length)}`;
+      return lead + line;
     }).join('\n');
   }
   window.nzNormalizeSpeakerLabels = normalizeSpeakerLabels;
