@@ -675,10 +675,22 @@ Output only the transcript.`;
       const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.${gap}`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
+    // While the recording runs, the note holds only a short overview. The full
+    // transcript and AI notes are written once the recording is finished.
+    function recOverviewBody(note) {
+      const parts = REC.processed || 0;
+      const waiting = (REC.segStatuses || []).filter(status => status === SEG_STATUS.FAILED).length;
+      const state = REC.status === REC_STATUS.PAUSED ? 'Recording paused' : 'Recording in progress';
+      const mode = REC.mode === 'meeting' ? 'Meeting' : 'Classroom';
+      const started = note?.createdAt ? new Date(note.createdAt).toLocaleString() : '';
+      const progress = `${parts} part${parts === 1 ? '' : 's'} transcribed so far${waiting ? `, ${waiting} waiting to be retried` : ''}.`;
+      return `> ${state}${started ? ` · ${started}` : ''} · ${mode}\n\n## Overview\n\n${progress}\n\nThe full transcript and AI notes are written here when you finish the recording.`;
+    }
     function recSaveNote(finishing = false, notesText = REC.liveNotes) {
       if (REC.discarding) return;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
-      note.body = recNoteBody(recTranscriptForNote(), notesText, finishing).slice(0, 200000);
+      const complete = finishing || REC.status === REC_STATUS.DONE;
+      note.body = (complete ? recNoteBody(recTranscriptForNote(), notesText, finishing) : recOverviewBody(note)).slice(0, 200000);
       note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', REC.mode === 'meeting' ? 'MEETING' : 'CLASS'];
       persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
       renderEverything();
