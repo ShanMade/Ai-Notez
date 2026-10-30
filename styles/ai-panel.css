@@ -116,3 +116,8 @@ html[data-theme] #nz-ai .nzai-sheet-grp { text-transform: none; letter-spacing: 
   html[data-theme] #nz-ai .ai-send { min-width: 40px; min-height: 40px; width: 40px; height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) { html[data-theme] #nz-ai .ai-composer, html[data-theme] #nz-ai .ai-card { transition: none; } }
+
+/* Signed out: the sign-in card is the only thing on screen, so the NotezAi panel and the focus timer stay hidden. */
+#login-screen:not(.hidden) ~ #nz-ai,
+#login-screen:not(.hidden) ~ #focus-fab,
+#login-screen:not(.hidden) ~ #focus-panel { display: none !important; }
