@@ -1,0 +1,20 @@
+[
+  { "q": "What's in my library?", "inventory": true },
+  { "q": "What is in the library", "inventory": true },
+  { "q": "How many notes do I have?", "inventory": true },
+  { "q": "how many notes are present in my library", "inventory": true },
+  { "q": "how many notes are in the library", "inventory": true },
+  { "q": "How many files do I have?", "inventory": true },
+  { "q": "Show me all my notes", "inventory": true },
+  { "q": "list my notes", "inventory": true },
+  { "q": "What notes do I have?", "inventory": true },
+  { "q": "Give me an overview of my collection", "inventory": true },
+  { "q": "What subjects have I covered?", "inventory": true },
+  { "q": "What is in my collection?", "inventory": true },
+  { "q": "Explain photosynthesis from my notes", "inventory": false },
+  { "q": "How many notes mention photosynthesis?", "inventory": false },
+  { "q": "How many notes about physics do I have?", "inventory": false },
+  { "q": "How many notes do I have about biology?", "inventory": false },
+  { "q": "Show notes about biology", "inventory": false },
+  { "q": "What notes do I have about biology?", "inventory": false }
+]

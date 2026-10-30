@@ -1,0 +1,13 @@
+{
+  "_comment": "Single source for library-inventory intent. scripts/generate.mjs writes app/00-intent-patterns.js and backend/app/intent_patterns.py. Edit here, then run: node scripts/generate.mjs",
+  "topicWords": "about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains",
+  "inventory": [
+    "\\bwhat(?:'s|\\s+is)\\s+in\\s+(?:my|the)\\s+(?:note\\s+)?library\\b",
+    "\\b(?:show|list|display)\\s+(?:me\\s+)?(?:all\\s+)?(?:my\\s+)?notes\\b(?!\\s+(?:TOPIC)\\b)",
+    "\\bwhat\\s+notes\\s+do\\s+i\\s+have\\b(?!\\s+(?:TOPIC)\\b)",
+    "\\bhow\\s+many\\s+(?:notes|files)\\b(?![^?.!]*\\b(?:TOPIC)\\b)",
+    "\\b(?:overview|summary)\\s+of\\s+(?:my\\s+)?(?:notes|library|collection)\\b",
+    "\\bwhat\\s+subjects\\s+have\\s+i\\s+covered\\b",
+    "\\bwhat(?:'s|\\s+is)\\s+in\\s+my\\s+collection\\b"
+  ]
+}

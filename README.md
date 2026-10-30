@@ -463,3 +463,19 @@ Firebase Hosting serves the static site; it does not run the FastAPI application
 ## License
 
 See [LICENSE](LICENSE).
+
+## Development checks
+
+Some files are generated. Never edit them by hand; change the source and regenerate:
+
+- `shared/intent-patterns.json` (library-inventory intent) generates `app/00-intent-patterns.js` and `backend/app/intent_patterns.py`.
+- `sw.js` `CACHE` and `SHELL` are derived from `index.html`, the dynamically loaded app modules, and the shell asset contents, so the cache name changes automatically whenever a shell file changes.
+
+```bash
+node scripts/generate.mjs            # regenerate
+node scripts/generate.mjs --check    # fail if anything is stale (what CI runs)
+node --test scripts/intent-parity.test.mjs
+cd backend && python -m pytest -q
+```
+
+Shared intent test cases live in `shared/intent-cases.json` and run against both the browser and Python patterns. CI (`.github/workflows/ci.yml`) runs all of these, and the deploy workflow will not publish the frontend unless they pass.
