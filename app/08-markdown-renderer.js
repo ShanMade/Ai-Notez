@@ -165,9 +165,9 @@
     const bullet = '(?:[-*\u2022\u2013]\\s+)?';
     // A recording is numbered one way throughout: if any part says "spk0" the
     // labels count from zero, otherwise Gemini's "spk_1" already starts at one.
-    const zeroBased = new RegExp(`(?:^|\\n)\\s*${bullet}(?:\\[[\\d:]{3,12}\\]\\s*)?\\**\\s*spk[\\s_-]*0\\s*\\**\\s*[:\\uFF1A]`, 'i')
+    const zeroBased = new RegExp(`(?:^|\\n)\\s*${bullet}(?:\\[[\\d:]{3,12}\\]\\s*)?\\**\\s*spk[\\s_:-]*0\\s*\\**\\s*[:\\uFF1A]`, 'i')
       .test(source.replace(REC_INVISIBLE, ''));
-    const numbered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(spk|voice|speaker|person)[\\s_-]*([0-9\\u0660-\\u0669]{1,2})\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
+    const numbered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(spk|voice|speaker|person)[\\s_:-]*([0-9\\u0660-\\u0669]{1,2})\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
     const lettered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(?:speaker|person|voice)\\s*([A-Za-z])\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
     return source.split('\n').map(raw => {
       const lead = (raw.match(recInvisibleLead) || [''])[0];
