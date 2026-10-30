@@ -465,9 +465,9 @@ async function openWikiLink(title) {
       // says spk0, spk1, spk2. `recSpkZero` is set from the whole transcript, so
       // one recording is numbered one way and the first voice always reads
       // "Voice 1". A label is never shown raw.
-      const spk = /^spk[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      const spk = /^spk[\s_:-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
       if (spk) return `Voice ${Math.max(1, Number(recDigits(spk[1])) + (recSpkZero ? 1 : 0))}`;
-      const numbered = /^(?:voice|speaker|person)[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      const numbered = /^(?:voice|speaker|person)[\s_:-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
       if (numbered) return `Voice ${Math.max(1, Number(recDigits(numbered[1])))}`;
       const letter = /^(?:speaker|person)\s*([A-Za-z])$/i.exec(raw);
       if (letter) return `Voice ${letter[1].toUpperCase().charCodeAt(0) - 64}`;
@@ -476,7 +476,7 @@ async function openWikiLink(title) {
     let recSpkZero = false;   // true while the current transcript labels its voices from 0
     // A saved note carries no live state, so its numbering is worked out from its
     // own words: one recording numbered from zero, the next from one.
-    const recSpkZeroIn = text => /(?:^|\n)\s*(?:[-*•]\s+)?(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(recUnmark(String(text || '')));
+    const recSpkZeroIn = text => /(?:^|\n)\s*(?:[-*•]\s+)?(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_:-]*0\s*\**\s*[:\uFF1A]/i.test(recUnmark(String(text || '')));
     const recWithSpkZero = (zero, run) => { const previous = recSpkZero; recSpkZero = zero; try { return run(); } finally { recSpkZero = previous; } };
     // A model writing Urdu or Hebrew often puts an invisible direction mark
     // (U+200F, U+200E …) in front of a line: "\u200Fspk0: …". The mark is not
@@ -492,7 +492,7 @@ async function openWikiLink(title) {
     const recLeadMark = line => (String(line ?? '').match(REC_BIDI_HEAD) || [''])[0];
     // A model writing notes often puts a turn in a list item ("- Voice 1: …"),
     // so a bullet is allowed in front of the label and kept.
-    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
+    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
       const match = String(recUnmark(line)).match(REC_LABEL_RE);
       if (!match) return null;
@@ -707,12 +707,12 @@ Output only the transcript.`;
     // Rewrites a leading speaker label to its canonical "Voice n" spelling, so a
     // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
     // label in the note. A real name ("Ayesha:") is left exactly as written.
-    const REC_LABEL_HEAD = /^(\s*(?:[-*•–]\s+)?(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+    const REC_LABEL_HEAD = /^(\s*(?:[-*•–]\s+)?(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
     // Nothing above can be trusted to catch every model quirk forever, so the
     // raw provider spelling is also swept out of whatever is about to be shown.
     // This is the guarantee: no surface ever prints "spk0:".
     const recScrubSpk = line => String(line ?? '').replace(
-      /(^|[^\p{L}\p{N}])(?:spk)[\s_-]*([0-9\u0660-\u0669]{1,2})(?![0-9\u0660-\u0669])/giu,
+      /(^|[^\p{L}\p{N}])(?:spk)[\s_:-]*([0-9\u0660-\u0669]{1,2})(?![0-9\u0660-\u0669])/giu,
       (all, lead, digits) => `${lead}Voice ${Math.max(1, Number(recDigits(digits)) + (recSpkZero ? 1 : 0))}`
     );
     function recNormalizeLabels(text) {
@@ -727,7 +727,7 @@ Output only the transcript.`;
     function recCleanPart(raw) {
       const lines = String(raw || '').split('\n').filter(line => line.trim());
       const kept = lines.filter(line => {
-        const words = recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
+        const words = recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
         return words.length > 0;
       });
       return kept.join('\n').trim();

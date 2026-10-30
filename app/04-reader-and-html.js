@@ -680,10 +680,10 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // Gemini labels speakers `spk_1`, `spk_2` … and a transcript has to read
       // "Voice 1", "Voice 2". A transcript that numbers from zero (spk_0, spk_1)
       // is shifted, so one reply never collapses two voices into one label.
-      const zeroBased = parts.some(part => /^spk[\s_-]*0$/i.test(String(part?.audioTranscription?.speakerLabel || '').trim()));
+      const zeroBased = parts.some(part => /^spk[\s_:-]*0$/i.test(String(part?.audioTranscription?.speakerLabel || '').trim()));
       const voiceLabel = raw => {
         const text = String(raw || '').trim();
-        const numbered = /^(spk|speaker|voice|person)[\s_-]*(\d{1,2})$/i.exec(text);
+        const numbered = /^(spk|speaker|voice|person)[\s_:-]*(\d{1,2})$/i.exec(text);
         if (!numbered) return text;
         const shift = zeroBased && /^spk$/i.test(numbered[1]) ? 1 : 0;
         return `Voice ${Math.max(1, Number(numbered[2]) + shift)}`;
