@@ -1650,7 +1650,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzai.editAt = null;
       if (!aiReady()) { nzai.busy = false; nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
       const note = forcedNote || (nzai.scope === 'note' ? nzaiScopeNote() : null);
-      const wantsInventory = /(?:what(?:'s|\s+is)\s+in\s+(?:my|the)\s+(?:note\s+)?library|(?:show|list|display)\s+(?:me\s+)?(?:all\s+)?(?:my\s+)?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|what\s+notes\s+do\s+i\s+have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)|how\s+many\s+(?:notes|files)\b(?![^?.!]*\b(?:about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains)\b)|(?:overview|summary)\s+of\s+(?:my\s+)?(?:notes|library|collection)|what\s+subjects\s+have\s+i\s+covered|what(?:'s|\s+is)\s+in\s+my\s+collection)/i.test(question);
+      const wantsInventory = (window.NZ_INTENT?.inventory || []).some(pattern => pattern.test(question));
       const chatBefore = nzaiChat();
       let sources = [], context = '', found = [], retrievalMetadata = null;
 

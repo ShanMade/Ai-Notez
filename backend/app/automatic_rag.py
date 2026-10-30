@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from .config import EMBEDDING, settings
+from .intent_patterns import INVENTORY_PATTERNS
 from .vector_store import (
     content_terms,
     has_indexable_content,
@@ -19,15 +20,6 @@ from .vector_store import (
 
 logger = logging.getLogger(__name__)
 NOTE_ID = re.compile(r"^[A-Za-z0-9_-]{1,160}$")
-INVENTORY_PATTERNS = (
-    r"\bwhat(?:'s| is) in (?:my|the) (?:note )?library\b",
-    r"\b(?:show|list|display) (?:me )?(?:all )?(?:my )?notes\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)",
-    r"\bwhat notes do i have\b(?!\s+(?:about|on|for|related|containing|with|that|which|where)\b)",
-    r"\bhow many (?:notes|files)\b(?![^?.!]*\b(?:about|on|for|related|containing|with|that|which|where|mention|mentions|cover|covers|discuss|discusses|explain|explains)\b)",
-    r"\b(?:give me )?(?:an? )?(?:overview|summary) of (?:my )?(?:notes|library|collection)\b",
-    r"\bwhat subjects have i covered\b",
-    r"\bwhat(?:'s| is) in my collection\b",
-)
 INVENTORY_LIMIT = 50
 
 
