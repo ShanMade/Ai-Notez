@@ -1575,6 +1575,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       body.innerHTML = `<div class="hist-list">${rows}</div>`;
     }
 
+    // The app version shown in NotezAi settings. Bump it with each release.
+    const NOTEZ_VERSION = '1.9.0';
     function nzaiRenderSettings(body) {
       const managedAvailable = aiBackendConfigured();
       const byok = !managedAvailable || aiSourcePref() === 'byok';
@@ -1596,6 +1598,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
         ${byok ? `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>` : ''}
         <p class="nzai-small">Chat, note tools and Voice-to-Note all use the source chosen above.</p>
+        <p class="nzai-small" id="nzai-version">NotezAi version ${esc(NOTEZ_VERSION)}</p>
         <button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div>`;
     }
     function nzaiTranscript(chat) {
