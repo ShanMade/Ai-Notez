@@ -128,3 +128,66 @@ html[data-theme] #nz-ai .nzai-sheet-grp { text-transform: none; letter-spacing: 
 #login-screen:not(.hidden) ~ #nz-ai,
 #login-screen:not(.hidden) ~ #focus-fab,
 #login-screen:not(.hidden) ~ #focus-panel { display: none !important; }
+
+/* ---- Chat panel redesign (reference layout). Colours come from the app tokens, so light and dark
+   themes and the accent setting all apply. Later rules win over the compact set above. ---- */
+
+/* Header: logo, title and subtitle on the left; New chat, voice and more on the right; close last */
+html[data-theme] #nz-ai .dock-chrome { min-height: 58px; padding: 10px 12px; gap: 8px; }
+html[data-theme] #nz-ai .dock-title { gap: 10px; min-width: 0; }
+html[data-theme] #nz-ai .dock-title-tx small { display: block; margin-top: 1px; font: 400 12px/1.3 Inter, system-ui, sans-serif; color: var(--muted); }
+html[data-theme] #nz-ai .dock-title-mark { background: var(--nzc-tint); color: var(--nzc-acc); }
+html[data-theme] #nz-ai .dock-lead { order: 3; }
+html[data-theme] #nz-ai .dock-actions { order: 2; margin-left: auto; flex: 0 0 auto; }
+html[data-theme] #nz-ai .nzai-newpill { flex: 0 0 auto; width: auto !important; height: 32px; min-width: 0 !important; white-space: nowrap; padding: 0 12px 0 10px; gap: 6px; border: 1px solid var(--nzc-line); border-radius: 999px; background: var(--panel) !important; color: var(--ink) !important; font: 550 13px/1 Inter, system-ui, sans-serif; }
+html[data-theme] #nz-ai .nzai-newpill:hover { background: var(--panel-raised) !important; }
+
+/* Tabs: Chat, Voice, Settings */
+html[data-theme] #nz-ai .nzai-tabs { display: flex; gap: 2px; margin: 10px 12px 0; padding: 3px; border-radius: 12px; background: var(--nzc-soft); }
+html[data-theme] #nz-ai .nzai-tab { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 0 8px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: 550 12.5px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+html[data-theme] #nz-ai .nzai-tab:hover { color: var(--ink); }
+html[data-theme] #nz-ai .nzai-tab.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+html[data-theme] #nz-ai .nzai-tab svg { flex: none; }
+
+/* Answer scope */
+html[data-theme] #nz-ai .ai-ctx-chip { display: flex; align-items: center; gap: 8px; min-height: 34px; margin: 10px 12px 0; padding: 0 12px; border: 1px solid var(--nzc-line); border-radius: 10px; background: var(--panel); color: var(--muted); font-size: 12.5px; }
+html[data-theme] #nz-ai .ai-ctx-chip::before { content: 'Answer scope'; flex: none; }
+html[data-theme] #nz-ai .ai-ctx-chip .ai-ctx-ic, html[data-theme] #nz-ai .ai-ctx-pill { display: none; }
+html[data-theme] #nz-ai .ai-ctx-name { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; }
+html[data-theme] #nz-ai .ai-ctx-name::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--nzc-acc); }
+html[data-theme] #nz-ai .ai-ctx-chip::after { content: ''; flex: none; width: 6px; height: 6px; margin: 0 2px 2px 2px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); }
+
+/* Welcome: greeting, quick action grid, recent chats */
+html[data-theme] #nz-ai .ai-welcome { padding: 22px 12px 12px; }
+html[data-theme] #nz-ai .ai-welcome-head h3 { font: 650 22px/1.2 Inter, system-ui, sans-serif; letter-spacing: -.02em; color: var(--ink); }
+html[data-theme] #nz-ai .ai-wave { font-style: normal; }
+html[data-theme] #nz-ai .ai-welcome-sub { margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+html[data-theme] #nz-ai .ai-stats { margin-top: 8px; }
+html[data-theme] #nz-ai .ai-suggest { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+html[data-theme] #nz-ai .ai-card { flex-direction: column; align-items: flex-start; gap: 10px; min-height: 0; padding: 12px; border: 1px solid var(--nzc-line); border-radius: 14px; background: var(--panel-raised); }
+html[data-theme] #nz-ai .ai-card-ic { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 9px; background: color-mix(in srgb, var(--nzc-ic, var(--nzc-acc)) 14%, transparent); color: var(--nzc-ic, var(--nzc-acc)); }
+html[data-theme] #nz-ai .ai-card-tx { gap: 2px; }
+html[data-theme] #nz-ai .ai-card-tx b { font: 600 13px/1.25 Inter, system-ui, sans-serif; }
+html[data-theme] #nz-ai .ai-card-tx small { font-size: 11.5px; line-height: 1.35; }
+html[data-theme] #nz-ai .ai-card-go { display: none; }
+html[data-theme] #nz-ai .ai-card[data-key="summarize"], html[data-theme] #nz-ai .ai-card[data-key="plan"] { --nzc-ic: #3B82F6; }
+html[data-theme] #nz-ai .ai-card[data-key="keypoints"], html[data-theme] #nz-ai .ai-card[data-key="ask"] { --nzc-ic: #16A34A; }
+html[data-theme] #nz-ai .ai-card[data-key="mcq"], html[data-theme] #nz-ai .ai-card[data-key="due"] { --nzc-ic: #F97316; }
+html[data-theme] #nz-ai .ai-card[data-key="quiz"], html[data-theme] #nz-ai .ai-card[data-key="explain"], html[data-theme] #nz-ai .ai-card[data-key="record"] { --nzc-ic: #8B5CF6; }
+html[data-theme] #nz-ai .ai-recent { margin-top: 20px; }
+html[data-theme] #nz-ai .ai-recent-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; font: 600 13px/1.2 Inter, system-ui, sans-serif; color: var(--ink); }
+html[data-theme] #nz-ai .ai-recent-all { padding: 4px 2px; border: 0; background: none; color: var(--nzc-acc); font: 550 12px/1 Inter, system-ui, sans-serif; cursor: pointer; }
+html[data-theme] #nz-ai .ai-recent-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 4px; border: 0; border-top: 1px solid var(--nzc-line); background: none; color: var(--ink); text-align: left; cursor: pointer; }
+html[data-theme] #nz-ai .ai-recent-row:hover { background: var(--nzc-soft); }
+html[data-theme] #nz-ai .ai-recent-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+html[data-theme] #nz-ai .ai-recent-tx b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 550 13px/1.3 Inter, system-ui, sans-serif; }
+html[data-theme] #nz-ai .ai-recent-tx small { font-size: 11.5px; color: var(--muted); }
+html[data-theme] #nz-ai .ai-recent-go { display: inline-flex; color: var(--muted); }
+html[data-theme] #nz-ai .ai-hint { margin-top: 14px; }
+
+/* Messages: a soft tint for the user, plain text for the assistant */
+html[data-theme] #nz-ai .ai-bubble-user { background: var(--nzc-tint) !important; color: var(--ink) !important; border-radius: 16px 16px 4px 16px; padding: 9px 13px; }
+
+/* Composer: one rounded field, quiet tools, accent send button */
+html[data-theme] #nz-ai .ai-composer { border-radius: 16px !important; padding: 8px 8px 8px 12px; }
+html[data-theme] #nz-ai .ai-send { border-radius: 50% !important; }
