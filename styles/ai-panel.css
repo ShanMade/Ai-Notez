@@ -1,0 +1,121 @@
+/* NotezAi panel, design "Margin". Scoped to html[data-theme] #nz-ai so nothing else in the app changes.
+   Restyle only: no markup or behaviour is touched. Works in light and dark and with every accent. */
+#nz-ai {
+  --nzp-hl: #FFE45C;
+  --nzp-acc: var(--nz-accent, #0F766E);
+  --nzp-on-acc: #fff;
+  --nzp-f-display: "Bricolage Grotesque", Inter, ui-sans-serif, system-ui, sans-serif;
+  --nzp-f-read: "Newsreader", Georgia, "Times New Roman", serif;
+}
+html[data-theme="dark"] #nz-ai { --nzp-on-acc: #0E1530; }
+html[data-theme] #nz-ai { border-left: 1.5px solid var(--ink); background: var(--panel); }
+html[data-theme] #nz-ai :focus-visible { outline: 3px solid var(--nzp-hl) !important; outline-offset: 2px; }
+
+/* ---- Header ---- */
+html[data-theme] #nz-ai .dock-chrome { padding: 12px 12px 8px 14px; gap: 4px; }
+html[data-theme] #nz-ai .dock-title-tx b { font: 800 22px var(--nzp-f-display); letter-spacing: -.03em; }
+html[data-theme] #nz-ai .dock-title-tx small { display: none; }
+html[data-theme] #nz-ai .dock-title-mark { background: var(--nzp-hl) !important; color: #0E1530 !important; border-radius: 12px 12px 12px 4px; box-shadow: none; }
+html[data-theme] #nz-ai .nzai-btn { min-width: 44px; min-height: 44px; border-radius: 50%; }
+html[data-theme] #nz-ai .nzai-btn:hover { background: var(--panel-raised); }
+html[data-theme] #nz-ai .nzai-new { background: var(--ink) !important; color: var(--panel) !important; }
+
+/* ---- Scope chip: a bold pill with the swap target as a badge ---- */
+html[data-theme] #nz-ai .ai-ctx-chip {
+  margin: 4px 14px 6px; min-height: 44px; border: 1.5px solid var(--ink); border-radius: 99px; background: var(--panel-raised);
+  padding: 0 6px 0 14px; font-weight: 700; color: var(--ink);
+}
+html[data-theme] #nz-ai .ai-ctx-pill { background: var(--nzp-acc) !important; color: var(--nzp-on-acc) !important; border-radius: 99px; padding: 6px 12px; font-size: 12px; font-weight: 700; }
+html[data-theme] #nz-ai .ai-ctx-chip.is-static .ai-ctx-pill { opacity: .55; }
+
+/* ---- Welcome (empty state) ---- */
+html[data-theme] #nz-ai .ai-orb { background: var(--nzp-hl) !important; color: #0E1530 !important; border-radius: 16px 16px 16px 5px; box-shadow: none; }
+html[data-theme] #nz-ai .ai-welcome-kicker { text-transform: none; letter-spacing: 0; font: 600 14px Inter, system-ui, sans-serif; color: var(--muted); }
+html[data-theme] #nz-ai .ai-welcome-kicker::before, html[data-theme] #nz-ai .ai-welcome-head::before { display: none; }
+html[data-theme] #nz-ai .ai-welcome-head h3 {
+  font-family: var(--nzp-f-display); font-weight: 800; letter-spacing: -.035em; line-height: 1.04; font-size: clamp(30px, 6vw, 40px);
+}
+html[data-theme] #nz-ai .ai-welcome-head h3 em, html[data-theme] #nz-ai .ai-welcome mark {
+  font-style: normal; color: inherit; background: linear-gradient(transparent 58%, var(--nzp-hl) 58%, var(--nzp-hl) 92%, transparent 92%); padding: 0 .1em;
+}
+html[data-theme="dark"] #nz-ai .ai-welcome-head h3 em, html[data-theme="dark"] #nz-ai .ai-welcome mark { background: var(--nzp-hl); color: #0E1530; border-radius: 4px; padding: 0 .25em; }
+html[data-theme] #nz-ai .ai-stat { background: none; border: 0; padding: 0; color: var(--muted); }
+html[data-theme] #nz-ai .ai-suggest { display: flex; flex-direction: column; gap: 0; }
+html[data-theme] #nz-ai .ai-card {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; min-height: 68px; padding: 14px 4px; text-align: left; border-radius: 0 !important;
+  border: 0 !important; border-top: 1.5px solid var(--line-strong) !important; background: none !important; box-shadow: none !important;
+}
+html[data-theme] #nz-ai .ai-card:last-child { border-bottom: 1.5px solid var(--line-strong) !important; }
+html[data-theme] #nz-ai .ai-card:hover { background: var(--panel-raised) !important; }
+html[data-theme] #nz-ai .ai-card-ic { display: none; }
+html[data-theme] #nz-ai .ai-card-tx b, html[data-theme] #nz-ai .ai-card-tx strong { font: 700 18px var(--nzp-f-display); letter-spacing: -.02em; }
+html[data-theme] #nz-ai .ai-card-go { color: var(--nzp-acc); }
+
+/* ---- Messages ---- */
+html[data-theme] #nz-ai .ai-msg.user { display: block; margin: 18px 0 12px; text-align: left; align-self: flex-start; max-width: 100%; }
+html[data-theme] #nz-ai .ai-composer textarea:focus-visible { outline: none !important; }
+html[data-theme] #nz-ai .ai-bubble-user {
+  background: none !important; color: var(--ink) !important; border: 0 !important; padding: 0 !important; border-radius: 0 !important; max-width: none; box-shadow: none;
+  font: 800 1.45em/1.2 var(--nzp-f-display); letter-spacing: -.03em;
+  background: linear-gradient(transparent 62%, var(--nzp-hl) 62%, var(--nzp-hl) 94%, transparent 94%) !important; display: inline;
+}
+html[data-theme="dark"] #nz-ai .ai-bubble-user { background: var(--nzp-hl) !important; color: #0E1530 !important; padding: 2px 8px !important; border-radius: 6px !important; }
+html[data-theme] #nz-ai .ai-user-tools { margin-top: 6px; opacity: .8; }
+html[data-theme] #nz-ai .ai-msg.ai { display: block; }
+html[data-theme] #nz-ai .ai-msg.ai .ai-avatar { display: none; }
+html[data-theme] #nz-ai .ai-md { font-family: var(--nzp-f-read); font-size: 1.22em; line-height: 1.7; color: var(--ink); }
+html[data-theme] #nz-ai .ai-md p { margin: 0 0 .8em; }
+html[data-theme] #nz-ai .ai-md li { margin-bottom: .45em; }
+html[data-theme] #nz-ai .ai-md blockquote { margin: 1em 0; padding: 2px 0 2px 16px; border-left: 5px solid var(--nzp-acc); font-style: italic; background: none; }
+html[data-theme] #nz-ai .ai-md code, html[data-theme] #nz-ai .ai-md pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .85em; }
+html[data-theme] #nz-ai .ai-think { color: var(--muted); font-family: var(--nzp-f-read); font-style: italic; font-size: 1.1em; }
+html[data-theme] #nz-ai .ai-think-dots i { background: var(--ink); }
+html[data-theme] #nz-ai .ai-msg.error .ai-md { border: 1.5px solid #D93036; background: rgba(217, 48, 54, .06); border-radius: 18px; padding: 14px 16px; font-family: inherit; font-size: 1em; }
+
+/* ---- Sources as numbered footnotes ---- */
+html[data-theme] #nz-ai .ai-sources { margin-top: 18px; border-top: 1.5px solid var(--ink); padding-top: 10px; background: none; border-left: 0; border-right: 0; border-bottom: 0; border-radius: 0; }
+html[data-theme] #nz-ai .ai-sources .ai-sources-title { font: 700 14px Inter, system-ui, sans-serif; text-transform: none; letter-spacing: 0; color: var(--muted); }
+html[data-theme] #nz-ai .ai-src-grid { display: flex; flex-direction: column; gap: 2px; }
+html[data-theme] #nz-ai .ai-src { display: grid; grid-template-columns: 30px 1fr; align-items: center; min-height: 48px; border: 0; background: none; border-radius: 12px; text-align: left; padding: 6px 8px 6px 4px; }
+html[data-theme] #nz-ai .ai-src:hover { background: var(--panel-raised); }
+html[data-theme] #nz-ai .ai-src-n { width: 24px; height: 24px; border-radius: 50%; background: var(--nzp-hl); color: #0E1530; display: grid; place-items: center; font-weight: 800; font-size: 12px; }
+
+/* ---- Quick chips and composer ---- */
+html[data-theme] #nz-ai .ai-qchip { min-height: 38px; border-radius: 99px; border: 1.5px solid var(--line-strong); background: var(--panel); font-weight: 600; }
+html[data-theme] #nz-ai .ai-qchip:hover { border-color: var(--ink); }
+html[data-theme] #nz-ai .ai-composer { border: 1.5px solid var(--ink) !important; border-radius: 26px !important; background: var(--panel-raised) !important; box-shadow: none; transition: box-shadow .15s; }
+html[data-theme] #nz-ai .ai-composer:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--nzp-acc) 30%, transparent) !important; }
+html[data-theme] #nz-ai .ai-send { background: var(--nzp-acc) !important; color: var(--nzp-on-acc) !important; border-radius: 24px; min-width: 48px; min-height: 48px; }
+html[data-theme] #nz-ai .ai-send.is-stop, html[data-theme] #nz-ai .ai-send[data-nzai="stop"] { background: #D93036 !important; color: #fff !important; }
+html[data-theme] #nz-ai .ai-ibtn { min-width: 44px; min-height: 44px; border-radius: 50%; }
+html[data-theme] #nz-ai .ai-slash { border: 1.5px solid var(--ink); border-radius: 20px; box-shadow: 0 18px 40px rgba(14, 21, 48, .25); }
+html[data-theme] #nz-ai .ai-foot { color: var(--muted); }
+
+/* ---- Menus and sheet ---- */
+html[data-theme] #nz-ai .nzai-sheet { border: 1.5px solid var(--ink); border-radius: 22px; box-shadow: 0 24px 60px rgba(14, 21, 48, .3); }
+html[data-theme] #nz-ai .nzai-sheet-row { min-height: 52px; border-radius: 14px; }
+html[data-theme] #nz-ai .nzai-sheet-grp { text-transform: none; letter-spacing: 0; font-weight: 700; }
+
+/* ---- Tablet: slide-over with a rounded edge ---- */
+@media (min-width: 761px) and (max-width: 1023px) {
+  html[data-theme] #nz-ai { width: min(500px, 100vw); border-radius: 30px 0 0 30px; box-shadow: -24px 0 50px rgba(14, 21, 48, .25); }
+}
+/* ---- Phone: full screen, bigger targets ---- */
+@media (max-width: 760px) {
+  html[data-theme] #nz-ai { width: 100vw !important; border-left: 0; border-radius: 0; }
+  html[data-theme] #nz-ai .dock-chrome { padding-top: max(12px, env(safe-area-inset-top)); }
+  html[data-theme] #nz-ai .ai-composer-wrap { padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+  html[data-theme] #nz-ai .nzai-sheet { border-width: 1.5px 0 0; border-radius: 28px 28px 0 0; }
+  html[data-theme] #nz-ai .nzai-sheet-row { min-height: 56px; }
+}
+@media (prefers-reduced-motion: reduce) { html[data-theme] #nz-ai .ai-composer { transition: none; } }
+
+/* Heading highlight: always readable, on one or two lines */
+html[data-theme] #nz-ai .ai-welcome-head h3 em { display: inline !important; color: inherit !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+html[data-theme="dark"] #nz-ai .ai-welcome-head h3 em { color: #0E1530 !important; }
+html[data-theme] #nz-ai .ai-welcome-head h3 em { -webkit-text-fill-color: currentColor !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; }
+html[data-theme] #nz-ai .ai-welcome-head h3 em { background-image: linear-gradient(transparent 58%, var(--nzp-hl) 58%, var(--nzp-hl) 92%, transparent 92%) !important; background-color: transparent !important; }
+html[data-theme="dark"] #nz-ai .ai-welcome-head h3 em { background-image: none !important; background-color: var(--nzp-hl) !important; border-radius: 4px; padding: 0 .25em; }
+@media (max-width: 760px) {
+  html[data-theme] #nz-ai .nzai-sheet:not([hidden]) { position: absolute !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; width: auto !important; max-height: 82% !important; overflow: auto; padding-bottom: max(22px, env(safe-area-inset-bottom)); }
+}
