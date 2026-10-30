@@ -1008,14 +1008,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // The phone layout keeps three controls in the bar and moves the rest into a
     // sheet that rises from the bottom edge, where a thumb already is. Nothing is
     // removed on a phone: every action is one tap away, the same handlers run.
-    // Recent chats and recent voice notes, listed in the More menu so both can be reopened in one tap.
+    // Recent voice notes, listed in the More menu so they can be reopened in one tap.
     function nzaiSheetRecent() {
       const box = $('#nzai-sheet-recent'); if (!box) return;
-      const chats = nzaiReadChats().slice(0, 3);
       const voices = (typeof recSessionList === 'function' ? recSessionList() : []).slice(0, 3);
-      const chatHtml = chats.length ? `<p class="nzai-sheet-grp">Recent chats</p><div class="nzai-sheet-rows">${chats.map(chat => `<button type="button" class="nzai-sheet-row" data-nzai="open-chat" data-id="${esc(chat.id)}"><span class="ic" aria-hidden="true">${nzaiSolidIcon('history')}</span><b>${esc(chat.title)}</b><small>${esc(chat.scope === 'note' ? 'This note' : 'My library')} · ${esc(nzaiDayLabel(chat.updatedAt || Date.now()))}</small></button>`).join('')}<button type="button" class="nzai-sheet-row" data-nzai="history" data-nav="history"><span class="ic" aria-hidden="true">${nzaiSolidIcon('history')}</span><b>View all chats</b><small>Saved chats on this device</small></button></div>` : '';
       const voiceHtml = voices.length ? `<p class="nzai-sheet-grp">Recent voice notes</p><div class="nzai-sheet-rows">${voices.map(item => `<button type="button" class="nzai-sheet-row" data-nzai="open-voice" data-id="${esc(item.note.id)}"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>${esc(item.title)}</b><small>${esc([item.day, item.time].filter(Boolean).join(' · '))}</small></button>`).join('')}<button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>View all voice notes</b><small>Record and transcribe</small></button></div>` : '';
-      box.innerHTML = chatHtml + voiceHtml;
+      box.innerHTML = voiceHtml;
     }
     function nzaiSheet(open) {
       const panel = $('#nz-ai'); if (!panel) return;
@@ -1411,36 +1409,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         `<button type="button" class="ai-card" data-nzai="suggest" data-key="${cmd.id}" ${disabled} aria-label="${esc(cmd.label)}" title="${esc(cmd.label)} · ${esc(cmd.hint)}">` +
         `<span class="ai-card-ic" aria-hidden="true">${nzaiIcon(cmd.icon, 17)}</span>` +
         `<span class="ai-card-tx"><b>${esc(cmd.label)}</b><small>${esc(cmd.hint)}</small></span>${cardGo}</button>`).join('');
-      // What this chat can read, counted from the real data it will send — no
-      // decorative numbers. A note reports its own size, the library its shelf.
-      const statBits = (inNote
-        ? (() => {
-            const words = String(note.body || '').trim().split(/\s+/).filter(Boolean).length;
-            const bits = words ? [`<b>${words.toLocaleString('en-US')}</b> words`] : [];
-            if (words > 60) bits.push(`<b>${Math.max(1, Math.round(words / 200))}</b> min read`);
-            const kind = String(note.fileName || '').split('.').pop().toUpperCase();
-            if (note.folderPath) bits.push(esc(note.folderPath));
-            else if (kind && kind.length <= 5) bits.push(kind);
-            return bits.length ? bits : ['Ready to read'];
-          })()
-        : (() => {
-            const folders = new Set(notes.map(item => item.folderPath).filter(Boolean)).size;
-            const bits = [`<b>${notes.length.toLocaleString('en-US')}</b> note${notes.length === 1 ? '' : 's'}`];
-            if (folders) bits.push(`<b>${folders}</b> folder${folders === 1 ? '' : 's'}`);
-            if (aiBackendSession()) bits.push('indexed');
-            return bits;
-          })()).map(bit => `<span class="ai-stat">${bit}</span>`).join('');
-      const welcomeHour = new Date().getHours();
-      const welcomeHello = welcomeHour < 12 ? 'Good morning' : welcomeHour < 18 ? 'Good afternoon' : 'Good evening';
-      const welcomeName = String(currentSession?.user?.displayName || '').trim().split(/\s+/)[0] || '';
       const welcome = `<div class="ai-welcome">` +
         `<div class="ai-welcome-head">` +
-          `<h3>${welcomeHello}${welcomeName ? `, ${esc(welcomeName)}` : ''}</h3>` +
-          `<p class="ai-welcome-sub">${inNote ? `Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.` : 'Ask me anything about your notes, or choose a quick action below.'}</p>` +
-          (statBits ? `<div class="ai-stats">${statBits}</div>` : '') +
+          `<h3>NotezAi</h3>` +
+          (inNote ? `<p class="ai-welcome-sub">Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.</p>` : '') +
         `</div>` +
         `<div class="ai-suggest">${suggestCards}</div>` +
-        `<p class="ai-hint"><span class="ai-hint-key">/</span> every command<span class="ai-hint-dot" aria-hidden="true">·</span><span class="ai-hint-key">⌘K</span> jump to a note</p>` +
       `</div>`;
       let thread = '';
       if (!messages.length) thread = welcome;
