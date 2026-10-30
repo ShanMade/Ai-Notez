@@ -68,11 +68,23 @@ class Settings:
         ).split(",") if item.strip()
     )
     gemini_key: str = os.getenv("AI_GEMINI_API_KEY", "")
+    # Voice-to-Note audio goes to these chat models, in order. The browser moves a
+    # part to the next one when the first is out of quota, so each request here is
+    # one model.
+    gemini_audio_models: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "AI_GEMINI_AUDIO_MODELS",
+            "gemini-3.1-flash-lite,gemini-3.5-flash-lite",
+        ).split(",") if item.strip()
+    )
+
     @property
     def gemini_transcribe_models(self) -> tuple[str, ...]:
         """Every Gemini model Voice-to-Note may use, in order."""
         return tuple(dict.fromkeys(
-            item for item in (self.gemini_transcribe_model, *self.gemini_transcribe_fallbacks) if item
+            item for item in (
+                self.gemini_transcribe_model, *self.gemini_transcribe_fallbacks, *self.gemini_audio_models,
+            ) if item
         ))
 
     groq_key: str = os.getenv("AI_GROQ_API_KEY", "")

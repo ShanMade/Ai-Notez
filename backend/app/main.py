@@ -248,9 +248,11 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
             # the cheaper chat models behind it. Quotas are counted per model, so
             # a model that is exhausted for the day only costs one 429 before the
             # next one takes over.
-            # TEMPORARY: the transcribe model is the only one used for audio. The
-            # chat models are not walked, and a requested model is ignored.
-            models = list(dict.fromkeys([settings.gemini_transcribe_model, *settings.gemini_transcribe_fallbacks]))
+            # One model per request: the browser moves a part to the next audio
+            # model when the first is out of quota, so a part is never lost here.
+            if explicit and explicit not in settings.gemini_audio_models:
+                raise HTTPException(status_code=422, detail="The requested model is not enabled for audio.")
+            models = [explicit or settings.gemini_audio_models[0]]
         else:
             models = [explicit or MODEL_DEFAULTS[provider][0]]
         for model_index, model in enumerate(models):

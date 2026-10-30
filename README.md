@@ -10,7 +10,7 @@ AI-Notez is a browser-based note-taking Progressive Web App (PWA) with Firebase-
 - Create and organize notes in a focused web workspace.
 - Sign in through Firebase Authentication and sync user data with Firebase Realtime Database.
 - Use AI generation through configured Gemini and Groq providers; Mistral support can be enabled in backend configuration.
-- Record a lecture and watch it become notes: one-minute parts by default, each transcribed as it is recorded, with the tail of the previous part carried into the next one so a sentence cut by the boundary survives, and repeated words removed instead of duplicated. The part length is a setting (20/30/45/60 s); longer parts spend far fewer requests for the same audio.
+- Record a lecture or meeting and watch it become notes: parts of up to 40 seconds (default 40 s; 20 / 30 / 40 s are the choices), each transcribed as it is recorded with the setting you picked (classroom or meeting) and the tail of the previous part carried into the next. Notes are written once the speakers are labelled.
 - Teach a voice once — record a name's owner for eight seconds — and every later transcript labels that person by name instead of "Voice 2".
 - Semantic search over your notes through a per-user vector index (USearch HNSW, cosine similarity), fused with keyword matching so exact terms and identifiers still hit.
 - RAG answers: the assistant quotes only notes above a confidence threshold, cites them as openable sources, and says so instead of inventing an answer when nothing matches.
@@ -214,8 +214,8 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `AI_EMBEDDING_API_KEY`, `AI_EMBEDDING_PROVIDER`, `AI_EMBEDDING_MODEL`, `AI_EMBEDDING_DIMENSIONS` | Embedding provider and vector configuration |
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
-| `AI_GEMINI_TRANSCRIBE_MODEL` | Model used for Voice-to-Note audio; defaults to `gemini-3.5-transcribe`, the dedicated speech-to-text model with speaker diarization |
-| `AI_GEMINI_TRANSCRIBE_FALLBACKS` | Ordered models tried when the transcription model is missing or out of quota; **temporarily empty** (`gemini-3.5-flash-lite,gemini-3.1-flash-lite` before the test), so the transcribe model is the only one used |
+| `AI_GEMINI_AUDIO_MODELS` | Models for Voice-to-Note audio, in order; defaults to `gemini-3.1-flash-lite,gemini-3.5-flash-lite` |
+| `AI_GEMINI_TRANSCRIBE_FALLBACKS` | Legacy recorded-file transcription chain; empty by default and not used for Voice-to-Note audio |
 | `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model for Voice-to-Note fallback transcription; defaults to `whisper-large-v3` (the full model, not turbo) |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
@@ -226,18 +226,18 @@ output size); the backend refuses to start with a mismatched value instead of fa
 
 ### Voice-to-Note transcription
 
-A recording is cut into parts of **60 seconds by default**, and the length is a setting (20 / 30 / 45 / 60
-s, stored as `localStorage['notez-rec-chunk-v1']`). Each part is transcribed as soon as it is recorded, so
+A recording is cut into parts of **40 seconds by default**, and the length is a setting (20 / 30 / 40 s,
+stored as `localStorage['notez-rec-chunk-v1']`; 40 s is the maximum). Each part is transcribed as soon as it is recorded, so
 the transcript appears while the lecture is still running, and the next part always receives the tail of
 what was already heard.
 
-Why 60 s is the ceiling and the default: the binding limit is not tokens, it is **requests**. Gemini counts
+Why 40 s is the ceiling and the default: the binding limit is not tokens, it is **requests**. Gemini counts
 audio at 32 tokens a second, so a one-minute part is ~1,900 audio tokens and ~3,000 tokens with the prompt —
 one request a minute is about 3,000 tokens per minute, roughly 1.5% of a 200,000 tokens-per-minute
 allowance. The request count is what actually runs out: at 20-second parts a 500-request day covers about
-2.8 hours of audio, at 60-second parts it covers 8.3 hours. Past 60 s the first sentence takes too long to
-appear, a failed part costs a whole minute of retry, and the upload stops being cheap on a phone line. Below
-60 s the transcript is fresher but the allowance drains proportionally faster.
+2.8 hours of audio, at 40-second parts it covers about 5.6 hours. Past 40 s the first sentence takes too long to appear, a
+failed part costs more retry time, and the upload stops being cheap on a phone line. Below 40 s the transcript
+is fresher but the allowance drains proportionally faster.
 
 The first part is always capped at 20 seconds, whatever the setting, so the first words appear quickly and
 the chosen length only applies from the second part. Live notes refresh about once every 90 seconds of audio
@@ -261,23 +261,18 @@ repeats are removed before the part is stored (`recTrimOverlap`). A part that en
 two-word echo; a part that ends at a full stop only trims an echo of three words or more, because there it
 is far more likely to be real speech.
 
-Transcription uses **Gemini 3.5 Transcribe** (`gemini-3.5-transcribe`, `AI_GEMINI_TRANSCRIBE_MODEL`), the
-dedicated speech-to-text model. It is asked for a **diarized** transcript
-(`generationConfig.audioTranscriptionConfig.diarization: true`) and returns speaker turns directly, as
-`audioTranscription` parts carrying a `speakerLabel` (`spk_1`) and the spoken words. The client turns those
-into `Voice 1: words` lines, merging consecutive turns of the same voice, so the transcript arrives already
-labelled by the model instead of relying on a chat model's guess. The audio is the only part in that
-request: a text instruction next to it is read as a question *about* the audio rather than something to
-transcribe, and a transcription model takes no system instruction or temperature.
+Voice-to-Note audio goes to **Gemini 3.1 Flash-Lite** (`gemini-3.1-flash-lite`) first. When that model is out
+of quota, the same part goes to **Gemini 3.5 Flash-Lite** (`gemini-3.5-flash-lite`). The backend runs one
+model per request (`AI_GEMINI_AUDIO_MODELS`); the browser moves the part between them.
 
-The Live variant (`gemini-3.5-transcribe-live`) is **not** used: it streams over a WebSocket and, per
-Google's own feature table, cannot diarize, which is the one thing Voice-to-Note needs from it.
+Each model is tried on the user's **own key first** (BYOK is the default), then on **NotezAi's service** if
+that key fails. A part is never dropped while a model on either route can still answer: its audio is kept
+and retried. The recorder shows the model chain it will use.
 
-**Temporary test setup:** `gemini-3.5-transcribe` (the free-tier transcribe model) is the only model used for
-Voice-to-Note audio. The Flash-Lite fallbacks, the Groq Whisper fallback and the chat-model audio path are
-switched off, so a quota or model error is reported instead of being handed to another model. To bring the
-chain back, set `AI_GEMINI_TRANSCRIBE_FALLBACKS` and revert the browser and `main.py` audio changes in the
-same commit. Quotas are counted **per model**, which is why a fallback chain was used before.
+The live Gemini Transcribe models are not used. `gemini-3.5-transcribe` is a recorded-file model, and the
+`-live` variant streams text without speaker labels.
+
+Notes are written after the transcript is final and every speaker is labelled, not during the recording.
 
 The chat models cannot diarize, so their prompt carries the accuracy rules that matter for a transcript:
 every sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word
@@ -290,7 +285,7 @@ of text. Labels are parsed generously: `Voice 2`, `Speaker 2`, `Speaker B` (A=1)
 `[00:12] Voice 1:`, a colon or a dash, and a learned name written with a trailing full stop or different
 case all count as a speaker turn.
 
-Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini, and fall over to Groq's Whisper
+Audio parts sent to `POST /v1/ai/generate` are transcribed by Gemini only. The Groq Whisper fallback is switched off for now, so it does not take a part over from Gemini; when it is enabled, audio falls over to Groq's Whisper
 endpoint (`AI_GROQ_TRANSCRIBE_MODEL`, default `whisper-large-v3`) when Gemini is rate limited or rejects its
 credential — the resulting transcript is then formatted by a Groq chat model so speaker labels and structure
 stay the same. A provider that is cooling down after a rate limit is tried last rather than skipped, so a
@@ -321,7 +316,8 @@ The clip goes to a private IndexedDB store (`notez-voice-samples-v1`) and the pr
 
 - every transcription prompt lists the known voices by name with their description, so turns are labelled
   `Sir Ahmed:` instead of `Voice 2:`;
-- the first part and every thirtieth part (about once a minute) also carry the reference clips themselves,
+- every part also carries the reference clips of the saved voices and of the voices already heard in this
+  recording, so the same person keeps the same label after a model switch;
   which is what makes matching reliable rather than descriptive;
 - the live transcript renders a learned name as a speaker chip with the same colouring as a voice number,
   and the prompt forbids inventing a name that is not on the list.

@@ -255,16 +255,16 @@ def test_voice_to_note_uses_the_dedicated_transcription_model(monkeypatch):
     finally:
         app.dependency_overrides.clear()
 
-    # Audio gets the cheap transcription model; text keeps the chat model.
-    assert seen[0] == settings.gemini_transcribe_model
-    assert seen[1] != settings.gemini_transcribe_model
+    # Audio gets the first audio model; text keeps the chat model.
+    assert seen[0] == settings.gemini_audio_models[0]
+    assert seen[1] != settings.gemini_audio_models[0]
 
 
 def test_a_missing_transcription_model_is_reported_not_replaced(monkeypatch):
     from app.config import settings
 
     seen = []
-    first = settings.gemini_transcribe_model
+    first = settings.gemini_audio_models[0]
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
@@ -377,7 +377,7 @@ def test_an_exhausted_transcription_model_is_not_replaced(monkeypatch):
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
-        if model == settings.gemini_transcribe_model:
+        if model == settings.gemini_audio_models[0]:
             raise HTTPException(status_code=429, detail="Quota exceeded for this model.")
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
@@ -396,7 +396,7 @@ def test_an_exhausted_transcription_model_is_not_replaced(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code != 200
-    assert seen == [settings.gemini_transcribe_model]
+    assert seen == [settings.gemini_audio_models[0]]
 
 
 def test_a_transcription_model_that_rejects_the_shape_is_not_replaced(monkeypatch):
@@ -406,7 +406,7 @@ def test_a_transcription_model_that_rejects_the_shape_is_not_replaced(monkeypatc
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
-        if model == settings.gemini_transcribe_model:
+        if model == settings.gemini_audio_models[0]:
             raise HTTPException(status_code=400, detail="audioTranscriptionConfig is not supported by this API revision.")
         return {"text": "Voice 1: hello", "provider": provider, "model": model}
 
@@ -425,7 +425,7 @@ def test_a_transcription_model_that_rejects_the_shape_is_not_replaced(monkeypatc
         app.dependency_overrides.clear()
 
     assert response.status_code != 200
-    assert seen == [settings.gemini_transcribe_model]
+    assert seen == [settings.gemini_audio_models[0]]
 
 
 def test_the_transcription_flag_reaches_the_provider(monkeypatch):
@@ -452,13 +452,14 @@ def test_the_transcription_flag_reaches_the_provider(monkeypatch):
     assert captured == [(True, True), (False, False)]
 
 
-def test_the_transcription_chain_is_only_the_transcribe_model():
+def test_the_transcription_chain_is_the_two_flash_lite_audio_models():
     from app.config import settings
 
-    # TEMPORARY: the free-tier transcribe model is the only one used for audio.
-    assert settings.gemini_transcribe_model == "gemini-3.5-transcribe"
+    # Voice-to-Note audio: 3.1 Flash-Lite first, 3.5 Flash-Lite when it is out of
+    # quota. The browser moves the part between them; the backend runs one model.
+    assert settings.gemini_audio_models == ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
     assert settings.gemini_transcribe_fallbacks == ()
-    assert settings.gemini_transcribe_models == ("gemini-3.5-transcribe",)
+    assert set(settings.gemini_audio_models) <= set(settings.gemini_transcribe_models)
 
 
 def test_a_part_can_carry_its_recording_plus_eight_voice_samples():
