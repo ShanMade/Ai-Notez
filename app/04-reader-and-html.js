@@ -1045,11 +1045,16 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <div class="dock-title-tx"><b>NotezAi</b><small id="dock-sub">Your study assistant</small></div>
           </div>
           <div class="dock-actions" role="toolbar" aria-label="Panel actions">
-            <button type="button" class="nzai-btn nzai-new" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5.2v13.6M5.2 12h13.6"/></svg></button>
+            <button type="button" class="nzai-btn nzai-new nzai-newpill" data-nzai="new" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 5.2v13.6M5.2 12h13.6"/></svg><span>New chat</span></button>
             <button type="button" class="nzai-btn" data-dock="voice" data-nav="voice" aria-label="Voice notes" title="Voice notes"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9.1" y="2.9" width="5.8" height="11.6" rx="2.9"/><path d="M5.4 11.2a6.6 6.6 0 0 0 13.2 0M12 17.8v3.3M8.6 21.1h6.8"/></svg><span class="dock-badge" id="dock-rec-badge" hidden aria-label="Recording"></span></button>
             <button type="button" class="nzai-btn nzai-more" data-nzai="sheet" aria-label="More actions" title="More actions" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="currentColor"><circle cx="5.4" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18.6" cy="12" r="1.5"/></svg></button>
           </div>
         </header>
+        <nav class="nzai-tabs" role="group" aria-label="NotezAi sections">
+          <button type="button" class="nzai-tab" data-nzai="go-chat" data-nav="chat" aria-label="Chat"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 6.2h14a1.6 1.6 0 0 1 1.6 1.6v7.9a1.6 1.6 0 0 1-1.6 1.6h-8.1L7.4 20.6v-3.3H5a1.6 1.6 0 0 1-1.6-1.6V7.8A1.6 1.6 0 0 1 5 6.2Z"/></svg><span>Chat</span></button>
+          <button type="button" class="nzai-tab" data-dock="voice" data-nav="voice" aria-label="Voice"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9.1" y="2.9" width="5.8" height="11.6" rx="2.9"/><path d="M5.4 11.2a6.6 6.6 0 0 0 13.2 0M12 17.8v3.3M8.6 21.1h6.8"/></svg><span>Voice</span></button>
+          <button type="button" class="nzai-tab" data-nzai="settings" data-nav="settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l2-1.5-2-3.5-2.4.9a7.4 7.4 0 0 0-2.8-1.6L14 2.9h-4l-.2 2.8a7.4 7.4 0 0 0-2.8 1.6l-2.4-.9-2 3.5 2 1.5a7.6 7.6 0 0 0 0 3.2l-2 1.5 2 3.5 2.4-.9a7.4 7.4 0 0 0 2.8 1.6l.2 2.8h4l.2-2.8a7.4 7.4 0 0 0 2.8-1.6l2.4.9 2-3.5Z"/></svg><span>Settings</span></button>
+        </nav>
         <button type="button" class="ai-ctx-chip" id="dock-scope" data-nzai="scope-toggle" aria-label="What this chat can read" title="What this chat can read" style="display:none">
           <span class="ai-ctx-ic" aria-hidden="true">
             <svg class="ic-note" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.75 3.75h6.9L18 8.1v12.15H6.75z"/><path d="M13.4 3.9v4.35h4.35M9.6 12.7h5.6M9.6 16.1h5.6"/></svg>
@@ -1415,15 +1420,21 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             if (aiBackendSession()) bits.push('indexed');
             return bits;
           })()).map(bit => `<span class="ai-stat">${bit}</span>`).join('');
+      const welcomeHour = new Date().getHours();
+      const welcomeHello = welcomeHour < 12 ? 'Good morning' : welcomeHour < 18 ? 'Good afternoon' : 'Good evening';
+      const welcomeName = String(currentSession?.user?.displayName || '').trim().split(/\s+/)[0] || '';
+      const chevronRight = nzaiIcon('chevronRight', 14);
+      const recentChats = nzaiReadChats().slice(0, 3);
+      const recentHtml = recentChats.length ? `<div class="ai-recent"><div class="ai-recent-head"><span>Recent chats</span><button type="button" class="ai-recent-all" data-nzai="history">View all</button></div>` +
+        recentChats.map(chat => `<button type="button" class="ai-recent-row" data-nzai="open-chat" data-id="${esc(chat.id)}"><span class="ai-recent-tx"><b>${esc(chat.title)}</b><small>From: ${esc(chat.scope === 'note' ? 'This note' : 'All notes')} · ${esc(nzaiDayLabel(chat.updatedAt || Date.now()))}</small></span><span class="ai-recent-go" aria-hidden="true">${chevronRight}</span></button>`).join('') + `</div>` : '';
       const welcome = `<div class="ai-welcome">` +
         `<div class="ai-welcome-head">` +
-          `<span class="ai-orb" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 21) : ''}</span>` +
-          `<p class="ai-welcome-kicker">${inNote ? 'READING THIS NOTE' : 'YOUR WHOLE LIBRARY'}</p>` +
-          `<h3>${inNote ? 'What should we<br><em>work through?</em>' : 'What do you want<br><em>to know?</em>'}</h3>` +
-          `<p class="ai-welcome-sub">${inNote ? `Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.` : 'Answers come from your notes. Every answer shows you which notes it used.'}</p>` +
+          `<h3>${welcomeHello}${welcomeName ? `, ${esc(welcomeName)}` : ''} <span class="ai-wave" aria-hidden="true">👋</span></h3>` +
+          `<p class="ai-welcome-sub">${inNote ? `Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.` : 'Ask me anything about your notes, or choose a quick action below.'}</p>` +
           (statBits ? `<div class="ai-stats">${statBits}</div>` : '') +
         `</div>` +
         `<div class="ai-suggest">${suggestCards}</div>` +
+        recentHtml +
         `<p class="ai-hint"><span class="ai-hint-key">/</span> every command<span class="ai-hint-dot" aria-hidden="true">·</span><span class="ai-hint-key">⌘K</span> jump to a note</p>` +
       `</div>`;
       let thread = '';
@@ -1915,6 +1926,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'chat') { nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'toggle-more') { nzai.moreOpen = !nzai.moreOpen; return nzaiRender(); }
       if (act === 'settings') { nzaiSheet(false); return nzaiGoView('settings'); }
+      if (act === 'go-chat') { nzaiSheet(false); return nzaiGoView('chat'); }
       if (act === 'scope') { nzai.scope = el.dataset.scope; return nzaiRender(); }
       if (act === 'send') return nzaiSendFromInput();
       if (act === 'quick') return nzaiQuick(el.dataset.task);
