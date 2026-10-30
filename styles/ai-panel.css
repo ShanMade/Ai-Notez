@@ -191,3 +191,40 @@ html[data-theme] #nz-ai .ai-bubble-user { background: var(--nzc-tint) !important
 /* Composer: one rounded field, quiet tools, accent send button */
 html[data-theme] #nz-ai .ai-composer { border-radius: 16px !important; padding: 8px 8px 8px 12px; }
 html[data-theme] #nz-ai .ai-send { border-radius: 50% !important; }
+
+/* ---- Compact pass: quieter type, smaller controls, mode switch at the bottom ---- */
+html[data-theme] #nz-ai .nzai-newpill[hidden] { display: none !important; }
+html[data-theme] #nz-ai .nzai-newpill { height: 28px; padding: 0 10px 0 8px; gap: 5px; font-size: 12px; }
+html[data-theme] #nz-ai .nzai-newpill svg { width: 13px !important; height: 13px !important; }
+html[data-theme] #nz-ai .dock-chrome { min-height: 50px; padding: 8px 10px; }
+html[data-theme] #nz-ai .dock-title-mark { width: 22px; height: 22px; flex-basis: 22px; }
+html[data-theme] #nz-ai .dock-title-tx b { font-size: 14px; }
+html[data-theme] #nz-ai .dock-title-tx small { font-size: 11px; }
+html[data-theme] #nz-ai .dock-actions .nzai-btn { width: 30px; height: 30px; min-width: 30px; min-height: 30px; }
+
+html[data-theme] #nz-ai .nzai-tabs { margin: 0 10px 10px; padding: 3px; border-radius: 10px; }
+html[data-theme] #nz-ai .nzai-tab { min-height: 26px; gap: 5px; font-size: 12px; }
+html[data-theme] #nz-ai .nzai-tab svg { width: 13px; height: 13px; }
+
+html[data-theme] #nz-ai .ai-ctx-chip { min-height: 30px; margin: 8px 10px 0; font-size: 12px; }
+
+html[data-theme] #nz-ai .ai-welcome { padding: 14px 10px 10px; }
+html[data-theme] #nz-ai .ai-welcome-head h3 { font-size: 17px; }
+html[data-theme] #nz-ai .ai-welcome-sub { font-size: 12px; margin-top: 4px; }
+html[data-theme] #nz-ai .ai-stats { display: none; }
+html[data-theme] #nz-ai .ai-suggest { gap: 6px; margin-top: 12px; }
+html[data-theme] #nz-ai .ai-card { padding: 10px; gap: 8px; border-radius: 12px; }
+html[data-theme] #nz-ai .ai-card-ic { width: 26px; height: 26px; flex-basis: 26px; border-radius: 8px; }
+html[data-theme] #nz-ai .ai-card-ic svg { width: 15px !important; height: 15px !important; }
+html[data-theme] #nz-ai .ai-card-tx b { font-size: 12.5px; }
+html[data-theme] #nz-ai .ai-card-tx small { font-size: 11px; }
+html[data-theme] #nz-ai .ai-recent { margin-top: 12px; }
+html[data-theme] #nz-ai .ai-recent-head { font-size: 12px; }
+html[data-theme] #nz-ai .ai-recent-row { padding: 7px 2px; }
+html[data-theme] #nz-ai .ai-recent-tx b { font-size: 12.5px; }
+html[data-theme] #nz-ai .ai-hint { margin-top: 10px; font-size: 11px; }
+
+html[data-theme] #nz-ai .ai-composer-wrap { padding: 6px 10px; }
+html[data-theme] #nz-ai .ai-composer { padding: 6px 6px 6px 10px; }
+html[data-theme] #nz-ai .ai-composer textarea { font-size: 13px; }
+html[data-theme] #nz-ai .ai-foot { font-size: 10px; }
