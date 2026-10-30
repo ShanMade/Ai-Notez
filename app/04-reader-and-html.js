@@ -1091,11 +1091,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         <section class="dock-pane" id="pane-voice" hidden>
           <div id="rec-body" class="rec-body"></div>
         </section>
-        <nav class="nzai-tabs" role="group" aria-label="NotezAi sections">
-          <button type="button" class="nzai-tab" data-nzai="go-chat" data-nav="chat" aria-label="Chat"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 6.2h14a1.6 1.6 0 0 1 1.6 1.6v7.9a1.6 1.6 0 0 1-1.6 1.6h-8.1L7.4 20.6v-3.3H5a1.6 1.6 0 0 1-1.6-1.6V7.8A1.6 1.6 0 0 1 5 6.2Z"/></svg><span>Chat</span></button>
-          <button type="button" class="nzai-tab" data-dock="voice" data-nav="voice" aria-label="Voice"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9.1" y="2.9" width="5.8" height="11.6" rx="2.9"/><path d="M5.4 11.2a6.6 6.6 0 0 0 13.2 0M12 17.8v3.3M8.6 21.1h6.8"/></svg><span>Voice</span><span class="dock-badge" id="dock-rec-badge" hidden aria-label="Recording"></span></button>
-          <button type="button" class="nzai-tab" data-nzai="settings" data-nav="settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.6a7.6 7.6 0 0 0 0-3.2l2-1.5-2-3.5-2.4.9a7.4 7.4 0 0 0-2.8-1.6L14 2.9h-4l-.2 2.8a7.4 7.4 0 0 0-2.8 1.6l-2.4-.9-2 3.5 2 1.5a7.6 7.6 0 0 0 0 3.2l-2 1.5 2 3.5 2.4-.9a7.4 7.4 0 0 0 2.8 1.6l.2 2.8h4l.2-2.8a7.4 7.4 0 0 0 2.8-1.6l2.4.9 2-3.5Z"/></svg><span>Settings</span></button>
-        </nav>`;
+`;
       document.body.appendChild(panel);
       nzaiWireResizer(panel);
       let savedText = 0;
@@ -1426,18 +1422,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const welcomeHour = new Date().getHours();
       const welcomeHello = welcomeHour < 12 ? 'Good morning' : welcomeHour < 18 ? 'Good afternoon' : 'Good evening';
       const welcomeName = String(currentSession?.user?.displayName || '').trim().split(/\s+/)[0] || '';
-      const chevronRight = nzaiIcon('chevronRight', 14);
-      const recentChats = nzaiReadChats().slice(0, 3);
-      const recentHtml = recentChats.length ? `<div class="ai-recent"><div class="ai-recent-head"><span>Recent chats</span><button type="button" class="ai-recent-all" data-nzai="history">View all</button></div>` +
-        recentChats.map(chat => `<button type="button" class="ai-recent-row" data-nzai="open-chat" data-id="${esc(chat.id)}"><span class="ai-recent-tx"><b>${esc(chat.title)}</b><small>From: ${esc(chat.scope === 'note' ? 'This note' : 'All notes')} · ${esc(nzaiDayLabel(chat.updatedAt || Date.now()))}</small></span><span class="ai-recent-go" aria-hidden="true">${chevronRight}</span></button>`).join('') + `</div>` : '';
       const welcome = `<div class="ai-welcome">` +
         `<div class="ai-welcome-head">` +
-          `<h3>${welcomeHello}${welcomeName ? `, ${esc(welcomeName)}` : ''} <span class="ai-wave" aria-hidden="true">👋</span></h3>` +
+          `<h3>${welcomeHello}${welcomeName ? `, ${esc(welcomeName)}` : ''}</h3>` +
           `<p class="ai-welcome-sub">${inNote ? `Grounded in <b>${esc(note.title)}</b>. Every answer names the lines it came from.` : 'Ask me anything about your notes, or choose a quick action below.'}</p>` +
           (statBits ? `<div class="ai-stats">${statBits}</div>` : '') +
         `</div>` +
         `<div class="ai-suggest">${suggestCards}</div>` +
-        recentHtml +
         `<p class="ai-hint"><span class="ai-hint-key">/</span> every command<span class="ai-hint-dot" aria-hidden="true">·</span><span class="ai-hint-key">⌘K</span> jump to a note</p>` +
       `</div>`;
       let thread = '';
@@ -1607,13 +1598,16 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         ? `<div class="nzai-keybox"><b>Key saved</b><span>••••${esc(key.slice(-4))}</span><small>Saved on this device only and never synced with your notes. Requests go straight to ${esc(info.label)}. ${esc(info.privacy)}</small><div class="nzai-actions"><button type="button" data-nzai="change-key">Change key</button><button type="button" class="danger" data-nzai="remove-key">Remove key</button></div></div>`
         : `<label class="nzai-label">API key</label><input class="nzai-field nzai-secret" id="nzai-key" name="notez-ai-api-token" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" placeholder="${esc(info.placeholder)}"><p class="nzai-small">Get a free key at <a href="${info.keyUrl}" target="_blank" rel="noopener">${info.keyHost}</a>. It is stored only in this browser and sent only to ${esc(info.label)}. ${esc(info.privacy)}${managedAvailable && !aiHasOwnKey() ? ' Until a key is saved, NotezAi keeps being used.' : ''}</p><button type="button" class="nzai-primary" data-nzai="save-key">Save key</button>`;
       const options = [`<option value="">Automatic (${esc(info.models[0])})</option>`, ...models.map(model => `<option value="${esc(model)}" ${model === pref ? 'selected' : ''}>${esc(model)}</option>`)].join('');
-      body.innerHTML = `<div class="nzai-section-head"><b>AI source</b></div>${sourceBlock}${byok ? `<div class="nzai-chips">${tabs}</div>` : ''}${managedBlock}${keyBlock}
-        ${byok ? `<label class="nzai-label">Model</label><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model">${options}</select><button type="button" data-nzai="load-models">Load</button></div>` : ''}
-        <label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        ${byok ? `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>` : ''}
-        <p class="nzai-small">Chat, note tools and Voice-to-Note all use the source chosen above.</p>
-        <p class="nzai-small" id="nzai-version">NotezAi version ${esc(NOTEZ_VERSION)}</p>
-        <button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div>`;
+      const ready = aiReady();
+      const statusTitle = aiUsesManaged() ? 'NotezAi is ready' : ready ? `${info.label} is ready` : 'Setup needed';
+      const statusLine = aiUsesManaged() ? 'Managed by NotezAi. No key needed.' : ready ? `Using your ${info.label} key${pref ? ` · ${pref}` : ' · automatic model'}` : `Add a ${info.label} key below to start.`;
+      body.innerHTML = `<div class="nzai-status ${ready ? 'is-ready' : 'is-setup'}" role="status"><span class="nzai-status-dot" aria-hidden="true"></span><div><b>${esc(statusTitle)}</b><small>${esc(statusLine)}</small></div></div>
+        <section class="nzai-group"><h4>Source</h4>${sourceBlock}${byok ? `<div class="nzai-chips">${tabs}</div>` : ''}${managedBlock}${keyBlock}</section>
+        ${byok ? `<section class="nzai-group"><h4>Model</h4><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model" aria-label="Model">${options}</select><button type="button" data-nzai="load-models">Load</button></div></section>` : ''}
+        <section class="nzai-group"><h4>Writing</h4><label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          ${byok ? `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>` : ''}</section>
+        <section class="nzai-group nzai-setfoot"><p class="nzai-small">Chat, note tools and Voice-to-Note all use the source chosen above.</p><p class="nzai-small" id="nzai-version">NotezAi version ${esc(NOTEZ_VERSION)}</p><button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div></section>`;
+
     }
     function nzaiTranscript(chat) {
       // `chat` is captured before the current message is appended, so the newest
