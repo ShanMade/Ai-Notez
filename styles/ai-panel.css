@@ -23,6 +23,13 @@ html[data-theme] #nz-ai .fl-btn:hover, html[data-theme] #nz-ai .nzai-btn:hover {
 html[data-theme] #nz-ai .fl-bar .fl-btn.on { background: var(--nzc-tint); color: var(--nzc-acc); }
 html[data-theme] #nz-ai .fl-bar .fl-new, html[data-theme] #nz-ai .nzai-new { background: var(--nzc-acc) !important; color: var(--nzc-on-acc) !important; }
 
+/* Top buttons: one icon size, one stroke weight, centred in a square hit area */
+html[data-theme] #nz-ai .dock-actions { gap: 4px; align-items: center; }
+html[data-theme] #nz-ai .nzai-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 0; }
+html[data-theme] #nz-ai .nzai-btn svg { flex: none; stroke-width: 1.8; }
+html[data-theme] #nz-ai .dock-actions .nzai-btn > svg { display: block; width: 18px; height: 18px; }
+html[data-theme] #nz-ai #dock-lead svg { width: 18px; height: 18px; }
+
 /* Scope chip */
 html[data-theme] #nz-ai .ai-ctx-chip { margin: 8px 12px 0; min-height: 32px; padding: 0 4px 0 12px; border: 1px solid var(--nzc-line); border-radius: 999px; background: var(--panel-raised); color: var(--muted); font-size: 12.5px; font-weight: 500; }
 html[data-theme] #nz-ai .ai-ctx-pill { background: var(--nzc-tint) !important; color: var(--nzc-acc) !important; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
