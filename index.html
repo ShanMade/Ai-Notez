@@ -7,6 +7,8 @@
   <title>Notez — your study space</title>
   <script>try{var nzAcc=localStorage.getItem('notez-accent-v1');var nzMap={yellow:'gold',green:'forest',blue:'sky'};if(nzAcc)document.documentElement.dataset.accent=nzMap[nzAcc]||nzAcc;}catch(e){}try{if(localStorage.getItem('notez-lock-v1')&&!sessionStorage.getItem('notez-unlocked'))document.documentElement.classList.add('nz-locked');if(localStorage.getItem('notez-auth-hint'))document.documentElement.classList.add('nz-booting');var th=localStorage.getItem('notez-theme-v1');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th}catch(e){}</script>
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400&display=swap" />
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js" />
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js" />
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js" />
@@ -23,6 +25,7 @@
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
   <link rel="stylesheet" href="styles/app.css">
   <link rel="stylesheet" href="styles/reader-v2.css">
+  <link rel="stylesheet" href="styles/redesign.css">
   <!-- Voice Profiles CSS -->
   <style>
     /* Voice Recording Styles */
@@ -285,6 +288,7 @@
   <script src="app/06-ai-and-recording.js"></script>
   <script src="app/07-voice-identity.js"></script>
   <script src="app/10-reader-v2.js"></script>
+  <script src="app/11-shell-redesign.js"></script>
 
 </body>
 </html>
