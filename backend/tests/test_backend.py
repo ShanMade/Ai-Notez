@@ -260,7 +260,7 @@ def test_voice_to_note_uses_the_dedicated_transcription_model(monkeypatch):
     assert seen[1] != settings.gemini_transcribe_model
 
 
-def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
+def test_a_missing_transcription_model_is_reported_not_replaced(monkeypatch):
     from app.config import settings
 
     seen = []
@@ -268,9 +268,7 @@ def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
         seen.append(model)
-        if model == first:
-            raise HTTPException(status_code=404, detail=f"models/{model} is not found for API version v1beta")
-        return {"text": "Voice 1: hello", "provider": provider, "model": model}
+        raise HTTPException(status_code=404, detail=f"models/{model} is not found for API version v1beta")
 
     monkeypatch.setattr(main_module, "generate", fake_generate)
     monkeypatch.setattr(main_module, "configured_providers", lambda: ["gemini"])
@@ -286,9 +284,9 @@ def test_a_missing_transcription_model_falls_back_to_a_chat_model(monkeypatch):
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert seen[0] == first
-    assert len(seen) > 1 and seen[1] != first
+    # Only the transcribe model is tried: a missing model is an error, not a switch.
+    assert response.status_code != 200
+    assert seen == [first]
 
 
 def test_a_transcription_request_asks_for_diarization(monkeypatch):
@@ -372,7 +370,7 @@ def test_diarized_labels_never_leak_the_provider_spelling():
     assert providers.diarized_text(merged) == "Voice 1: one two\nVoice 2: three"
 
 
-def test_an_exhausted_transcription_model_falls_back_to_the_next_one(monkeypatch):
+def test_an_exhausted_transcription_model_is_not_replaced(monkeypatch):
     from app.config import settings
 
     seen = []
@@ -397,12 +395,11 @@ def test_an_exhausted_transcription_model_falls_back_to_the_next_one(monkeypatch
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert seen[0] == settings.gemini_transcribe_model
-    assert seen[1] == settings.gemini_transcribe_fallbacks[0]
+    assert response.status_code != 200
+    assert seen == [settings.gemini_transcribe_model]
 
 
-def test_a_transcription_model_that_rejects_the_shape_falls_back(monkeypatch):
+def test_a_transcription_model_that_rejects_the_shape_is_not_replaced(monkeypatch):
     from app.config import settings
 
     seen = []
@@ -427,8 +424,8 @@ def test_a_transcription_model_that_rejects_the_shape_falls_back(monkeypatch):
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert seen == [settings.gemini_transcribe_model, settings.gemini_transcribe_fallbacks[0]]
+    assert response.status_code != 200
+    assert seen == [settings.gemini_transcribe_model]
 
 
 def test_the_transcription_flag_reaches_the_provider(monkeypatch):
@@ -455,12 +452,13 @@ def test_the_transcription_flag_reaches_the_provider(monkeypatch):
     assert captured == [(True, True), (False, False)]
 
 
-def test_the_transcription_chain_is_transcribe_then_the_flash_lite_models():
+def test_the_transcription_chain_is_only_the_transcribe_model():
     from app.config import settings
 
+    # TEMPORARY: the free-tier transcribe model is the only one used for audio.
     assert settings.gemini_transcribe_model == "gemini-3.5-transcribe"
-    assert settings.gemini_transcribe_fallbacks == ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
-    assert settings.gemini_transcribe_models == ("gemini-3.5-transcribe", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+    assert settings.gemini_transcribe_fallbacks == ()
+    assert settings.gemini_transcribe_models == ("gemini-3.5-transcribe",)
 
 
 def test_a_part_can_carry_its_recording_plus_eight_voice_samples():
@@ -472,9 +470,9 @@ def test_a_part_can_carry_its_recording_plus_eight_voice_samples():
     assert len(request.images) == 9
 
 
-def test_managed_audio_falls_back_to_groq_when_gemini_is_rate_limited(monkeypatch):
-    # The screenshot case: Gemini rate-limited, the request was refused instead
-    # of being handed to the provider that can still transcribe.
+def test_managed_audio_does_not_fall_back_to_groq_while_testing(monkeypatch):
+    # TEMPORARY: Groq Whisper is not a transcription fallback, so a rate-limited
+    # Gemini transcribe model is reported rather than handed to another model.
     transcribed = []
 
     async def fake_generate(provider, model, api_key, prompt, system_prompt, temperature, json_mode, images, audio_transcription=False):
@@ -499,9 +497,8 @@ def test_managed_audio_falls_back_to_groq_when_gemini_is_rate_limited(monkeypatc
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert response.json()["provider"] == "groq"
-    assert transcribed == [("groq", "audio/webm", 3)]
+    assert response.status_code != 200
+    assert transcribed == []
 
 
 def test_a_cooling_provider_is_still_tried_instead_of_failing_everything(monkeypatch):

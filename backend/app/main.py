@@ -221,7 +221,9 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
         except (binascii.Error, ValueError) as exc:
             raise HTTPException(status_code=422, detail="The audio part is not valid base64.") from exc
         # Audio is transcribed by Gemini inline, or by Groq's Whisper endpoint.
-        capable = [item for item in preferred if item in {"gemini", "groq"}]
+        # TEMPORARY: only Gemini transcribes audio (no Groq Whisper fallback) while
+        # the free-tier transcribe model is tested alone.
+        capable = [item for item in preferred if item == "gemini"]
         if not capable:
             raise HTTPException(status_code=503, detail="No configured AI provider can transcribe audio. Set AI_GEMINI_API_KEY or AI_GROQ_API_KEY.")
     elif body.images:
@@ -246,11 +248,9 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
             # the cheaper chat models behind it. Quotas are counted per model, so
             # a model that is exhausted for the day only costs one 429 before the
             # next one takes over.
-            models = list(dict.fromkeys([
-                explicit or settings.gemini_transcribe_model,
-                *settings.gemini_transcribe_fallbacks,
-                *MODEL_DEFAULTS["gemini"],
-            ]))
+            # TEMPORARY: the transcribe model is the only one used for audio. The
+            # chat models are not walked, and a requested model is ignored.
+            models = list(dict.fromkeys([settings.gemini_transcribe_model, *settings.gemini_transcribe_fallbacks]))
         else:
             models = [explicit or MODEL_DEFAULTS[provider][0]]
         for model_index, model in enumerate(models):

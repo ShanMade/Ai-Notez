@@ -215,7 +215,7 @@ See [`backend/.env.example`](backend/.env.example) for a template. Common settin
 | `NOTEZ_CORS_ORIGINS` | Comma-separated allowed browser origins |
 | `NOTEZ_DATA_DIR` | Directory for local backend index/metadata data |
 | `AI_GEMINI_TRANSCRIBE_MODEL` | Model used for Voice-to-Note audio; defaults to `gemini-3.5-transcribe`, the dedicated speech-to-text model with speaker diarization |
-| `AI_GEMINI_TRANSCRIBE_FALLBACKS` | Ordered models tried when the transcription model is missing or out of quota; defaults to `gemini-3.5-flash-lite,gemini-3.1-flash-lite` |
+| `AI_GEMINI_TRANSCRIBE_FALLBACKS` | Ordered models tried when the transcription model is missing or out of quota; **temporarily empty** (`gemini-3.5-flash-lite,gemini-3.1-flash-lite` before the test), so the transcribe model is the only one used |
 | `AI_GROQ_TRANSCRIBE_MODEL` | Whisper model for Voice-to-Note fallback transcription; defaults to `whisper-large-v3` (the full model, not turbo) |
 | `AI_REQUEST_TIMEOUT_SECONDS`, `AI_MAX_PROMPT_CHARS`, `AI_MAX_CHUNKS_PER_USER`, `AI_MAX_INDEXED_NOTES`, `AI_MAX_SEARCH_RESULTS`, `AI_MIN_SIMILARITY`, `AI_RAG_MAX_INDEX_UPDATES`, `AI_RAG_MIN_CONFIDENCE`, `AI_RAG_MAX_EXCERPTS` | Backend timeouts, limits, and retrieval tuning |
 
@@ -273,11 +273,11 @@ transcribe, and a transcription model takes no system instruction or temperature
 The Live variant (`gemini-3.5-transcribe-live`) is **not** used: it streams over a WebSocket and, per
 Google's own feature table, cannot diarize, which is the one thing Voice-to-Note needs from it.
 
-Free-tier quotas are counted **per model**, so a model that is out of requests for the day is skipped for
-the next one instead of ending the transcript: `gemini-3.5-transcribe` → `gemini-3.5-flash-lite` →
-`gemini-3.1-flash-lite` (`AI_GEMINI_TRANSCRIBE_FALLBACKS`). The model that answered is remembered for the
-rest of the session, so a spent model costs one request rather than one per part, and the recorder shows the
-chain it will use.
+**Temporary test setup:** `gemini-3.5-transcribe` (the free-tier transcribe model) is the only model used for
+Voice-to-Note audio. The Flash-Lite fallbacks, the Groq Whisper fallback and the chat-model audio path are
+switched off, so a quota or model error is reported instead of being handed to another model. To bring the
+chain back, set `AI_GEMINI_TRANSCRIBE_FALLBACKS` and revert the browser and `main.py` audio changes in the
+same commit. Quotas are counted **per model**, which is why a fallback chain was used before.
 
 The chat models cannot diarize, so their prompt carries the accuracy rules that matter for a transcript:
 every sentence in order, no summarising, no paraphrasing, no translating, and `[inaudible]` only for a word

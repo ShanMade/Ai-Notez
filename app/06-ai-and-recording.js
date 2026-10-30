@@ -283,7 +283,9 @@ async function openWikiLink(title) {
     // Shown in the recorder so the model in use is never a mystery.
     function recSttHint() {
       const chain = recSttModels().map(recModelLabel);
-      return `Transcribed by ${chain[0]} with speaker labels. If it runs out of quota: ${chain.slice(1).join(', then ')}.`;
+      return chain.length > 1
+        ? `Transcribed by ${chain[0]} with speaker labels. If it runs out of quota: ${chain.slice(1).join(', then ')}.`
+        : `Transcribed by ${chain[0]} with speaker labels (free tier, test only).`;
     }
     function recChunkHint(ms) {
       const perHour = Math.round(3600000 / ms);
@@ -352,10 +354,10 @@ async function openWikiLink(title) {
     // a chat model guesses the turns. The Live variant (gemini-3.5-transcribe-live)
     // streams audio over a WebSocket and cannot diarize, so it is not used here.
     const REC_STT_MODEL_DEFAULT = 'gemini-3.5-transcribe';
-    // Free-tier quotas are counted per model, so an exhausted model is skipped for
-    // the next one instead of ending the transcript.
-    const REC_STT_MODEL_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
-    const recSttModels = () => [...new Set([String(aiStore.get('notez-stt-model-v1', '') || '').trim(), REC_STT_MODEL_DEFAULT, ...REC_STT_MODEL_FALLBACKS].filter(Boolean))];
+    // TEMPORARY: this free-tier transcribe model is the only one used for audio
+    // while it is tested. No fallbacks and no local override.
+    const REC_STT_MODEL_FALLBACKS = [];
+    const recSttModels = () => [REC_STT_MODEL_DEFAULT];
     const recSttModel = () => recSttModels()[0];
     // The Live variant streams over a WebSocket, so it can never be used here.
     const recIsTranscribeModel = model => /transcribe/i.test(String(model || '')) && !/-live$/i.test(String(model || ''));
@@ -551,11 +553,9 @@ async function openWikiLink(title) {
     }
     // Check if a provider supports audio transcription
     const recAudioProviders = () => {
+      // TEMPORARY: only Gemini transcribes audio (no Groq Whisper fallback).
       if (aiUsesManaged()) return ['gemini']; // NotezAi (default): the backend transcribes with its managed Gemini
-      const providers = [];
-      if (aiKey('gemini')) providers.push('gemini'); // Gemini supports audio via generateContent with inline data
-      if (aiKey('groq')) providers.push('groq'); // Groq supports audio via Whisper API
-      return providers;
+      return aiKey('gemini') ? ['gemini'] : []; // Gemini supports audio via generateContent with inline data
     };
     const recProviders = () => recAudioProviders(); // Alias for backward compatibility
     
@@ -636,7 +636,8 @@ async function openWikiLink(title) {
         }
         throw lastError || new Error('No transcription model is available.');
       } });
-      if (!aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
+      // TEMPORARY: the Groq Whisper step is disabled, so Gemini is the only model.
+      if (false && !aiUsesManaged() && aiKey('groq')) steps.push({ name: 'groq', run: async () => {
         const raw = await recTranscribeGroq(blob, context);
         if (!raw) return '';
         const typed = await aiCall('groq', `${RECORD_LABEL_PASS}\n\n<transcript>\n${raw}\n</transcript>`, { temperature: 0 });
