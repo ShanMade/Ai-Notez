@@ -567,12 +567,30 @@ async function openWikiLink(title) {
       const { text } = await recFailover(steps, 'while writing notes');
       return text;
     }
+    // Reference clips for a chat model: the saved voices, plus the voices already
+    // heard in this recording ("Voice 1" …) so the same person keeps the same
+    // label after a provider switch. Clips are added until the size budget is full.
+    const REC_CONTEXT_BUDGET = 1200000;   // base64 characters across all clips
+    async function recVoiceContext(index) {
+      const saved = typeof nzVoiceSamples === 'function' && recVoiceCount() > 0 ? await nzVoiceSamples() : [];
+      const heard = [];
+      for (const label of Object.keys(REC.speakerClips || {}).sort((a, b) => Number(a.match(/\d+/)?.[0] || 0) - Number(b.match(/\d+/)?.[0] || 0))) {
+        const clip = REC.speakerClips[label];
+        if (!clip?.blob || !clip.blob.size) continue;
+        const data = bytesToB64Safe(new Uint8Array(await clip.blob.arrayBuffer()));
+        heard.push({ name: label, mime: clip.blob.type || 'audio/webm', data });
+      }
+      const out = [];
+      let used = 0;
+      for (const sample of [...saved, ...heard]) {
+        if (used + sample.data.length > REC_CONTEXT_BUDGET) continue;
+        used += sample.data.length;
+        out.push(sample);
+      }
+      return out;
+    }
     async function recTranscribePart(blob, index) {
       const context = recBoundaryTail(index);
-      // Reference clips are only attached to the first part and then once a
-      // minute: they cost bandwidth and the model keeps the names from the
-      // carried prompt, so every part does not need them.
-      const withSamples = index % 30 === 0 && typeof nzVoiceSamples === 'function' && recVoiceCount() > 0;
       const steps = [];
       if (aiUsesManaged() || aiKey('gemini')) steps.push({ name: 'gemini', run: async () => {
         const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -589,7 +607,9 @@ async function openWikiLink(title) {
           // The recording part always comes first, and the prompt names the clips
           // in the order they are attached, so an evicted clip can never shift the
           // mapping between a name and the wrong voice.
-          const samples = withSamples && !diarize ? await nzVoiceSamples() : [];
+          // Chat models get reference clips on every part, so a provider switch
+          // keeps the voices it was given. The transcription model takes none.
+          const samples = diarize ? [] : await recVoiceContext(index);
           const images = [audio];
           for (const sample of samples) images.push({ mime: sample.mime, data: sample.data });
           try {
@@ -644,6 +664,11 @@ Speaker labels: every line of speech starts with a speaker label, exactly like "
 Output only the transcript.`;
 
     function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
+    // Rewrites one part's labels to "Voice n" using only that part's numbering.
+    function recCanonicalPart(text) {
+      const raw = String(text || '');
+      return recWithSpkZero(recSpkZeroIn(raw), () => recNormalizeLabels(raw));
+    }
     // The one place a transcript is read from: the raw parts are joined, the
     // speaker numbering is decided for the whole recording, and every label is
     // rewritten to "Voice n" before anything renders or saves it.
@@ -744,7 +769,9 @@ Output only the transcript.`;
         if (REC.segMarks[index] == null) REC.segMarks[index] = recElapsed();   // when this part closed
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
         try {
-          const cleaned = recCleanPart(await recTranscribePart(blob, index));
+          // Each part is numbered on its own before it is stored. A provider that
+          // counts from zero (spk0) then cannot shift the voices of earlier parts.
+          const cleaned = recCleanPart(recCanonicalPart(await recTranscribePart(blob, index)));
           const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
           if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
           // A part with no speaker turn used to look exactly like the feature
