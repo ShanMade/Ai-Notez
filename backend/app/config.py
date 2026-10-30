@@ -48,13 +48,11 @@ class Settings:
     # default. The live variant (gemini-3.5-transcribe-live) is streaming only
     # and cannot diarize, so it is not used here.
     gemini_transcribe_model: str = os.getenv("AI_GEMINI_TRANSCRIBE_MODEL", "gemini-3.5-transcribe")
-    # Quotas are counted per model, so a model that is out of free requests for
-    # the day is skipped for the next one instead of failing the recording.
+    # TEMPORARY: the free-tier transcribe model is the only model used for
+    # Voice-to-Note audio, so there are no fallbacks while it is tested. Set
+    # AI_GEMINI_TRANSCRIBE_FALLBACKS to bring the chain back.
     gemini_transcribe_fallbacks: tuple[str, ...] = tuple(
-        item.strip() for item in os.getenv(
-            "AI_GEMINI_TRANSCRIBE_FALLBACKS",
-            "gemini-3.5-flash-lite,gemini-3.1-flash-lite",
-        ).split(",") if item.strip()
+        item.strip() for item in os.getenv("AI_GEMINI_TRANSCRIBE_FALLBACKS", "").split(",") if item.strip()
     )
     groq_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
@@ -70,11 +68,23 @@ class Settings:
         ).split(",") if item.strip()
     )
     gemini_key: str = os.getenv("AI_GEMINI_API_KEY", "")
+    # Voice-to-Note audio goes to these chat models, in order. The browser moves a
+    # part to the next one when the first is out of quota, so each request here is
+    # one model.
+    gemini_audio_models: tuple[str, ...] = tuple(
+        item.strip() for item in os.getenv(
+            "AI_GEMINI_AUDIO_MODELS",
+            "gemini-3.1-flash-lite,gemini-3.5-flash-lite",
+        ).split(",") if item.strip()
+    )
+
     @property
     def gemini_transcribe_models(self) -> tuple[str, ...]:
         """Every Gemini model Voice-to-Note may use, in order."""
         return tuple(dict.fromkeys(
-            item for item in (self.gemini_transcribe_model, *self.gemini_transcribe_fallbacks) if item
+            item for item in (
+                self.gemini_transcribe_model, *self.gemini_transcribe_fallbacks, *self.gemini_audio_models,
+            ) if item
         ))
 
     groq_key: str = os.getenv("AI_GROQ_API_KEY", "")

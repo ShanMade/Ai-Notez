@@ -578,7 +578,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     const aiModelPref = provider => aiStore.get(`notez-ai-model-${provider}`);
     const aiBackendSession = () => aiBackendConfigured() && currentSession?.mode === 'cloud';
     // AI source: 'managed' = the NotezAi backend (default, works for guests and signed-in users); 'byok' = the user's own Gemini/Groq key.
-    const aiSourcePref = () => aiStore.get('notez-ai-source', 'managed') === 'byok' ? 'byok' : 'managed';
+    // Own key first by default; NotezAi's service answers when that key fails.
+    const aiSourcePref = () => aiStore.get('notez-ai-source', 'byok') === 'managed' ? 'managed' : 'byok';
     const aiHasOwnKey = () => Object.keys(AI_PROVIDERS).some(aiKey);
     // When the managed route fails and the browser holds its own key, it is
     // retried on that key and then left alone for a while: a recording sends a
@@ -701,12 +702,21 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       return turns.filter(turn => turn.text).map(turn => (turn.speaker ? `${turn.speaker}: ${turn.text}` : turn.text)).join('\n').trim();
     }
-    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '', timeout = 0, audioTranscription = null, partsOnly = false } = {}) {
+    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '', timeout = 0, route = '', exact = false, audioTranscription = null, partsOnly = false } = {}) {
       const key = aiKey(provider), temperature = typeof forced === 'number' ? forced : aiTemperature();
+      // Own key first when the user prefers it, then NotezAi's service if that fails.
+      // A caller can also pin one route ('own' or 'managed') and get no fallback.
+      if (!route && aiHasOwnKey() && aiSourcePref() === 'byok' && aiBackendConfigured()) {
+        const retry = { json, temperature: forced, images, model: pinnedModel, timeout, audioTranscription, partsOnly, exact };
+        try { return await aiCall(provider, prompt, { ...retry, route: 'own' }); }
+        catch (error) { console.warn('Own key failed; using the NotezAi service.', error); return aiCall(provider, prompt, { ...retry, route: 'managed' }); }
+      }
+      if (route === 'managed' && !aiBackendConfigured()) throw new Error('The NotezAi service is not set up on this app.');
       // A caller can pin the model (Voice-to-Note pins its transcription model).
       // The backend honours the pair, so the managed path asks for it explicitly.
       const pinned = String(pinnedModel || '').trim();
-      if (aiUsesManaged()) {
+      const managedRoute = route ? route === 'managed' : aiUsesManaged();
+      if (managedRoute) {
         try {
           const result = await aiBackendRequest('/v1/ai/generate', {
             ...(pinned ? { provider, model: pinned } : {}),
@@ -723,7 +733,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           // The managed route is a convenience, not a requirement. When the
           // browser holds its own key the same request is retried on it, so a
           // managed outage never turns into a message the user has to act on.
-          if (!aiHasOwnKey()) throw error;
+          if (route || !aiHasOwnKey()) throw error;
           aiStore.set('notez-ai-managed-down', String(Date.now() + AI_MANAGED_PAUSE));
           console.warn('Managed AI route failed; retrying with the saved key.', error);
         }
@@ -762,7 +772,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const builtin = live.length ? [] : AI_PROVIDERS[provider].models.filter(aiChatModel);
       const busy = aiBusyMap(provider);
       const warm = model => !busy[model] || model === pinned;
-      let queue = [...new Set([pinned, prefUsable ? pref : '', lastGood, ...live, ...builtin].filter(Boolean))];
+      // An exact call (a pinned audio model) runs that one model and no other.
+      let queue = exact ? [pinned] : [...new Set([pinned, prefUsable ? pref : '', lastGood, ...live, ...builtin].filter(Boolean))];
       // Stable partition: a model that just answered "high demand" is tried
       // after its neighbours, not before them.
       queue = [...queue.filter(warm), ...queue.filter(model => !warm(model))];
