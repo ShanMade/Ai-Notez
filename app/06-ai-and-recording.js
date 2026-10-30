@@ -1525,19 +1525,15 @@ if (act === 'pause') return recPause();
       const due = (Array.isArray(notes) ? notes : []).filter(note => isReviewDue(note)).length;
       const exam = examInfo();
       const conflicts = readConflicts().length;
-      const lastExport = Number(localStorage.getItem('notez-last-export')) || 0;
-      const backupDue = notes.length > 0 && (!lastExport || Date.now() - lastExport > 14 * 864e5);
       const parts = [];
       if (exam) parts.push(exam.days > 0 ? `<b>${exam.days} day${exam.days === 1 ? '' : 's'} to your exam</b>` : exam.days === 0 ? '<b>Exam day. Good luck.</b>' : '<b>Your exam date has passed</b>');
       if (due) parts.push(`${due} note${due === 1 ? ' is' : 's are'} due for review`);
       if (conflicts) parts.push(`<b>${conflicts} sync conflict${conflicts === 1 ? '' : 's'} to review</b>`);
-      if (backupDue) parts.push('Your last backup is over two weeks old');
       if (!parts.length) { bar.hidden = true; return; }
       bar.hidden = false;
       const actions = [
         conflicts ? '<button type="button" class="nzai-primary hub-btn" data-nudge="conflicts">Review conflicts</button>' : '',
-        due ? '<button type="button" class="nzai-primary hub-btn" data-nudge="study">Start review</button>' : '',
-        backupDue ? '<button type="button" class="nzai-primary hub-btn" data-nudge="backup">Back up now</button>' : ''
+        due ? '<button type="button" class="nzai-primary hub-btn" data-nudge="study">Start review</button>' : ''
       ].join('');
       bar.innerHTML = `<div><b>${parts.join(' · ')}</b><small>${due ? 'A 10-minute session keeps your memory fresh.' : conflicts ? 'Nothing was lost: each conflict kept both versions.' : 'Nothing is due. Use the time to read ahead.'}</small></div><div style="display:flex;gap:6px;flex-wrap:wrap">${actions}</div>`;
     }
@@ -1551,7 +1547,6 @@ if (act === 'pause') return recPause();
     document.addEventListener('click', event => {
       if (event.target.closest('[data-nudge=study]')) startStudySession?.();
       if (event.target.closest('[data-nudge=conflicts]')) showConflicts();
-      if (event.target.closest('[data-nudge=backup]')) exportNotesJson();
     });
     // ================= Main UI: command strip on Home, recent notes in the sidebar =================
     function renderHomeCommands() {
