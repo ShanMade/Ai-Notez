@@ -19,35 +19,112 @@
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
     $('.search-shortcut').textContent = /Mac|iPhone|iPad/i.test(navigator.platform || '') ? '⌘ K' : 'Ctrl K';
-    const svgIcon = (name, size = 16) => {
-      const paths = {
-        note: '<path d="M6 4.5h8l4 4v11H6v-15Z"/><path d="M14 4.8v4h3.8M9 13h6M9 16h6"/>',
-        markdown: '<path d="M4 6h16v12H4z"/><path d="m7 14 2-5 2 5m-3.3-1h2.6m4.2-4v5l1.6-2 1.5 2V9"/>',
-        html: '<path d="m8 8-4 4 4 4m8-8 4 4-4 4m-2-10-4 12"/>',
-        pdf: '<path d="M6 4.5h8l4 4v11H6v-15Z"/><path d="M14 4.8v4h3.8M8.5 15.5h2m1.3 0h3.7M8.5 12.5h7"/>',
-        image: '<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m5 17 4.2-4 3.3 3 2.7-2.4L19 17"/>',
-        audio: '<path d="M11 5 6.5 9H4v6h2.5L11 19V5Z"/><path d="M15 9a4 4 0 0 1 0 6m2.5-8.5a7.5 7.5 0 0 1 0 11"/>',
-        video: '<rect x="3.5" y="6" width="13" height="12" rx="2"/><path d="m16.5 10 4-2v8l-4-2z"/><path d="m9 10 4 2-4 2z"/>',
-        folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-10Z"/><path d="M3.8 10h16.4"/>',
-        more: '<circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/>',
-        grid: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
-        list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".7" fill="currentColor"/><circle cx="4.5" cy="12" r=".7" fill="currentColor"/><circle cx="4.5" cy="18" r=".7" fill="currentColor"/>',
-        recent: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v5l3.2 1.8"/>',
-        theme: '<path d="M20 15.5A8.2 8.2 0 0 1 8.5 4a8.5 8.5 0 1 0 11.5 11.5Z"/>',
-        star: '<path d="m12 3.8 2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.82l-5.1 2.68.97-5.68-4.12-4.02 5.7-.83L12 3.8Z"/>',
-        edit: '<path d="m14 5 5 5M4 20l4.2-.8L19 8.4a2.1 2.1 0 0 0-3-3L5.2 16.2 4 20Z"/>',
-        open: '<path d="M13 5h6v6M19 5l-9 9"/><path d="M18 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
-        move: '<path d="M4 7h12m0 0-3-3m3 3-3 3M20 17H8m0 0 3 3m-3-3 3-3"/>',
-        download: '<path d="M12 4v10m0 0 4-4m-4 4-4-4M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3"/>',
-        import: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4"/>',
-        export: '<path d="M12 15V4m0 0L8 8m4-4 4 4M5 14.5v4A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-4"/>',
-        trash: '<path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
-        copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
-        check: '<path d="m5 12 4 4L19 6"/>',
-        file: '<path d="M6 4.5h8l4 4v11H6v-15Z"/><path d="M14 4.8v4h3.8"/>'
-      };
-      return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.file}</svg>`;
+    // ================= Icon system =================
+    // One geometry for the whole app: a 24px grid, 1.7px strokes, round caps and
+    // joins, no filled shapes except deliberate dots. Every icon is drawn on the
+    // same optical weight so a toolbar of mixed glyphs reads as one set.
+    const NZ_ICON_PATHS = {
+      // documents
+      note: '<path d="M6.75 3.75h6.9L18 8.1v12.15H6.75z"/><path d="M13.4 3.9v4.35h4.35M9.6 12.7h5.6M9.6 16.1h5.6"/>',
+      markdown: '<rect x="3.75" y="5.75" width="16.5" height="12.5" rx="2.4"/><path d="m6.9 14.6 1.9-4.6 1.9 4.6M7.5 13.2h2.6M13.6 10v4.6l1.6-2 1.6 2V10"/>',
+      html: '<path d="m8.4 7.6-4.2 4.4 4.2 4.4M15.6 7.6l4.2 4.4-4.2 4.4M13.4 5.4l-2.8 13.2"/>',
+      pdf: '<path d="M6.75 3.75h6.9L18 8.1v12.15H6.75z"/><path d="M13.4 3.9v4.35h4.35M9.3 16.4v-4.1h1.5a1.15 1.15 0 0 1 0 2.3H9.3M13.4 12.3v4.1h1.15a1.85 1.85 0 0 0 0-4.1z"/>',
+      image: '<rect x="3.75" y="5.25" width="16.5" height="13.5" rx="2.4"/><circle cx="8.7" cy="10" r="1.45"/><path d="m4.4 16.9 4.3-4.05 3.5 3.15 2.6-2.35 4.5 4.3"/>',
+      audio: '<path d="M11.2 5.4 6.9 9.05H4v5.9h2.9l4.3 3.65z"/><path d="M14.9 9.2a3.9 3.9 0 0 1 0 5.6M17.6 6.6a7.7 7.7 0 0 1 0 10.8"/>',
+      video: '<rect x="3.4" y="5.9" width="12.8" height="12.2" rx="2.4"/><path d="m16.2 10.4 4.4-2.2v7.6l-4.4-2.2z"/><path d="m8.1 10.1 3.6 1.9-3.6 1.9z"/>',
+      file: '<path d="M6.75 3.75h6.9L18 8.1v12.15H6.75z"/><path d="M13.4 3.9v4.35h4.35"/>',
+      book: '<path d="M4 5.4a1.8 1.8 0 0 1 1.8-1.8h4.7v16.8H5.8A1.8 1.8 0 0 1 4 18.6z"/><path d="M20 5.4a1.8 1.8 0 0 0-1.8-1.8h-4.7v16.8h4.7a1.8 1.8 0 0 0 1.8-1.8z"/><path d="M6.8 7.6h1.5M15.7 7.6h1.5"/>',
+      // structure
+      folder: '<path d="M3.6 7.4a2.1 2.1 0 0 1 2.1-2.1h3.6l1.9 2.1h5.1a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1H5.7a2.1 2.1 0 0 1-2.1-2.1z"/><path d="M3.9 9.9h16.2"/>',
+      folderPlus: '<path d="M3.6 7.4a2.1 2.1 0 0 1 2.1-2.1h3.6l1.9 2.1h5.1a2.1 2.1 0 0 1 2.1 2.1v7.4a2.1 2.1 0 0 1-2.1 2.1H5.7a2.1 2.1 0 0 1-2.1-2.1z"/><path d="M12 11.6v4.8M9.6 14h4.8"/>',
+      layers: '<path d="m12 3.6 8.2 4.3-8.2 4.3-8.2-4.3z"/><path d="m3.8 12.4 8.2 4.3 8.2-4.3M3.8 16.5l8.2 4.3 8.2-4.3"/>',
+      grid: '<rect x="4" y="4" width="6.4" height="6.4" rx="1.6"/><rect x="13.6" y="4" width="6.4" height="6.4" rx="1.6"/><rect x="4" y="13.6" width="6.4" height="6.4" rx="1.6"/><rect x="13.6" y="13.6" width="6.4" height="6.4" rx="1.6"/>',
+      list: '<path d="M9.2 6.2h10.3M9.2 12h10.3M9.2 17.8h10.3"/><circle cx="4.9" cy="6.2" r="1.05" fill="currentColor" stroke="none"/><circle cx="4.9" cy="12" r="1.05" fill="currentColor" stroke="none"/><circle cx="4.9" cy="17.8" r="1.05" fill="currentColor" stroke="none"/>',
+      // actions
+      spark: '<path d="M12 3.4c.55 4.2 1.9 5.55 6.1 6.1-4.2.55-5.55 1.9-6.1 6.1-.55-4.2-1.9-5.55-6.1-6.1 4.2-.55 5.55-1.9 6.1-6.1Z"/><path d="M17.9 15.2c.3 2.05.95 2.7 3 3-2.05.3-2.7.95-3 3-.3-2.05-.95-2.7-3-3 2.05-.3 2.7-.95 3-3Z"/>',
+      plus: '<path d="M12 5.2v13.6M5.2 12h13.6"/>',
+      close: '<path d="m6.4 6.4 11.2 11.2M17.6 6.4 6.4 17.6"/>',
+      check: '<path d="m4.9 12.4 4.7 4.7L19.1 7.5"/>',
+      search: '<circle cx="10.9" cy="10.9" r="6.65"/><path d="m15.9 15.9 4.3 4.3"/>',
+      more: '<circle cx="5.4" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="18.6" cy="12" r="1.35" fill="currentColor" stroke="none"/>',
+      moreVert: '<circle cx="12" cy="5.4" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="18.6" r="1.35" fill="currentColor" stroke="none"/>',
+      chevronDown: '<path d="m6.5 9.4 5.5 5.5 5.5-5.5"/>',
+      chevronRight: '<path d="m9.6 6.2 5.8 5.8-5.8 5.8"/>',
+      chevronUp: '<path d="m6.5 14.6 5.5-5.5 5.5 5.5"/>',
+      arrowLeft: '<path d="M19 12H5.4M11 5.6 4.8 12l6.2 6.4"/>',
+      arrowRight: '<path d="M5 12h13.6M13 5.6 19.2 12 13 18.4"/>',
+      arrowUpRight: '<path d="M7.4 16.6 16.6 7.4M8.7 7.4h7.9v7.9"/>',
+      send: '<path d="M20.4 3.6 3.9 10.2c-.8.3-.8 1.5 0 1.8l6.3 2.2 2.2 6.3c.3.8 1.5.8 1.8 0z"/><path d="m10.2 14.2 4.5-4.5"/>',
+      copy: '<rect x="8.6" y="8.6" width="11.4" height="11.4" rx="2.2"/><path d="M15.6 8.6V6.2A2.2 2.2 0 0 0 13.4 4H6.2A2.2 2.2 0 0 0 4 6.2v7.2a2.2 2.2 0 0 0 2.2 2.2h2.4"/>',
+      refresh: '<path d="M20.2 11.4a8.2 8.2 0 1 0-2.5 6.4"/><path d="M20.4 4.6v6.8h-6.8"/>',
+      trash: '<path d="M4.4 7.1h15.2M9.7 7.1V4.4h4.6v2.7M6.4 7.1l.85 12.2a1.6 1.6 0 0 0 1.6 1.5h6.3a1.6 1.6 0 0 0 1.6-1.5l.85-12.2"/><path d="M10.5 10.7v6.5M13.5 10.7v6.5"/>',
+      edit: '<path d="M15.2 4.6a2.35 2.35 0 0 1 3.3 3.3L8.2 18.2l-4.4 1.1 1.1-4.4z"/><path d="m13.9 5.9 3.3 3.3"/>',
+      pen: '<path d="M15.2 4.6a2.35 2.35 0 0 1 3.3 3.3L8.2 18.2l-4.4 1.1 1.1-4.4z"/>',
+      download: '<path d="M12 4.2v10.1M7.9 10.3 12 14.4l4.1-4.1M4.8 16.6v2.3a1.3 1.3 0 0 0 1.3 1.3h11.8a1.3 1.3 0 0 0 1.3-1.3v-2.3"/>',
+      upload: '<path d="M12 14.6V4.5M7.9 8.6 12 4.5l4.1 4.1M4.8 16.6v2.3a1.3 1.3 0 0 0 1.3 1.3h11.8a1.3 1.3 0 0 0 1.3-1.3v-2.3"/>',
+      external: '<path d="M13.4 4.6h6v6M19.4 4.6 10.6 13.4"/><path d="M17.8 14v4.4a1.6 1.6 0 0 1-1.6 1.6H5.8a1.6 1.6 0 0 1-1.6-1.6V8a1.6 1.6 0 0 1 1.6-1.6H10"/>',
+      move: '<path d="M4 7.4h11.3m-3.4-3.5 3.5 3.5-3.5 3.5M20 16.6H8.7m3.4 3.5-3.4-3.5 3.4-3.5"/>',
+      star: '<path d="m12 3.9 2.62 5.32 5.88.86-4.25 4.14 1 5.86L12 17.31l-5.25 2.77 1-5.86L3.5 10.08l5.88-.86z"/>',
+      pin: '<path d="M9.4 3.9h5.2l-.75 5.1 3.05 3.05H7.1l3.05-3.05z"/><path d="M12 12.05V20.1"/>',
+      clock: '<circle cx="12" cy="12" r="8.3"/><path d="M12 7.3V12l3.2 1.9"/>',
+      history: '<path d="M3.7 12a8.3 8.3 0 1 0 2.5-5.9L3.5 8.5"/><path d="M3.4 3.9v4.6h4.6M12 7.4V12l3.4 2"/>',
+      settings: '<circle cx="12" cy="12" r="2.9"/><path d="M19.1 14.4a1.5 1.5 0 0 0 .3 1.65l.05.05a1.8 1.8 0 1 1-2.55 2.55l-.05-.05a1.5 1.5 0 0 0-1.65-.3 1.5 1.5 0 0 0-.9 1.37v.13a1.8 1.8 0 1 1-3.6 0v-.07a1.5 1.5 0 0 0-.98-1.37 1.5 1.5 0 0 0-1.65.3l-.05.05a1.8 1.8 0 1 1-2.55-2.55l.05-.05a1.5 1.5 0 0 0 .3-1.65 1.5 1.5 0 0 0-1.37-.9h-.13a1.8 1.8 0 1 1 0-3.6h.07a1.5 1.5 0 0 0 1.37-.98 1.5 1.5 0 0 0-.3-1.65l-.05-.05a1.8 1.8 0 1 1 2.55-2.55l.05.05a1.5 1.5 0 0 0 1.65.3h.07a1.5 1.5 0 0 0 .9-1.37v-.13a1.8 1.8 0 1 1 3.6 0v.07a1.5 1.5 0 0 0 .9 1.37 1.5 1.5 0 0 0 1.65-.3l.05-.05a1.8 1.8 0 1 1 2.55 2.55l-.05.05a1.5 1.5 0 0 0-.3 1.65v.07a1.5 1.5 0 0 0 1.37.9h.13a1.8 1.8 0 1 1 0 3.6h-.07a1.5 1.5 0 0 0-1.37.9z"/>',
+      key: '<circle cx="8.1" cy="15.9" r="3.4"/><path d="m10.6 13.4 8.1-8.1M16.3 7.7l2 2M14.1 9.9l2 2"/>',
+      lock: '<rect x="4.9" y="10.4" width="14.2" height="9.4" rx="2.3"/><path d="M8.3 10.4V7.8a3.7 3.7 0 0 1 7.4 0v2.6M12 14.2v2.4"/>',
+      shield: '<path d="M12 3.6 5 6.4v5.1c0 4.1 2.8 7.6 7 8.9 4.2-1.3 7-4.8 7-8.9V6.4z"/><path d="m9.1 11.9 2.1 2.1 3.8-3.9"/>',
+      globe: '<circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8M12 3.6c2.2 2.3 3.4 5.3 3.4 8.4S14.2 18.1 12 20.4c-2.2-2.3-3.4-5.3-3.4-8.4S9.8 5.9 12 3.6Z"/>',
+      theme: '<path d="M20.3 15.2A8.4 8.4 0 0 1 8.8 3.7 8.6 8.6 0 1 0 20.3 15.2Z"/>',
+      sun: '<circle cx="12" cy="12" r="4.1"/><path d="M12 2.7v2.2M12 19.1v2.2M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.7 12h2.2M19.1 12h2.2M4.4 19.6 6 18M18 6l1.6-1.6"/>',
+      moon: '<path d="M20.3 15.2A8.4 8.4 0 0 1 8.8 3.7 8.6 8.6 0 1 0 20.3 15.2Z"/>',
+      // AI + study
+      mic: '<rect x="9.1" y="2.9" width="5.8" height="11.6" rx="2.9"/><path d="M5.4 11.2a6.6 6.6 0 0 0 13.2 0M12 17.8v3.3M8.6 21.1h6.8"/>',
+      stop: '<rect x="6.4" y="6.4" width="11.2" height="11.2" rx="2.6" fill="currentColor" stroke="none"/>',
+      pause: '<rect x="7.6" y="5.2" width="3.4" height="13.6" rx="1.5" fill="currentColor" stroke="none"/><rect x="13" y="5.2" width="3.4" height="13.6" rx="1.5" fill="currentColor" stroke="none"/>',
+      play: '<path d="M8.2 5.4 18.6 12 8.2 18.6z"/>',
+      bulb: '<path d="M9.2 18.1h5.6M10.2 20.9h3.6"/><path d="M12 3.1a6.1 6.1 0 0 0-3.6 11.05c.6.45.95 1.15.95 1.9v.25h5.3v-.25c0-.75.35-1.45.95-1.9A6.1 6.1 0 0 0 12 3.1Z"/>',
+      quiz: '<circle cx="12" cy="12" r="8.4"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.65.35-.95.85-.95 1.6M12 17v.1"/>',
+      cards: '<rect x="3.9" y="5.4" width="16.2" height="13.6" rx="2.4"/><path d="M7.9 10.2h8.2M7.9 13.8h5.4"/>',
+      checkList: '<path d="M9.6 6.4h10M9.6 12h10M9.6 17.6h10"/><path d="m3.4 6.2 1.4 1.4 2.4-2.6M3.4 17.4l1.4 1.4 2.4-2.6"/>',
+      spell: '<path d="M3.6 19.4 8.7 5.2l5.1 14.2M5.4 14.6h6.6"/><path d="M16.6 19.4h4"/>',
+      title: '<path d="M4.6 6.2h9.8M9.5 6.2v13.2M7.2 19.4h4.6"/><path d="M16.4 12.6h4M18.4 12.6v6.8M17.2 19.4h2.4"/>',
+      tag: '<path d="M4.2 12.4V5.9a1.7 1.7 0 0 1 1.7-1.7h6.5l7.6 7.6a1.7 1.7 0 0 1 0 2.4l-6.4 6.4a1.7 1.7 0 0 1-2.4 0z"/><circle cx="8.3" cy="8.3" r="1.35"/>',
+      plan: '<rect x="3.9" y="5.2" width="16.2" height="15" rx="2.4"/><path d="M3.9 10.2h16.2M8.6 2.9v4.4M15.4 2.9v4.4"/><path d="M7.9 14.1h2M11 14.1h2M14.1 14.1h2M7.9 17.2h2M11 17.2h2"/>',
+      due: '<circle cx="12" cy="12" r="8.3"/><path d="M12 7.2v5l3.2 1.9"/>',
+      chart: '<path d="M4 20V4M4 20h16"/><rect x="7.4" y="12.6" width="3.2" height="4.9" rx="1"/><rect x="12.4" y="8.4" width="3.2" height="9.1" rx="1"/><rect x="17.4" y="10.7" width="3.2" height="6.8" rx="1"/>',
+      bolt: '<path d="M13.4 3.2 4.9 13.5h5.9l-.7 7.3 8.5-10.3h-5.9z"/>',
+      thumbUp: '<path d="M7.4 10.2v10.2H4.2a.9.9 0 0 1-.9-.9v-8.4a.9.9 0 0 1 .9-.9z"/><path d="M7.4 10.2 11.1 3a2.7 2.7 0 0 1 2.7 2.7v3.6h5.1a1.9 1.9 0 0 1 1.9 2.2l-1.3 7a1.9 1.9 0 0 1-1.9 1.6H7.4"/>',
+      thumbDown: '<path d="M16.6 13.8V3.6h3.2a.9.9 0 0 1 .9.9v8.4a.9.9 0 0 1-.9.9z"/><path d="M16.6 13.8 12.9 21a2.7 2.7 0 0 1-2.7-2.7v-3.6H5.1a1.9 1.9 0 0 1-1.9-2.2l1.3-7a1.9 1.9 0 0 1 1.9-1.6h10.2"/>',
+      // misc
+      recent: '<circle cx="12" cy="12" r="8.3"/><path d="M12 7.3V12l3.2 1.9"/>',
+      open: '<path d="M13.4 4.6h6v6M19.4 4.6 10.6 13.4"/><path d="M17.8 14v4.4a1.6 1.6 0 0 1-1.6 1.6H5.8a1.6 1.6 0 0 1-1.6-1.6V8a1.6 1.6 0 0 1 1.6-1.6H10"/>',
+      filter: '<path d="M3.9 5.6h16.2l-6.3 7.5v5.5l-3.6 1.8v-7.3z"/>',
+      sliders: '<path d="M4 7.2h9.4M18.6 7.2h1.5M4 16.8h1.5M10.7 16.8H20"/><circle cx="16" cy="7.2" r="2.5"/><circle cx="8.1" cy="16.8" r="2.5"/>',
+      bell: '<path d="M17.6 9.6a5.6 5.6 0 1 0-11.2 0c0 5.2-2.1 6.7-2.1 6.7h15.4s-2.1-1.5-2.1-6.7Z"/><path d="M13.6 19.4a1.9 1.9 0 0 1-3.2 0"/>',
+      people: '<circle cx="9.2" cy="8.4" r="3.4"/><path d="M2.9 19.7a6.3 6.3 0 0 1 12.6 0"/><path d="M16.1 5.5a3.4 3.4 0 0 1 0 6.4M17.4 14.2a6.3 6.3 0 0 1 3.7 5.5"/>',
+      person: '<circle cx="12" cy="8.2" r="3.7"/><path d="M5.1 20a6.9 6.9 0 0 1 13.8 0"/>',
+      trashEmpty: '<path d="M4.4 7.1h15.2M9.7 7.1V4.4h4.6v2.7M6.4 7.1l.85 12.2a1.6 1.6 0 0 0 1.6 1.5h6.3a1.6 1.6 0 0 0 1.6-1.5l.85-12.2"/>',
+      keyboard: '<rect x="3.2" y="6.2" width="17.6" height="11.6" rx="2.2"/><path d="M7 10h.01M10.2 10h.01M13.4 10h.01M16.6 10h.01M7.6 14.1h8.8"/>',
+      display: '<rect x="3.4" y="4.6" width="17.2" height="11.8" rx="2.2"/><path d="M9.2 20.4h5.6M12 16.4v4"/>',
+      install: '<path d="M12 3.6v10.6M7.9 10.1 12 14.2l4.1-4.1M4.8 16.4v2.1a1.5 1.5 0 0 0 1.5 1.5h11.4a1.5 1.5 0 0 0 1.5-1.5v-2.1"/>',
+      logout: '<path d="M10.2 17.4 15.6 12l-5.4-5.4M15.2 12H3.9M18.4 4.2h.4a1.7 1.7 0 0 1 1.7 1.7v12.2a1.7 1.7 0 0 1-1.7 1.7h-.4"/>',
+      sidebar: '<rect x="3.6" y="4.6" width="16.8" height="14.8" rx="2.3"/><path d="M9.4 4.6v14.8"/>',
+      quote: '<path d="M9.6 6.6H6.4a1.9 1.9 0 0 0-1.9 1.9v3.1a1.9 1.9 0 0 0 1.9 1.9h1.5a1.7 1.7 0 0 0 1.7-1.7zM19.5 6.6h-3.2a1.9 1.9 0 0 0-1.9 1.9v3.1a1.9 1.9 0 0 0 1.9 1.9h1.5a1.7 1.7 0 0 0 1.7-1.7z"/><path d="M6.2 13.5c0 2.2-1 3.6-2.6 4.3M16.1 13.5c0 2.2-1 3.6-2.6 4.3"/>',
+      wifi: '<path d="M2.9 9.4a13 13 0 0 1 18.2 0M6.2 12.8a8.3 8.3 0 0 1 11.6 0M9.4 16.1a3.7 3.7 0 0 1 5.2 0"/><circle cx="12" cy="19.4" r="1.1" fill="currentColor" stroke="none"/>'
     };
+    // Aliases: commands and note kinds ask for these names.
+    NZ_ICON_PATHS.text = NZ_ICON_PATHS.note;
+    NZ_ICON_PATHS.record = NZ_ICON_PATHS.mic;
+    NZ_ICON_PATHS.ask = NZ_ICON_PATHS.search;
+    // exam-style question list (used by the assistant's study commands)
+    NZ_ICON_PATHS.mcq = '<path d="M4.5 6.5h2M4.5 12h2M4.5 17.5h2M9.5 6.5h10M9.5 12h10M9.5 17.5h10"/>';
+    NZ_ICON_PATHS.ai = NZ_ICON_PATHS.spark;
+    // A circle with an exclamation: the toast and inline error mark.
+    NZ_ICON_PATHS.alert = '<circle cx="12" cy="12" r="8.4"/><path d="M12 7.8v5M12 16.1v.1"/>';
+    NZ_ICON_PATHS.export = NZ_ICON_PATHS.upload;
+    NZ_ICON_PATHS.import = NZ_ICON_PATHS.download;
+    const svgIcon = (name, size = 16, extraClass = '') => `<svg class="icon${extraClass ? ` ${extraClass}` : ''}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${NZ_ICON_PATHS[name] || NZ_ICON_PATHS.file}</svg>`;
+    // Other files build markup too, so the set is shared rather than re-inlined.
+    window.nzIcon = svgIcon;
     const esc = (value = '') => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const uid = () => (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const wordCount = text => (String(text || '').trim().match(/\b[\w'-]+\b/g) || []).length;
@@ -325,7 +402,10 @@
           if (!listType) { listType = nextType; output.push(`<${listType}>`); }
           const rawItem = (bullet || numbered)[1];
           const check = rawItem.match(/^\[([ xX])\]\s+(.*)$/);
-          output.push(`<li>${check ? `<span aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${check[1].trim() ? '☑' : '☐'}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
+          const TICK = '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><path d="m15.4 15.9 1.7 1.8 3.2-4"/>';
+          const BOX = '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><rect x="15" y="14.6" width="5.2" height="5.2" rx="1.2"/>';
+          const tick = (name) => `<svg class="icon md-task" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${name}</svg>`;
+          output.push(`<li>${check ? `<span class="md-task-slot" aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${tick(check[1].trim() ? TICK : BOX)}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
           continue;
         }
         closeList(); flushQuote(); paragraph.push(line.trim());
@@ -439,7 +519,7 @@
     function toast(message, type = 'success', duration = 3600) {
       const item = document.createElement('div');
       item.className = `toast ${type === 'error' ? 'error' : ''}`;
-      item.innerHTML = `<span class="toast-mark">${type === 'error' ? '!' : '✓'}</span><span>${esc(message)}</span>`;
+      item.innerHTML = `<span class="toast-mark">${svgIcon(type === 'error' ? 'alert' : 'check', 15)}</span><span>${esc(message)}</span>`;
       $('#toast-stack').append(item);
       window.setTimeout(() => item.remove(), duration);
     }
@@ -463,6 +543,20 @@
       $('#auth-status').textContent = '';
       $('#auth-status').classList.remove('show');
     }
+    // A provider's own refusal ("credential rejected", "(tried groq, mistral)",
+    // a raw upstream body) is never shown to the user. Anything that looks like
+    // infrastructure noise becomes one plain sentence; the detail is logged.
+    function nzSafeError(error, fallback = 'The AI is busy right now. Try again in a moment.') {
+      const raw = String(error?.message || error || '').replace(/\s*\(tried[^)]*\)/gi, '').trim();
+      if (!raw) return fallback;
+      if (/credential|api[ _-]?key|unauthori[sz]ed|forbidden|quota|rate.?limit|resource[ _-]?exhausted|overload|temporarily|unavailable|internal server|bad gateway|gateway timeout|\b(401|403|408|429|5\d\d)\b|model.{0,24}(not|unsup|decommiss|retir)|decommiss|unsupported provider|no credential/i.test(raw)) {
+        console.warn('AI detail (not shown to the user):', error);
+        return fallback;
+      }
+      return raw;
+    }
+    window.nzSafeError = nzSafeError;
+
     function friendlyFirebaseError(error) {
       const code = String(error?.code || '').toLowerCase();
       if (code.includes('api-key-not-valid')) return 'Firebase rejected the web API key. Recopy apiKey from Firebase Console → Project settings → General → Your apps for this same project, and check that the Google Cloud key is active and not restricted away from Firebase Authentication. If the key is valid but sign-in still fails, add this app’s hostname under Authentication → Settings → Authorized domains.';
@@ -1475,7 +1569,10 @@ const noteSearchCache = new WeakMap();
       if (!raw && cachedHtmlText) raw = cachedHtmlText;
       if (!raw && isHtmlSource(note.body)) raw = extractReadableHtml(note.body);
       if (!raw) raw = note.fileName || '';
-      let text = String(raw || '').replace(/\r/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^#{1,6}\s*/gm, '').replace(/[`*_~]/g, '').replace(/^>\s*/gm, '').replace(/\s+/g, ' ').trim();
+      // A recording note stores speaker labels on their own lines; the excerpt
+      // reads them like the note does ("Voice 1:"), never as a raw "spk0:".
+      const labelled = typeof window.nzNormalizeSpeakerLabels === 'function' ? window.nzNormalizeSpeakerLabels(raw) : raw;
+      let text = String(labelled || '').replace(/\r/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^#{1,6}\s*/gm, '').replace(/[`*_~]/g, '').replace(/^>\s*/gm, '').replace(/\[\d{2}:\d{2}(?::\d{2})?\]\s*/g, '').replace(/\s+/g, ' ').trim();
       if (!text) return '';
       const terms = String(query || '').replace(/"([^"]+)"/g, '$1').split(/\s+/).map(term => term.trim()).filter(term => term.length > 1);
       let hit = -1;

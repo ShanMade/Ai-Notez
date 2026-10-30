@@ -143,7 +143,49 @@
   }
 
   // Main markdown to HTML function
+  // A transcript part can arrive with the provider's own speaker label
+  // ("spk0:", "spk_1:", "Speaker B:") when a model ignores the "Voice n"
+  // instruction. Rendering rewrites those at the start of a line, so an older
+  // note that already stored one reads as "Voice 1:" instead of leaking the
+  // raw label into the reader.
+  // Invisible characters are not part of a label, but a model writing Urdu or
+  // Hebrew puts a direction mark in front of a line (\u200F \u200E \u202B …)
+  // and a model writing anything can leave a zero-width space behind. Those
+  // stopped the pattern from matching at the start of the line, so the raw
+  // "spk0:" reached the page. Marks are removed before matching (and before
+  // the zero-based test), then a mark that opened the line is put back, because
+  // it is what keeps a mixed right-to-left line in the right order.
+  const REC_INVISIBLE = /[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  const recInvisibleLead = /^[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/;
+  function normalizeSpeakerLabels(text) {
+    const source = String(text || '');
+    // A transcript line can also arrive as a list item ("- spk0: …") once a
+    // model has been asked for notes; the bullet is kept and the label inside
+    // it is rewritten like any other.
+    const bullet = '(?:[-*\u2022\u2013]\\s+)?';
+    // A recording is numbered one way throughout: if any part says "spk0" the
+    // labels count from zero, otherwise Gemini's "spk_1" already starts at one.
+    const zeroBased = new RegExp(`(?:^|\\n)\\s*${bullet}(?:\\[[\\d:]{3,12}\\]\\s*)?\\**\\s*spk[\\s_-]*0\\s*\\**\\s*[:\\uFF1A]`, 'i')
+      .test(source.replace(REC_INVISIBLE, ''));
+    const numbered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(spk|voice|speaker|person)[\\s_-]*([0-9\\u0660-\\u0669]{1,2})\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
+    const lettered = new RegExp(`^(\\s*${bullet}(?:\\[[\\d:]+\\]\\s*)?)\\**\\s*(?:speaker|person|voice)\\s*([A-Za-z])\\s*\\**\\s*(?:[:\\uFF1A]|\\s+[-\u2013\u2014]\\s+)\\s*\\**\\s*`, 'i');
+    return source.split('\n').map(raw => {
+      const lead = (raw.match(recInvisibleLead) || [''])[0];
+      const line = raw.replace(REC_INVISIBLE, '');
+      let match = line.match(numbered);
+      if (match) {
+        const digits = String(match[3]).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
+        const shift = /^spk$/i.test(match[2]) && zeroBased ? 1 : 0;
+        return `${lead}${match[1]}Voice ${Math.max(1, Number(digits) + shift)}: ${line.slice(match[0].length)}`;
+      }
+      match = line.match(lettered);
+      if (match) return `${lead}${match[1]}Voice ${match[2].toUpperCase().charCodeAt(0) - 64}: ${line.slice(match[0].length)}`;
+      return lead + line;
+    }).join('\n');
+  }
+  window.nzNormalizeSpeakerLabels = normalizeSpeakerLabels;
   window.markdownToHtmlSafe = function markdownToHtmlSafe(markdown) {
+    markdown = normalizeSpeakerLabels(markdown);
     const inline = source => {
       if (!source) return '';
       let text = source;  // Do NOT escape here - escape matched content in replacements
@@ -405,7 +447,13 @@
           }
           const rawItem = (bullet || numbered)[1];
           const check = rawItem.match(/^\[([ xX])\]\s+(.*)$/);
-          output.push(`<li>${check ? `<span aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${check[1].trim() ? '\u2611' : '\u2610'}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
+          const taskIcon = done => {
+            const shape = done
+              ? '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><path d="m15.4 15.9 1.7 1.8 3.2-4"/>'
+              : '<path d="M4.6 7.1h8.8M4.6 12h8.8M4.6 16.9h5.4"/><rect x="15" y="14.6" width="5.2" height="5.2" rx="1.2"/>';
+            return `<svg class="icon md-task" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${shape}</svg>`;
+          };
+          output.push(`<li>${check ? `<span class="md-task-slot" aria-label="${check[1].trim() ? 'complete' : 'incomplete'}">${taskIcon(check[1].trim())}</span> ${inline(check[2])}` : inline(rawItem)}</li>`);
           continue;
         }
         

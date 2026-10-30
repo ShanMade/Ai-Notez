@@ -512,7 +512,8 @@ async function startEnhancedRecording(mode = 'class') {
               updateRecordingStatus(RECORDING_STATUS.NEEDS_ATTENTION);
             }
             
-            SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Error transcribing segment ${segmentIndex + 1}: ${error.message || 'Unknown error'}]`;
+            SPEAKER_STATE.transcriptSegments[segmentIndex] = `[Part ${segmentIndex + 1} could not be transcribed]`;
+            console.warn('Segment transcription failed:', error);
             SPEAKER_STATE.rawTranscriptSegments[segmentIndex] = '';
             updateRecordingUI();
           }
@@ -637,7 +638,7 @@ function updateRecordingUI() {
   recPanel.innerHTML = `
     <div class="rec-header">
       <div class="rec-status">
-        <span class="rec-indicator">●</span>
+        <span class="rec-indicator" aria-hidden="true"></span>
         <span class="rec-time">${timeStr}</span>
         <span class="rec-mode">${SPEAKER_STATE.mode === 'meeting' ? 'Meeting' : 'Class'}</span>
       </div>
@@ -983,7 +984,7 @@ function renderVoiceProfileSettings() {
         
         <div class="voice-profile-card">
           <div class="profile-header">
-            <span class="profile-icon">🎤</span>
+            <span class="profile-icon">${typeof svgIcon === 'function' ? svgIcon('mic', 18) : ''}</span>
             <span class="profile-name">${ownerProfile?.name || 'Your Voice'}</span>
           </div>
           
@@ -1086,7 +1087,7 @@ function renderProfileCard(profile) {
   return `
     <div class="profile-card" data-profile-id="${esc(profile.id)}">
       <div class="profile-header">
-        <span class="profile-icon">👤</span>
+        <span class="profile-icon">${typeof svgIcon === 'function' ? svgIcon('person', 18) : ''}</span>
         <span class="profile-name">${esc(profile.name)}</span>
         <button type="button" class="delete-profile" data-profile-id="${esc(profile.id)}" title="Delete">×</button>
       </div>

@@ -1,8 +1,8 @@
 /* ==========================================================================
    Reader v2 — editorial minimal (design A)
    The note is the page: no card, no frame, one column, one accent. Every
-   rule here is scoped to the reader (#note-view) or to the assistant's sheet
-   state (html.nzai-sheet), so the rest of the app is untouched.
+   rule here is scoped to the reader (#note-view), so the rest of the app is
+   untouched; the assistant stays a dock, never a sheet over the note.
    ========================================================================== */
 
 html {
@@ -422,33 +422,11 @@ html[data-theme] #sel-bar button {
 html[data-theme] #sel-bar button:hover,
 html[data-theme] #sel-bar button:focus-visible { background: var(--rv2-hover); color: var(--rv2-ink); }
 
-/* ------------------------------------------------- assistant as a sheet */
-html.nzai-sheet #nz-ai {
-  top: auto; right: auto; bottom: 24px; left: 50%;
-  height: min(74vh, 780px); max-height: calc(100dvh - 96px);
-  width: min(var(--dock-w, 680px), calc(100vw - 28px));
-  transform: translateX(-50%);
-  border: 1px solid var(--rv2-line-strong);
-  border-radius: 18px;
-  box-shadow: 0 30px 80px -32px rgba(10, 20, 15, .55);
-  overflow: hidden;
-  overscroll-behavior: contain;
-}
-html.nzai-sheet .app-shell { margin-right: 0 !important; }
-html.nzai-sheet #nzai-fab { display: none; }
-html.nzai-sheet .nzai-resizer { left: 0; }
-
-/* Mobile: a full-width bottom sheet. */
-@media (max-width: 760px) {
-  html.nzai-sheet #nz-ai {
-    left: 0; right: 0; bottom: 0; width: 100%;
-    height: 88dvh; max-height: 88dvh;
-    border-radius: 18px 18px 0 0;
-    border-left: 0; border-right: 0; border-bottom: 0;
-    transform: none;
-  }
-}
-
+/* ------------------------------------------------------- assistant (docked)
+   The assistant is never presented as a sheet over the note. It keeps the
+   dock the rest of the app uses: a column beside the page on a desktop and the
+   page itself on a phone. The reader only has to make room for it, which the
+   app-wide `html.nzai-open` rule already does. */
 /* ------------------------------------------------------------ responsive */
 /* With the sidebar on screen the column is narrower than the viewport, so the
    margin numerals go inline earlier than the phone breakpoint. */
@@ -496,3 +474,7 @@ html.nzai-sheet .nzai-resizer { left: 0; }
   .rv2-bar, .rv2-title, .rv2-ask, .rv2-sheet, .rv2-scrim,
   .rv2-arc .fill, #note-view #viewer-content > h2::before { transition: none; }
 }
+
+/* the ask bar's icon now comes from the shared set */
+.rv2-ask .spark svg { width: 16px; height: 16px; display: block; }
+.rv2-ask .spark { display: inline-flex; align-items: center; }

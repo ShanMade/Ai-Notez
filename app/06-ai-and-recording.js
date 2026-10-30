@@ -313,7 +313,8 @@ async function openWikiLink(title) {
     const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0,
       status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
       noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
-      segMarks: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false, sttModel: '' };
+      segMarks: [], segWall: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false, sttModel: '',
+      histOpen: new Set() };
     const recMime = () => ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(type => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || 'audio/webm';
     // Audio time, not wall time: every continuation adds the time already
     // recorded, so part marks and the clock keep counting across a resume.
@@ -322,6 +323,26 @@ async function openWikiLink(title) {
       return REC.baseMs + Math.max(0, (REC.status === REC_STATUS.PAUSED ? REC.pausedAt : Date.now()) - REC.startedAt - REC.pausedMs);
     };
     const fmtClock = ms => { const sec = Math.floor(ms / 1000), h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = sec % 60; return (h ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0'); };
+    // Time of day on this device, not a stopwatch. A transcript is read days
+    // later, so "14:05:12" tells you when a sentence was said; "Part 45 - 46 s"
+    // only tells you how the audio was cut up. The clock is built by hand so it
+    // does not pick up a locale's own separators or numerals.
+    const recClockOf = ms => { const d = new Date(Number(ms) || Date.now()); return [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':'); };
+    // When a part began, on the wall clock. Parts are numbered internally for
+    // retries, but a reader only ever sees the time.
+    const recWallOf = index => Number(REC.segWall?.[index]) || Number(REC.startedAt) || Date.now();
+    // "[02:14]" is an offset from the first second of its part, so the wall
+    // time of a line is that part's start plus that offset.
+    function recStampSeconds(stamp) {
+      const found = String(stamp || '').match(/\d{1,2}(?::\d{1,2}){1,2}/);
+      if (!found) return null;
+      const bits = found[0].split(':').map(Number);
+      return bits.length === 3 ? bits[0] * 3600 + bits[1] * 60 + bits[2] : bits[0] * 60 + (bits[1] || 0);
+    }
+    function recStampWall(partIndex, stamp) {
+      const seconds = recStampSeconds(stamp);
+      return seconds == null ? '' : recClockOf(recWallOf(partIndex) + seconds * 1000);
+    }
     const recTransient = error => error?.status === 429 || error?.status >= 500 || error instanceof TypeError || error?.name === 'AbortError' || error?.code === 'cut';
     const recLabel = provider => provider === 'gemini' ? 'Gemini' : 'Groq';
     const recSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -443,17 +464,45 @@ async function openWikiLink(title) {
     // Gemini output when it ignores the "Voice n" instruction), bold labels and
     // a dash instead of a colon. All of them become a speaker turn, and the
     // numbered forms share one numbering so colours and naming still line up.
+    // Arabic-Indic digits are digits too: a model writing Urdu can label a voice
+    // "spk_١", and that still has to read as Voice 1.
+    const recDigits = text => String(text || '').replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660));
     function recLabelName(name) {
-      const raw = String(name || '').replace(/\*+/g, '').trim();
-      const numbered = /^(?:voice|speaker|person|spk)[\s_-]*(\d{1,2})$/i.exec(raw);
-      if (numbered) return `Voice ${Number(numbered[1])}`;
+      const raw = recUnmark(String(name || '')).replace(/\*+/g, '').trim();
+      // Gemini says spk_1, spk_2 … and a chat model told to label turns often
+      // says spk0, spk1, spk2. `recSpkZero` is set from the whole transcript, so
+      // one recording is numbered one way and the first voice always reads
+      // "Voice 1". A label is never shown raw.
+      const spk = /^spk[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      if (spk) return `Voice ${Math.max(1, Number(recDigits(spk[1])) + (recSpkZero ? 1 : 0))}`;
+      const numbered = /^(?:voice|speaker|person)[\s_-]*([0-9\u0660-\u0669]{1,2})$/i.exec(raw);
+      if (numbered) return `Voice ${Math.max(1, Number(recDigits(numbered[1])))}`;
       const letter = /^(?:speaker|person)\s*([A-Za-z])$/i.exec(raw);
       if (letter) return `Voice ${letter[1].toUpperCase().charCodeAt(0) - 64}`;
       return recKnownMatch(raw) || raw;
     }
-    const REC_LABEL_RE = /^\s*(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:\d{1,2}|[A-Za-z])|[^:\n]{1,40}?)\s*\**\s*(?::\s*|\s+[-–—]\s+)(.*)$/i;
+    let recSpkZero = false;   // true while the current transcript labels its voices from 0
+    // A saved note carries no live state, so its numbering is worked out from its
+    // own words: one recording numbered from zero, the next from one.
+    const recSpkZeroIn = text => /(?:^|\n)\s*(?:[-*•]\s+)?(?:\[[\d:]{3,12}\]\s*)?\**\s*spk[\s_-]*0\s*\**\s*[:\uFF1A]/i.test(recUnmark(String(text || '')));
+    const recWithSpkZero = (zero, run) => { const previous = recSpkZero; recSpkZero = zero; try { return run(); } finally { recSpkZero = previous; } };
+    // A model writing Urdu or Hebrew often puts an invisible direction mark
+    // (U+200F, U+200E …) in front of a line: "\u200Fspk0: …". The mark is not
+    // part of the label, but it stopped the label regex from matching at the
+    // start of the line, so a transcript showed raw "spk0:" and every voice
+    // collapsed into the same colour. Marks are dropped before a line is read.
+    const REC_BIDI_HEAD = /^[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/;
+    const REC_BIDI_ANY = /[\u00ad\u180e\u200b-\u200f\u061c\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]+/g;
+    // Marks are removed wherever they sit (a model can also put one after a
+    // timestamp or after bold asterisks), but a mark that opened the line is put
+    // back afterwards, because that is what keeps a mixed Urdu line right-to-left.
+    const recUnmark = line => String(line ?? '').replace(REC_BIDI_ANY, '');
+    const recLeadMark = line => (String(line ?? '').match(REC_BIDI_HEAD) || [''])[0];
+    // A model writing notes often puts a turn in a list item ("- Voice 1: …"),
+    // so a bullet is allowed in front of the label and kept.
+    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
-      const match = String(line).match(REC_LABEL_RE);
+      const match = String(recUnmark(line)).match(REC_LABEL_RE);
       if (!match) return null;
       const name = recLabelName(match[2]);
       const isVoice = /^Voice\s+\d+$/i.test(name);
@@ -494,7 +543,9 @@ async function openWikiLink(title) {
             if (attempt === 0) await recSleep(700);
           }
         }
-        if (i < steps.length - 1) { REC.notice = `${recLabel(step.name)} stopped (${aiErrorMessage(last)}). ${recLabel(steps[i + 1].name)} is taking over.`; REC.failovers++; updateRecLive(); }
+        // The reason a provider refused is a backend detail: it is logged for
+        // support, never printed. The panel only says who is carrying on.
+        if (i < steps.length - 1) { REC.notice = `${recLabel(steps[i + 1].name)} is taking over ${tag}.`; REC.failovers++; updateRecLive(); }
       }
       throw last || new Error('No AI provider is available.');
     }
@@ -559,7 +610,7 @@ async function openWikiLink(title) {
             // because the chat models take the same audio with a prompt.
             const rejected = diarize && [400, 404, 422, 501].includes(error?.status);
             if (i === order.length - 1 || !(recModelExhausted(error) || rejected)) throw error;
-            REC.notice = `${recModelLabel(model)} could not take this part (${aiErrorMessage(error)}). Switching to ${recModelLabel(order[i + 1])}.`;
+            REC.notice = `Switching to ${recModelLabel(order[i + 1])} for this part.`;
             updateRecLive();
           }
         }
@@ -592,8 +643,35 @@ If this part starts in the middle of a word or a sentence, continue it from ther
 Speaker labels: every line of speech starts with a speaker label, exactly like "[00:12] Voice 1: words". Use the known name above when the voice matches one of them; otherwise use "Voice 1", "Voice 2" and so on. Keep the same label for the same person and continue the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}. If you cannot tell the voices apart, label every line "Voice 1:" — never write a line of speech without a label.
 Output only the transcript.`;
 
-    function recKnownVoices() { return recDetectVoices(REC.segTexts.join('\n')).join(', '); }
-    function recLiveTranscript() { return REC.segTexts.filter(Boolean).join('\n'); }
+    function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
+    // The one place a transcript is read from: the raw parts are joined, the
+    // speaker numbering is decided for the whole recording, and every label is
+    // rewritten to "Voice n" before anything renders or saves it.
+    function recLiveTranscript() {
+      const text = REC.segTexts.filter(Boolean).join('\n');
+      recSpkZero = recSpkZeroIn(text);
+      return recNormalizeLabels(text);
+    }
+    // The transcript that goes into the note: every part joined, and every
+    // stamped line rewritten to the time of day it was spoken. A note opened a
+    // week later should say when something was said, not which audio chunk it
+    // arrived in - and because each chunk restarts its offsets at zero, the raw
+    // stamps jumped backwards every minute.
+    function recTranscriptForNote() {
+      recLiveTranscript();   // settles the Voice numbering before any line is read
+      return REC.segTexts.map((text, index) => {
+        let lastClock = recClockOf(recWallOf(index));
+        return String(recNormalizeLabels(text || '')).split('\n').map(raw => {
+          const line = recUnmark(raw);
+          if (!line.trim()) return '';
+          const own = recStampWall(index, (line.match(/^\[([\d:]{3,12})\]/) || [])[1]);
+          const clock = own || lastClock;
+          lastClock = clock;
+          if (!own) return `[${clock}] ${line}`;
+          return line.replace(/^\[([\d:]{3,12})\]/, `[${clock}]`);
+        }).filter(Boolean).join('\n');
+      }).filter(Boolean).join('\n');
+    }
     function recNoteBody(transcript, notesText, finishing) {
       const when = new Date(REC.startedAt);
       const providerLine = REC.provider ? `${recLabel(REC.provider)}` : 'AI';
@@ -606,7 +684,7 @@ Output only the transcript.`;
     function recSaveNote(finishing = false, notesText = REC.liveNotes) {
       if (REC.discarding) return;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
-      note.body = recNoteBody(recLiveTranscript(), notesText, finishing).slice(0, 200000);
+      note.body = recNoteBody(recTranscriptForNote(), notesText, finishing).slice(0, 200000);
       note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', REC.mode === 'meeting' ? 'MEETING' : 'CLASS'];
       persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
       renderEverything();
@@ -624,14 +702,38 @@ Output only the transcript.`;
           const prior = REC.liveNotes ? `Current notes:\n${REC.liveNotes}\n\n` : '';
           REC.liveNotes = await recTextCall(`${instruction}\n\n${prior}Update the notes with the newest part of this recording. Keep earlier points, add new ones, and remove repeats. Keep every Voice label.\n\n<transcript>\n${transcript.slice(-14000)}\n</transcript>`);
         }
-      } catch (error) { console.warn('Live notes update failed:', error); REC.notice = `Notes will refresh with the next part (${aiErrorMessage(error)}).`; }
+      } catch (error) {
+        // A notes refresh is retried on the next part, so a failed one needs no
+        // message at all. The reason stays in the console for support.
+        console.warn('Live notes update failed:', error);
+        if (final) REC.notice = 'The notes summary could not be written this time. The transcript is saved.';
+      }
       REC.lastNotesAt = Date.now();
     }
+    // Rewrites a leading speaker label to its canonical "Voice n" spelling, so a
+    // model that answers "spk_0:" or "Speaker B:" never stores a raw provider
+    // label in the note. A real name ("Ayesha:") is left exactly as written.
+    const REC_LABEL_HEAD = /^(\s*(?:[-*•–]\s+)?(?:\[[\d:]+\]\s*)?)(\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*)\**\s*(?:[:\uFF1A]|\s+[-–—]\s+)\s*\**\s*/i;
+    // Nothing above can be trusted to catch every model quirk forever, so the
+    // raw provider spelling is also swept out of whatever is about to be shown.
+    // This is the guarantee: no surface ever prints "spk0:".
+    const recScrubSpk = line => String(line ?? '').replace(
+      /(^|[^\p{L}\p{N}])(?:spk)[\s_-]*([0-9\u0660-\u0669]{1,2})(?![0-9\u0660-\u0669])/giu,
+      (all, lead, digits) => `${lead}Voice ${Math.max(1, Number(recDigits(digits)) + (recSpkZero ? 1 : 0))}`
+    );
+    function recNormalizeLabels(text) {
+      return String(text || '').split('\n').map(raw => recScrubSpk(recLeadMark(raw) + recUnmark(raw).replace(
+        REC_LABEL_HEAD,
+        (all, stamp, label) => `${stamp}${recLabelName(label)}: `
+      ))).join('\n');
+    }
     // Keeps the words that were heard. Runs of [inaudible] or [unclear] lines are dropped; a part with no words becomes empty.
+    // Labels are left as the model wrote them: they are rewritten once, for the
+    // whole transcript, so every part shares one Voice numbering.
     function recCleanPart(raw) {
       const lines = String(raw || '').split('\n').filter(line => line.trim());
       const kept = lines.filter(line => {
-        const words = line.replace(/^\s*(\[[\d:]+\]\s*)?\**\s*Voice\s+\d+\s*\**\s*:/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
+        const words = recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
         return words.length > 0;
       });
       return kept.join('\n').trim();
@@ -644,12 +746,13 @@ Output only the transcript.`;
         try {
           const cleaned = recCleanPart(await recTranscribePart(blob, index));
           const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
-          if (!text) REC.notice = `Part ${index + 1} had no clear speech. Check the microphone and the room noise.`;
+          if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
           // A part with no speaker turn used to look exactly like the feature
           // being gone, because the transcript simply rendered as paragraphs.
-          else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `Part ${index + 1} came back without speaker labels. The words are kept as plain text.`;
-          recRememberVoiceClips(text, blob);
+          else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `The words at ${recClockOf(recWallOf(index))} came back without speaker labels. They are kept as plain text.`;
           REC.segTexts[index] = text;
+          recLiveTranscript();          // settles the Voice numbering before any label is read
+          recRememberVoiceClips(text, blob);
           REC.segBlobs[index] = null;
           REC.processed++;
           const isLast = REC.status === REC_STATUS.FINALIZING && REC.processed >= REC.expectedParts;
@@ -661,10 +764,10 @@ Output only the transcript.`;
           REC.segStatuses[index] = SEG_STATUS.FAILED;
           REC.segBlobs[index] = blob;
           const noSpare = !aiUsesManaged() && recAudioProviders().length < 2;
-          REC.notice = `Part ${index + 1} could not be transcribed (${aiErrorMessage(error)}). `
+          REC.notice = `The stretch at ${recClockOf(recWallOf(index))} could not be transcribed. `
             + (noSpare
-              ? 'Add a Groq key in NotezAi settings so a rate limit on one provider cannot stop the recording.'
-              : 'The audio is kept — retry the part when a provider is free.');
+              ? 'Add your own key in NotezAi settings so a rate limit cannot stop the recording.'
+              : 'The audio is kept — retry it when the AI is free.');
           updateRecLive();
         }
         updateRecLive();
@@ -683,6 +786,7 @@ Output only the transcript.`;
       recorder.start();
       REC.recorder = recorder;
       REC.partStartAt = Date.now();
+      REC.segWall[index] = REC.partStartAt;   // the wall clock this part began at
       REC.expectedParts = index + 1;
     }
     function endPart() {
@@ -756,7 +860,7 @@ Output only the transcript.`;
     // Forgets the recording session but keeps the note it produced (if any).
     function recResetSession() {
       REC.status = REC_STATUS.IDLE;
-      REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = [];
+      REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = [];
       REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
       REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set();
       REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.audioSaved = false;
@@ -767,23 +871,148 @@ Output only the transcript.`;
     }
     const REC_VOICE_CLASS = ['voice-a', 'voice-b', 'voice-c', 'voice-d'];
     function recTimeline() {
+      recLiveTranscript();   // decides the Voice numbering; only the flag is used here
       const parts = REC.segTexts.map((text, index) => ({ index, text: text || '', status: REC.segStatuses[index] || SEG_STATUS.PENDING })).filter(part => part.text.trim() || part.status === SEG_STATUS.FAILED || part.status === SEG_STATUS.NEEDS_RETRY);
       if (!parts.length) return `<div class="rec-empty">${REC.status === REC_STATUS.IDLE ? 'The live transcript appears here as you record.' : 'Listening… the first part appears within about 30 seconds.'}</div>`;
       const lastIndex = parts[parts.length - 1].index;
       return parts.map(part => {
-        const lines = part.text.split('\n').filter(line => line.trim()).map(line => {
+        // A model stamps most turns but not every one. A line without a stamp
+        // borrows the last clock above it (or the start of its part), so the
+        // column reads as one clock instead of a row of gaps.
+        let lastClock = recClockOf(recWallOf(part.index));
+        const lines = recNormalizeLabels(part.text).split('\n').filter(line => line.trim()).map(line => {
           const speaker = recSpeakerOf(line);
-          if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(line.trim())}</span></p>`;
+          if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recScrubSpk(recUnmark(line)).trim())}</span></p>`;
           const n = recSpeakerIndex(speaker.name);
-          return `<p class="rec-line"><span class="rec-stamp">${esc(speaker.stamp)}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">${esc(speaker.name)}</span><span class="rec-text">${esc(speaker.text)}</span></p>`;
+          const clock = recStampWall(part.index, speaker.stamp) || lastClock;
+          lastClock = clock;
+          return `<p class="rec-line"><span class="rec-stamp">${esc(clock)}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">${esc(speaker.name)}</span><span class="rec-text">${esc(speaker.text)}</span></p>`;
         }).join('');
         const statusClass = part.status === SEG_STATUS.FAILED ? ' failed' : part.status === SEG_STATUS.IN_PROGRESS ? ' in-progress' : part.status === SEG_STATUS.NEEDS_RETRY ? ' needs-retry' : '';
-        const statusLabel = part.status === SEG_STATUS.FAILED ? ' (Failed)' : part.status === SEG_STATUS.IN_PROGRESS ? ' (In progress)' : part.status === SEG_STATUS.NEEDS_RETRY ? ' (Needs retry)' : '';
+        const statusLabel = part.status === SEG_STATUS.FAILED ? 'Failed' : part.status === SEG_STATUS.IN_PROGRESS ? 'In progress' : part.status === SEG_STATUS.NEEDS_RETRY ? 'Needs retry' : '';
+        // A clock range, not a chunk number: when this stretch of speech started
+        // and when it ended, in the reader's own timezone.
+        const startWall = recWallOf(part.index);
         const partEnd = REC.segMarks[part.index] ?? recElapsed();
         const partStart = part.index > 0 ? (REC.segMarks[part.index - 1] || 0) : 0;
-        const partLength = recLengthLabel(partEnd - partStart);
-        return `<section class="rec-part${part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? ' current' : ''}${statusClass}"><header><b>Part ${part.index + 1}${statusLabel}</b><span>${esc(partLength)}</span></header>${lines}</section>`;
+        const endWall = REC.segWall[part.index + 1] || (part.index === lastIndex && REC.status === REC_STATUS.RECORDING ? Date.now() : startWall + Math.max(0, partEnd - partStart));
+        const isLive = part.index === lastIndex && REC.status === REC_STATUS.RECORDING;
+        return `<section class="rec-part${isLive ? ' current' : ''}${statusClass}"><header><b>${esc(recClockOf(startWall))}</b><span>${esc(recClockOf(endWall))}</span>${statusLabel ? `<i>${esc(statusLabel)}</i>` : ''}</header>${lines}</section>`;
       }).join('');
+    }
+    // ---- voice-note history ------------------------------------------------
+    // Every session the recorder saved is a note whose body starts with the
+    // recording header. The history reads those notes back, so a session is
+    // never lost just because the panel was closed: the transcript, the AI
+    // notes, the speakers and the times are all still there.
+    const recIsSession = note => /^>\s*Recording\b/m.test(String(note?.body || ''));
+    // A heading is matched loosely: an older build, or a model writing the note
+    // body, can produce "### Transcript" or a trailing space.
+    const REC_HEADING = name => new RegExp(`^#{1,6}\\s*${name}\\s*$`, 'm');
+    function recSavedParts(note) {
+      const body = String(note?.body || '');
+      const at = body.search(REC_HEADING('Transcript'));
+      if (at < 0) return { lines: [], notes: '' };
+      const rest = body.slice(at).replace(/^#{1,6}\s*Transcript[^\n]*\n?/, '');
+      const notesAt = rest.search(REC_HEADING('AI notes'));
+      const transcript = notesAt < 0 ? rest : rest.slice(0, notesAt);
+      const aiNotes = notesAt < 0 ? '' : rest.slice(notesAt).replace(/^#{1,6}\s*AI notes[^\n]*\n?/, '').trim();
+      // "_Listening…_" is what an empty transcript holds; it is not a line.
+      const lines = transcript.split('\n').map(line => line.trim())
+        .filter(line => line && !/^_?\s*Listening/.test(line) && !/^_?\s*The live transcript/.test(line));
+      return { lines, notes: aiNotes };
+    }
+    // A saved line starts with "[14:05:12]" (this build) or "[00:12]" (sessions
+    // saved before the clock change). The short form is turned into a real time
+    // from the note's own start, so an older recording still reads as a clock.
+    function recSavedClock(line, note) {
+      const stamp = (String(line).match(/^\[([\d:]{3,12})\]/) || [])[1];
+      if (!stamp) return '';
+      const bits = stamp.split(':').map(Number);
+      if (bits.length === 3) return stamp;
+      const start = Number(note?.createdAt) || Date.now();
+      return recClockOf(start + (bits[0] * 60 + (bits[1] || 0)) * 1000);
+    }
+    const recClockMs = clock => {
+      const bits = String(clock || '').split(':').map(Number);
+      if (bits.length < 2 || bits.some(Number.isNaN)) return null;
+      return ((bits[0] * 60 + bits[1]) * 60 + (bits[2] || 0)) * 1000;
+    };
+    // Parsing every transcript on each render would get slower with every
+    // lesson recorded, so a session is read once per edit and kept.
+    const recSessionCache = new Map();
+    function recSessionList() {
+      return (Array.isArray(notes) ? notes : []).filter(recIsSession).map(note => {
+        const key = `${note.id}:${note.updatedAt || 0}`;
+        if (recSessionCache.has(key)) return recSessionCache.get(key);
+        const built = recSessionOf(note);
+        if (recSessionCache.size > 60) recSessionCache.clear();
+        recSessionCache.set(key, built);
+        return built;
+      }).sort((a, b) => (b.note.createdAt || 0) - (a.note.createdAt || 0));
+    }
+    function recSessionOf(note) {
+      const { lines, notes: aiNotes } = recSavedParts(note);
+      const zero = recSpkZeroIn(lines.join('\n') || aiNotes);
+      const voices = new Set(), clocks = [];
+      recWithSpkZero(zero, () => lines.forEach(line => {
+        const speaker = recSpeakerOf(line);
+        if (speaker) voices.add(speaker.name);
+        const clock = recSavedClock(line, note);
+        if (clock) clocks.push(clock);
+      }));
+      const first = clocks[0] || '', last = clocks[clocks.length - 1] || '';
+      const start = recClockMs(first), end = recClockMs(last);
+      const span = start != null && end != null && end > start ? recLengthLabel(end - start) : '';
+      const when = note.createdAt ? new Date(note.createdAt) : null;
+      const day = when ? when.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+      const time = first || (when ? recClockOf(when) : '');
+      // The recorder names a session after its date, which the left column
+      // already shows; a title the user typed is kept as it is.
+      const rawTitle = String(note.title || '').trim();
+      const autoTitle = /^(Class|Meeting) recording(?:\s*·.*)?$/i.exec(rawTitle);
+      return {
+        note, lines, aiNotes,
+        title: autoTitle ? `${autoTitle[1]} recording` : rawTitle || 'Recording',
+        day, time, span, zero,
+        voices: [...voices].length,
+        mode: /· Meeting ·/.test(String(note.body)) || /^Meeting recording/i.test(String(note.title)) ? 'Meeting' : 'Class'
+      };
+    }
+    function recHistoryLine(line, note) {
+      const speaker = recSpeakerOf(line);
+      const clock = recSavedClock(line, note);
+      if (!speaker) return `<p class="rec-line"><span class="rec-text">${esc(recScrubSpk(recUnmark(line).replace(/^\[[\d:]{3,12}\]\s*/, '')))}</span></p>`;
+      const n = recSpeakerIndex(speaker.name);
+      return `<p class="rec-line"><span class="rec-stamp">${esc(clock)}</span><span class="rec-speaker ${REC_VOICE_CLASS[n % 4]}">${esc(speaker.name)}</span><span class="rec-text">${esc(speaker.text)}</span></p>`;
+    }
+    function recHistoryHtml() {
+      if (REC.status !== REC_STATUS.IDLE && REC.status !== REC_STATUS.DONE) return '';
+      const sessions = recSessionList();
+      if (!sessions.length) return '';
+      const rows = sessions.map(session => {
+        const open = REC.histOpen.has(session.note.id);
+        const words = session.lines.length || session.aiNotes.split('\n').filter(line => line.trim()).length;
+        const meta = [session.mode, session.span, `${words} line${words === 1 ? '' : 's'}`,
+          session.voices ? `${session.voices} voice${session.voices === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+        const empty = !session.lines.length && !session.aiNotes;
+        const body = open ? recWithSpkZero(session.zero, () => `<div class="rec-hist-body">
+            ${session.lines.length ? `<div class="rec-hist-scroll">${session.lines.map(line => recHistoryLine(line, session.note)).join('')}</div>` : ''}
+            ${empty ? `<p class="rec-muted rec-hist-empty">This session has no words in it yet.</p>` : ''}
+            ${session.aiNotes ? `<div class="rec-hist-notes ai-md">${markdownToHtml(session.aiNotes)}</div>` : ''}
+            <div class="rec-actions"><button type="button" class="ai-action" data-rec="open-sess" data-id="${esc(session.note.id)}">Open the note</button></div>
+          </div>`) : '';
+        return `<article class="rec-hist-item${open ? ' open' : ''}">
+            <button type="button" class="rec-hist-head" data-rec="sess" data-id="${esc(session.note.id)}" aria-expanded="${open}" aria-label="${esc(`${session.day} ${session.time}, ${session.title}`)}">
+              <span class="rec-hist-when"><b>${esc(session.day)}</b><span>${esc(session.time)}</span></span>
+              <span class="rec-hist-meta"><b>${esc(session.title)}</b><small>${esc(meta)}</small></span>
+              <span class="rec-hist-chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg></span>
+            </button>${body}</article>`;
+      }).join('');
+      return `<section class="rec-hist" aria-label="Voice-note history">
+          <header class="rec-hist-top"><b>Voice-note history</b><span>${sessions.length} session${sessions.length === 1 ? '' : 's'} on this device</span></header>
+          ${rows}
+        </section>`;
     }
     function recProviderStrip() {
       const failed = REC.failedOn || new Set();
@@ -839,7 +1068,12 @@ Output only the transcript.`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
-      return `${intro}${stage}<div id="rec-live" class="rec-live">${recLiveHtml()}</div>${tail}`;
+      const history = recHistoryHtml();
+      const live = `<div id="rec-live" class="rec-live">${recLiveHtml()}</div>`;
+      // Ready to record: the past sessions come up before the settings, because
+      // reading yesterday's lesson is the more likely next move. A session that
+      // has just finished keeps its own actions first, history under them.
+      return `${intro}${stage}${live}${status === REC_STATUS.IDLE ? history + tail : tail + history}`;
     }
     let recMeterCtx = null, recMeterRaf = 0;
     function recStartMeter(stream) {
@@ -880,7 +1114,7 @@ Output only the transcript.`;
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
           REC.choice = $('#rec-enhance')?.value || 'auto';
-          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segMarks = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();
@@ -946,12 +1180,31 @@ Output only the transcript.`;
       REC.stoppedMs = recElapsed();
       if (REC.status === REC_STATUS.RECORDING) { REC.pausedAt = 0; }
       REC.status = REC_STATUS.FINALIZING; clearRecTimers(); recRender();
-      await endPart();                                     // the last part is finalised before the microphone is released
-      recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop());
-      await Promise.race([REC.queue, recSleep(180000)]);  // parts are transcribed first; a stuck part cannot block the note for more than 3 minutes
-      recSaveNote(true, REC.liveNotes);
-      if (recLiveTranscript() && REC.choice !== 'none') {
-        try { await recRefreshNotes(true); recSaveNote(true, REC.liveNotes); } catch (error) { REC.notice = `Full notes could not be written (${aiErrorMessage(error)}). The transcript is saved.`; }
+      // Finishing must always end: whatever fails on the way (a recorder that
+      // will not close, a transcript that is still in flight, an AI route that
+      // is out of reach) is logged, and the panel still lands on Saved with
+      // whatever was transcribed. It never sits on "Finishing" forever.
+      try {
+        await endPart();                                   // the last part is finalised before the microphone is released
+        recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop()); REC.stream = null;
+        await Promise.race([REC.queue, recSleep(180000)]); // parts are transcribed first; a stuck part cannot block the note for more than 3 minutes
+        recSaveNote(true, REC.liveNotes);
+        if (recLiveTranscript() && REC.choice !== 'none') {
+          try {
+            // A summary is a nicety, the transcript is the record: never let it
+            // hold the panel on "Finishing" for longer than a minute and a half.
+            await Promise.race([
+              recRefreshNotes(true),
+              recSleep(90000).then(() => { throw Object.assign(new Error('The notes summary timed out.'), { code: 'timeout' }); })
+            ]);
+            recSaveNote(true, REC.liveNotes);
+          } catch (error) { console.warn('Final notes failed:', error); REC.notice = 'The notes summary could not be written this time. The transcript is saved.'; }
+        }
+      } catch (error) {
+        console.warn('Finishing the recording hit an error:', error);
+      } finally {
+        try { recStopMeter(); REC.stream?.getTracks().forEach(track => track.stop()); REC.stream = null; } catch { /* released already */ }
+        try { recSaveNote(true, REC.liveNotes); } catch (error) { console.warn('Saving the finished note failed:', error); }
       }
       const note = notes.find(item => item.id === REC.noteId);
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
@@ -1022,6 +1275,8 @@ if (act === 'pause') return recPause();
         nzaiClose(); return;   // recording keeps running in the background
       }
       if (act === 'retry') { recRetryFailedSegments(); return; }
+      if (act === 'sess') { const id = event.target.closest('[data-rec]').dataset.id; if (!id) return; if (REC.histOpen.has(id)) REC.histOpen.delete(id); else REC.histOpen.add(id); return recRender(); }
+      if (act === 'open-sess') { const id = event.target.closest('[data-rec]').dataset.id; const note = notes.find(item => item.id === id); if (!note) return; nzaiClose(); openNote(note.id); return; }
     }
     // Recording keeps going if the dialog is hidden; reopen it from Import to see progress.
     function bytesToB64Safe(bytes) { let bin = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)); return btoa(bin); }
