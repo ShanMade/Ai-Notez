@@ -306,3 +306,6 @@ html[data-theme] #nz-ai .nzai-status.is-setup .nzai-status-dot { background: #d1
 html[data-theme] #nz-ai .nzai-group { margin: 16px 14px 0; }
 html[data-theme] #nz-ai .nzai-group h4 { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 html[data-theme] #nz-ai .nzai-setfoot { padding: 14px 0 18px; border-top: 1px solid var(--nzc-line); }
+
+/* The More menu can hold recent chats and voice notes: keep it inside the screen and let it scroll. */
+html[data-theme] #nz-ai .nzai-sheet { max-height: min(72vh, 640px); overflow-y: auto; }
