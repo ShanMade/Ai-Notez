@@ -640,7 +640,7 @@ async function openWikiLink(title) {
       ? 'Keep the original language (English, Urdu or a mix of both) and never translate.'
       : `Write every line in ${recLangLabel(recTranscriptLang())}. If someone speaks another language, translate it faithfully into ${recLangLabel(recTranscriptLang())}; keep names, numbers and technical terms exact.`;
     const RECORD_TRANSCRIBE_GEMINI_PART = (index, context = '', attached = []) => `Transcribe audio part ${index + 1} of a recording, word for word.
-${REC.mode === 'meeting' ? 'Setting: a meeting. Several adults may speak, sometimes over each other.' : 'Setting: a classroom lecture. Usually one teacher and some students.'}
+${NzVoice.modeOf(REC.mode).setting}
 Accuracy rules: write every sentence you can hear, in order. Never summarise, never skip a sentence, never paraphrase and never correct the speaker's grammar. ${recTranscriptRule()} Use [inaudible] only for a word you truly cannot hear.
 ${context ? `The part before this one ended with: "${context}"
 If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
@@ -846,18 +846,11 @@ Output only the transcript.`;
       for (let i = index - 1; i >= 0; i--) { const text = REC.segTexts[i]; if (text && text.trim()) return text; }
       return '';
     }
-    // The words a line says, without its time stamp or speaker label.
-    const recSpokenWords = line => (String(recUnmark(line)).replace(/^\s*(?:[-*•]\s+)?(?:\[[\d:]+\]\s*)?\**[^:\n]{1,40}:/, '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(' ');
     // A model that is given the end of the previous part as context can hand it back:
     // the same line, word for word, at the top of this part, after the audio was
     // silent or quiet. Such lines are dropped. Only the first lines of a part are
     // checked, so a sentence that is really said again later is kept.
-    function recDropEcho(previous, current) {
-      const recent = new Set(String(previous || '').split('\n').slice(-8).map(recSpokenWords).filter(Boolean));
-      const lines = String(current || '').split('\n');
-      const kept = lines.filter((line, i) => !(i < 3 && recSpokenWords(line) && recent.has(recSpokenWords(line))));
-      return kept.join('\n').trim();
-    }
+    const recDropEcho = (previous, current) => NzVoice.dropEcho(previous, current);
     // A muted or silent part is not sent. A model asked to transcribe silence tends
     // to repeat whatever it heard last, which is the repeated transcript after the
     // mic was muted. Measured on the decoded audio: no sound above the noise floor.
@@ -868,12 +861,7 @@ Output only the transcript.`;
         const ctx = new AudioCtx();
         const buffer = await ctx.decodeAudioData(await blob.arrayBuffer());
         ctx.close?.();
-        let sum = 0, count = 0;
-        for (let c = 0; c < buffer.numberOfChannels; c++) {
-          const data = buffer.getChannelData(c);
-          for (let i = 0; i < data.length; i += 4) { sum += data[i] * data[i]; count++; }
-        }
-        return count > 0 && Math.sqrt(sum / count) < 0.002;
+        return NzVoice.isSilent([...Array(buffer.numberOfChannels)].map((_, c) => buffer.getChannelData(c)));
       } catch (error) {
         console.warn('Could not measure this part, so it is sent:', error);
         return false;
