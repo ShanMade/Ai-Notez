@@ -300,7 +300,6 @@ async function openWikiLink(title) {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && REC.status === REC_STATUS.RECORDING) recTick();
     });
-    const REC_MAX_MS = 50 * 60 * 1000;
     // Segment status constants
     const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
     // Recording status constants (separate from transcription status)
@@ -838,7 +837,6 @@ Output only the transcript.`;
       const clock = $('#rec-clock');
       if (clock) clock.textContent = fmtClock(recElapsed());
       if (REC.status !== REC_STATUS.RECORDING) return;
-      if (recElapsed() >= REC_MAX_MS) { recStop(); return; }
       // Catches a delayed timeout as soon as the page runs again. Measured
       // against the part's own start so a lost or late timeout cannot stack up.
       if (REC.partStartAt && Date.now() - REC.partStartAt >= recPartTarget()) recRollPart();
@@ -1092,13 +1090,12 @@ Output only the transcript.`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
-      const history = recHistoryHtml();
       const live = `<div id="rec-live" class="rec-live">${recLiveHtml()}</div>`;
       // Ready to record: the past sessions come up before the settings, because
       // reading yesterday's lesson is the more likely next move. A session that
       // has just finished keeps its own actions first, history under them.
       const naming = [REC_STATUS.IDLE, REC_STATUS.RECORDING, REC_STATUS.PAUSED].includes(status) ? `<div class="rec-name"><label class="nzai-label" for="rec-name">Name this recording</label><input class="nzai-field" id="rec-name" type="text" maxlength="80" autocomplete="off" placeholder="${esc(recAutoTitle())}" value="${esc(REC.name || '')}"></div>` : '';
-      return `${intro}${naming}${stage}${live}${status === REC_STATUS.IDLE ? history + tail : tail + history}`;
+      return `${intro}${naming}${stage}${live}${tail}`;
     }
     let recMeterCtx = null, recMeterRaf = 0;
     function recStartMeter(stream) {
@@ -1139,7 +1136,7 @@ Output only the transcript.`;
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
           REC.choice = $('#rec-enhance')?.value || 'auto';
-          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();

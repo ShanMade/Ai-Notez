@@ -1039,7 +1039,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <svg class="ic-back" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m14.4 5.6-6.4 6.4 6.4 6.4"/></svg>
           </button>
           <div class="dock-title">
-            <span class="dock-title-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4c.55 4.2 1.9 5.55 6.1 6.1-4.2.55-5.55 1.9-6.1 6.1-.55-4.2-1.9-5.55-6.1-6.1 4.2-.55 5.55-1.9 6.1-6.1Z"/><path d="M17.9 15.2c.3 2.05.95 2.7 3 3-2.05.3-2.7.95-3 3-.3-2.05-.95-2.7-3-3 2.05-.3 2.7-.95 3-3Z"/></svg></span>
+            <span class="dock-title-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.5 5.5h7.2l3.8 3.8v9.2H6.5V5.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 5.8v4h3.8M9.3 13h5.4M9.3 16h5.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
             <div class="dock-title-tx"><b>NotezAi</b><small id="dock-sub">Your study assistant</small></div>
           </div>
           <div class="dock-actions" role="toolbar" aria-label="Panel actions">
