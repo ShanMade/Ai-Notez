@@ -1048,6 +1048,7 @@ function noteRowMarkup(note, dateMode = 'updated') {
       void renderNoteBody(note).then(() => {
         if (currentPage !== 'reader' || activeId !== note.id) return;
         restoreReaderPosition(note.id);
+        window.nzAfterNoteRender?.(note);
         requestAnimationFrame(() => { if (readerPositionRestorePendingId === note.id) readerPositionRestorePendingId = ''; });
       });
       $('#workspace-main').scrollTop = 0;
