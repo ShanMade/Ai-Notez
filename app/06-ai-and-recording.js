@@ -841,6 +841,23 @@ Output only the transcript.`;
       recJournalSave(index);
       updateRecLive();
     }
+    // The nearest part before this one that has any words (a silent or failed part is empty).
+    function recPreviousText(index) {
+      for (let i = index - 1; i >= 0; i--) { const text = REC.segTexts[i]; if (text && text.trim()) return text; }
+      return '';
+    }
+    // The words a line says, without its time stamp or speaker label.
+    const recSpokenWords = line => (String(recUnmark(line)).replace(/^\s*(?:[-*•]\s+)?(?:\[[\d:]+\]\s*)?\**[^:\n]{1,40}:/, '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(' ');
+    // A model that is given the end of the previous part as context can hand it back:
+    // the same line, word for word, at the top of this part, after the audio was
+    // silent or quiet. Such lines are dropped. Only the first lines of a part are
+    // checked, so a sentence that is really said again later is kept.
+    function recDropEcho(previous, current) {
+      const recent = new Set(String(previous || '').split('\n').slice(-8).map(recSpokenWords).filter(Boolean));
+      const lines = String(current || '').split('\n');
+      const kept = lines.filter((line, i) => !(i < 3 && recSpokenWords(line) && recent.has(recSpokenWords(line))));
+      return kept.join('\n').trim();
+    }
     // A muted or silent part is not sent. A model asked to transcribe silence tends
     // to repeat whatever it heard last, which is the repeated transcript after the
     // mic was muted. Measured on the decoded audio: no sound above the noise floor.
@@ -875,7 +892,8 @@ Output only the transcript.`;
         const transcribed = silent ? '' : await recTranscribePart(blob, index);
         if (gen !== REC.gen) return false;   // discarded while it was being transcribed
         const cleaned = recCleanPart(recCanonicalPart(transcribed));
-        const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
+        const before = recPreviousText(index);
+        const text = recDropEcho(before, recTrimOverlap(before, cleaned));
         if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
         // A part with no speaker turn used to look exactly like the feature
         // being gone, because the transcript simply rendered as paragraphs.
