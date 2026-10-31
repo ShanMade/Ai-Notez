@@ -431,19 +431,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       });
     });
 
-    exportNotesJson = (original => async function (...args) {
-      const result = await original.apply(this, args);
-      try { localStorage.setItem('notez-last-export', String(Date.now())); } catch {}
-      return result;
-    })(exportNotesJson);
-    setTimeout(() => {
-      try {
-        if (!currentSession || !(Array.isArray(notes) && notes.length)) return;
-        if (!localStorage.getItem('notez-first-seen')) localStorage.setItem('notez-first-seen', String(Date.now()));
-        const since = Number(localStorage.getItem('notez-last-export')) || Number(localStorage.getItem('notez-first-seen')) || Date.now();
-        if (Date.now() - since > 14 * 864e5) toast('Backup reminder: it has been a while. Use Export notes (JSON) from the account menu.', 'success', 8000);
-      } catch {}
-    }, 12000);
 
     (function welcomeTour() {
       let tries = 0;
@@ -979,6 +966,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // New chat only appears once there is a conversation to leave behind.
       const newChat = panel.querySelector('.nzai-newpill');
       if (newChat) newChat.hidden = !(screen === 'chat' && (nzaiChat()?.messages || []).length);
+      if (screen !== 'chat' && nzai.scopeMenu) nzaiScopeMenuClose();
       const scopeButton = panel.querySelector('#dock-scope');
       if (scopeButton) {
         // The capsule is always visible on the chat screen: the one thing a
@@ -988,13 +976,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         scopeButton.style.display = screen === 'chat' ? 'inline-flex' : 'none';
         scopeButton.classList.toggle('is-note', scoped);
         scopeButton.classList.toggle('is-static', !note);
-        scopeButton.disabled = !note;
-        scopeButton.title = scoped ? 'Answer from every note instead' : note ? 'Answer from this note only' : 'Answers come from every note in your library';
+        scopeButton.disabled = false;
+        scopeButton.title = scoped ? 'Change the note this chat reads' : 'Choose what this chat reads: all notes, a folder or one note';
         scopeButton.setAttribute('aria-label', scopeButton.title);
         const name = panel.querySelector('#dock-scope-name');
         if (name) name.textContent = scoped ? note.title : 'All notes';
         const swap = panel.querySelector('#dock-scope-swap');
-        if (swap) swap.textContent = scoped ? 'This note' : note ? 'Switch' : 'Library';
+        if (swap) swap.textContent = scoped ? 'This note' : 'Folders';
       }
       const lead = panel.querySelector('#dock-lead');
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
@@ -1891,6 +1879,41 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // "What is due today?" typed into the chat used to be answered by the model,
     // which has no access to the spaced-review queue.
     const NZAI_DUE_QUESTION = /^(?:what(?:'s|\s+is|\s+are)?\s+(?:due|left\s+to\s+review|in\s+my\s+review\s+queue)|what\s+do\s+i\s+(?:have\s+)?due|do\s+i\s+have\s+(?:anything|any\s+notes?)\s+due|anything\s+due|what\s+needs?\s+review)\s*(?:for\s+review\s*)?(?:today|now|tomorrow|tonight|this\s+week)?\s*[?.!]*$/i;
+    // The answer-scope menu: pick All notes, or a folder, then a note. Picking a note sets it as the context and opens it in the viewer.
+    // nzai.scopeMenu.folder: null = folder list, a path = the notes in that folder ('' = unfiled).
+    function nzaiScopeMenuClose() { nzai.scopeMenu = null; $('#nzai-scope-menu')?.remove(); const chip = $('#dock-scope'); if (chip) chip.setAttribute('aria-expanded', 'false'); }
+    function nzaiScopeMenuOpen() {
+      if (nzai.scopeMenu) return nzaiScopeMenuClose();
+      nzai.scopeMenu = { folder: null };
+      nzaiScopeMenuRender();
+    }
+    function nzaiScopeMenuRender() {
+      const panel = $('#nz-ai'); if (!panel) return;
+      if (!nzai.scopeMenu) return;
+      let menu = $('#nzai-scope-menu', panel);
+      if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'nzai-scope-menu'; menu.className = 'nzai-scope-menu';
+        const chip = $('#dock-scope', panel);
+        if (chip) { chip.after(menu); chip.setAttribute('aria-expanded', 'true'); }
+      }
+      const folder = nzai.scopeMenu.folder;
+      const head = (title, back) => `<div class="nzai-scope-head">${back ? `<button type="button" class="nzai-scope-back" data-nzai="scope-back" aria-label="Back to folders">${nzaiSolidIcon('arrowLeft')}</button>` : ''}<b>${esc(title)}</b><button type="button" class="nzai-scope-close" data-nzai="scope-close" aria-label="Close">×</button></div>`;
+      if (folder === null) {
+        const counts = new Map();
+        notes.forEach(item => { const key = String(item.folderPath || '').trim(); counts.set(key, (counts.get(key) || 0) + 1); });
+        const folders = [...counts.entries()].sort((a, b) => (a[0] || '\uffff').localeCompare(b[0] || '\uffff'));
+        const isLibrary = nzai.scope !== 'note';
+        menu.innerHTML = head('Answer from', false) +
+          `<button type="button" class="nzai-scope-row${isLibrary ? ' on' : ''}" data-nzai="scope-library"><b>All notes</b><small>${notes.length} note${notes.length === 1 ? '' : 's'}</small></button>` +
+          (folders.length ? folders.map(([path, count]) => `<button type="button" class="nzai-scope-row" data-nzai="scope-folder" data-path="${esc(path)}"><b>${esc(path || 'Unfiled')}</b><small>${count} note${count === 1 ? '' : 's'}</small>${nzaiIcon('chevronRight', 14)}</button>`).join('') : '<p class="nzai-scope-empty">No folders yet.</p>');
+      } else {
+        const list = notes.filter(item => String(item.folderPath || '').trim() === folder).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const current = nzai.scope === 'note' ? nzai.noteId : '';
+        menu.innerHTML = head(folder || 'Unfiled', true) +
+          (list.length ? list.map(item => `<button type="button" class="nzai-scope-row${item.id === current ? ' on' : ''}" data-nzai="scope-note" data-id="${esc(item.id)}"><b>${esc(item.title || 'Untitled note')}</b><small>${esc(nzaiDayLabel(item.updatedAt || Date.now()))}</small></button>`).join('') : '<p class="nzai-scope-empty">No notes in this folder.</p>');
+      }
+    }
     async function nzaiClick(event) {
       const el = event.target.closest('[data-nzai]'); if (!el) return;
       const act = el.dataset.nzai;
@@ -1904,7 +1927,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'history') { nzaiSheet(false); return nzaiGoView('history'); }
       if (act === 'slash-open') { const input = $('#nzai-input'); if (input && !input.disabled) { input.value = '/'; input.focus(); nzaiSlash('/'); } return; }
       if (act === 'back') { nzai.view = 'chat'; if (nzai.dock === 'voice') return dockShow('ai'); return nzaiRender(); }
-      if (act === 'scope-toggle') { nzaiSheet(false); if (nzai.scope === 'note') nzai.scope = 'library'; else if (nzaiScopeNote()) nzai.scope = 'note'; return nzaiRender(); }
+      if (act === 'scope-toggle') { nzaiSheet(false); return nzaiScopeMenuOpen(); }
+      if (act === 'scope-close') return nzaiScopeMenuClose();
+      if (act === 'scope-back') { nzai.scopeMenu = { folder: null }; return nzaiScopeMenuRender(); }
+      if (act === 'scope-library') { nzai.scope = 'library'; nzaiScopeMenuClose(); return nzaiRender(); }
+      if (act === 'scope-folder') { nzai.scopeMenu = { folder: el.dataset.path || '' }; return nzaiScopeMenuRender(); }
+      if (act === 'scope-note') {
+        const note = notes.find(item => item.id === el.dataset.id); if (!note) return;
+        nzai.scope = 'note'; nzai.noteId = note.id;
+        nzaiScopeMenuClose(); nzaiRender();
+        return openNote(note.id);
+      }
       if (act === 'chat') { nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'toggle-more') { nzai.moreOpen = !nzai.moreOpen; return nzaiRender(); }
       if (act === 'settings') { nzaiSheet(false); return nzaiGoView('settings'); }
