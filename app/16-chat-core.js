@@ -49,7 +49,68 @@
     return { kind: 'cited', label: `From your notes · ${cited.length} of ${list.length} source${list.length === 1 ? '' : 's'} cited`, cited };
   }
 
-  const api = { route, ruleKey, attachSources, provenance };
+  // ---- Phase 4b: the prompt is built from pure parts. The wording below is copied
+  // from the phase 4a code, so the model receives the same text for the same notes.
+  const NUMBERED_HEAD = "NUMBERED NOTES FROM THE USER'S LIBRARY:\n";
+  const RULE_INVENTORY = 'Answer library inventory questions from the provided LIBRARY INVENTORY metadata. Use its exact count, list only the titles shown, and do not infer note contents from titles. If the backend provides a fresher authoritative inventory, prefer it.';
+  const RULE_NOTE = 'Answer using the note when it helps. Say clearly when the note does not cover something.';
+  const RULE_NUMBERED = 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.';
+  const RULE_GENERAL = "Answer the user's question directly using your general knowledge and the context provided in the user's message.";
+  const RULE_RECORDING = ' This note is a recording: its lines are stamped and labelled by speaker (Voice 1, or a name). Say who said something only when the line shows that label, and say "unclear" when it does not. Cite the stamped line, for example [00:12].';
+  const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+
+  // The inventory context for a library question: the notes sorted by title, at most `limit`.
+  function inventoryContext(notes, { limit = 50 } = {}) {
+    const all = Array.isArray(notes) ? notes : [];
+    const inventory = [...all].sort((a, b) => compact(a.title).localeCompare(compact(b.title))).slice(0, limit);
+    const total = all.length;
+    const context = [
+      'LIBRARY INVENTORY from the current NoteZ workspace cache.',
+      'Exact local note count: ' + total + '.',
+      'Entries shown: ' + inventory.length + ' of ' + total + '.',
+      ...inventory.map((item, index) => {
+        const title = compact(item.title || 'Untitled note').slice(0, 180);
+        const meta = [];
+        if (item.folderPath) meta.push('folder=' + compact(item.folderPath).slice(0, 120));
+        if (item.subject) meta.push('subject=' + compact(item.subject).slice(0, 100));
+        if (Array.isArray(item.tags) && item.tags.length) meta.push('tags=' + item.tags.slice(0, 8).map(tag => compact(tag).slice(0, 50)).join(', '));
+        if (item.updatedAt || item.createdAt) meta.push('date=' + String(item.updatedAt || item.createdAt).slice(0, 40));
+        return '[' + (index + 1) + '] ' + title + (meta.length ? ' — ' + meta.join('; ') : '');
+      }),
+      total > inventory.length ? (total - inventory.length) + ' additional notes are omitted from this compact inventory.' : '',
+      'Use these metadata records for library questions. Do not infer note contents from titles or invent omitted records.'
+    ].filter(Boolean).join('\n');
+    const sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180), folderPath: compact(item.folderPath || '').slice(0, 120) })).filter(item => item.id);
+    return { context, sources };
+  }
+
+  // The numbered note blocks the model cites as [1], [2]. Each body is cut to `perChars`.
+  function numberedContext(items, perChars) {
+    const blocks = (Array.isArray(items) ? items : []).map((item, index) =>
+      `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${String(item.body || '').slice(0, perChars)}\n</note>`);
+    return NUMBERED_HEAD + blocks.join('\n\n');
+  }
+
+  // The rule text for a route. The recording addendum is added only for a recording note.
+  function rulesFor(routed, hasNotes) {
+    const key = ruleKey(routed, hasNotes);
+    if (key === 'inventory') return RULE_INVENTORY;
+    if (key === 'note') return RULE_NOTE;
+    if (key === 'note-recording') return RULE_NOTE + RULE_RECORDING;
+    if (key === 'numbered-notes') return RULE_NUMBERED;
+    return RULE_GENERAL;
+  }
+
+  // The prompt sent to the model. `transcript` is the chat so far; `quiz` switches to the tutor prompt.
+  function buildPrompt({ question = '', transcript = '', context = '', routed, hasNotes = false, quiz = false } = {}) {
+    if (quiz) {
+      return { rules: '', prompt: `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${transcript}STUDENT: ${question}` };
+    }
+    const rules = rulesFor(routed, hasNotes);
+    return { rules, prompt: `${transcript}${context}\n\n${rules}\n\nUSER: ${question}` };
+  }
+
+  const api = { route, ruleKey, attachSources, provenance, inventoryContext, numberedContext, rulesFor, buildPrompt };
   root.NzChat = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

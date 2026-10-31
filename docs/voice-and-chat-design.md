@@ -120,7 +120,9 @@ Six stages. Each one is a pure function except the two marked I/O, and the pure 
 
 _4a status: done. `app/16-chat-core.js` (route, ruleKey, attachSources, provenance) is wired into `nzaiAsk` and the chip. Tests in `scripts/chat-core.test.mjs`. Browser: a seeded chat shows the cited, suggestion and general chips, with no page errors. Model routing is unchanged._
 
-**4b (next): split the function.** Move retrieval into `retrieve(route)` and the prompt into `buildPrompt`, behind the same entry point. Acceptance: same answers for the same inputs (a fixture test), no page errors.
+_4b status: done. `nzaiAsk` is split. `nzaiGather` (app/04) retrieves the context and sources. `NzChat.buildPrompt`, `rulesFor`, `inventoryContext` and `numberedContext` (app/16) are pure and build the prompt. Fixture tests in `scripts/chat-prompt.test.mjs`. Browser: the prompt sent to the model was compared against the pre-change code for four questions (library, no match, inventory, topic). The three non-inventory prompts are byte-identical. The inventory prompt differs only in the demo notes' seed timestamps._
+
+**4b : split the function.** Move retrieval into `retrieve(route)` and the prompt into `buildPrompt`, behind the same entry point. Acceptance: same answers for the same inputs (a fixture test), no page errors.
 
 **4c: suggestion blocks and the voice follow-up rules.** Suggestion rendering with accept, edit and dismiss. Acceptance: a title suggestion cannot be applied without a click; a recording answer carries "From this recording".
 
