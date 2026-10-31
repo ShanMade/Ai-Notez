@@ -65,10 +65,63 @@ Acceptance: core tests pass; the recorder still works with the same behaviour fo
 
 _Phase 3 status: done. `app/15-recording-state.js` holds the session table (begin, granted, denied, pause, resume, stop, discard, finished, restore, reset) and the part table (queue, send, done, hold). Every status write in `app/06` goes through `recMove` or `recPartMove`, and a move the table refuses is logged and not applied. Tests: `scripts/recording-state.test.mjs`. Browser: start, pause, resume, stop, and discard from both paused and finished, with no page errors or refused moves._
 
-**Phase 4:** main NotezAi chat rebuild, after the voice work is merged. It covers the chat architecture (routing for normal questions, library answers, and voice-note follow-ups), the source and provenance display, and the chat UX. Its plan is written when phase 3 is merged. Chat must keep its current model routing until then.
+**Phase 4:** main NotezAi chat rebuild, after the voice work is merged. It covers the chat architecture (routing for normal questions, library answers, and voice-note follow-ups), the source and provenance display, and the chat UX. The plan is in section 7 and was written after phase 3 merged. Chat keeps its current model routing.
 
 ## 6. Out of scope for now
 
 - On-device diarization or speaker embeddings.
 - Changing the backend's audio size or duration limits.
 - Changing chat models or providers.
+
+## 7. Phase 4 plan: NotezAi chat
+
+### 7.1 What the code does today (audit, `app/04-reader-and-html.js`)
+
+- `nzaiAsk` (about 200 lines) does routing, retrieval, prompt building, generation, provenance and rendering in one function. None of the decisions can be tested on their own.
+- Routing is inline: an inventory regex (`NZ_INTENT.inventory`) bypasses search; a note scope or a folder scope sends only those notes; otherwise the library is searched.
+- Retrieval order: the knowledge index (`retrieveRelevantContext`, backend session only), then `/v1/index/search` on the backend, then the local `nzaiRetrieve`. Scoped questions skip the index.
+- Sources: the sources the model sent are numbered `[1]`, `[2]`. But when the answer comes back with its own `answer.sources`, those replace the list that was sent. A source the model names can therefore be shown as if it was used, even when the model never saw it. This is a provenance bug.
+- Provenance (`NzConn.provenance`, `app/11`) has three kinds: `cited` (the answer has `[n]` markers that match a source), `context` (notes were sent but no marker), and `general` (no notes). Title and tag suggestions from the quick tasks are not marked as suggestions.
+- Model routing: `aiGenerate` picks the provider and model from settings. The backend chat list includes `gemini-3.1-flash-lite`. Unchanged in this phase.
+
+### 7.2 Target architecture
+
+Six stages. Each one is a pure function except the two marked I/O, and the pure ones are tested in Node.
+
+1. **Route** (pure, `app/16-chat-core.js` `route`): inventory, then note, then folder, then library. A note that is a recording (tag `RECORDING`) is marked `recording: true`, which changes only the prompt rules.
+2. **Retrieve** (I/O): the same sources as today, by route. The result is a list of candidates, each with a stable `n`, `id`, `title`, `folderPath`, and the passage that was sent.
+3. **Build prompt** (pure, `buildRules`): the rules for each route. Notes are sent only when they were retrieved for this question.
+4. **Generate** (I/O): `aiGenerate`, unchanged.
+5. **Attach** (pure, `attachSources`): the sources shown are exactly the ones that were sent, keeping their `n`. A source the model names but did not receive is dropped. The provenance kind is computed from the answer text and these sources.
+6. **Render**: one provenance chip per answer, and a separate block for suggestions.
+
+### 7.3 Source and provenance rules (the standing rule: never imply notes said something they did not)
+
+- Kinds: `cited` (sourced facts), `context` (notes were used, no specific marker), `general` (no notes; the answer comes from the model alone), `suggestion` (a title, tag or organisation proposal from a quick task). The chip text names the kind, and `suggestion` is never labelled as a note fact.
+- A `general` answer says so in the chip and never lists sources.
+- Organisation suggestions stay suggestions: accept, edit or dismiss, one at a time. Nothing is applied on its own.
+- Link insertion needs the user's approval, as before.
+
+### 7.4 Voice-note follow-ups
+
+- A question asked about a recording uses its transcript with the Voice labels (or the names the user set). The rules ask the model to say who said something when the transcript labels them, and to say "unclear" when the label is missing.
+- Citations point to the recording's stamped lines. The chip says "From this recording".
+- Renames made in the recorder (phase 2) are already in the transcript, so the answer uses the names.
+
+### 7.5 Chat UX
+
+- Keep the answer-scope chip and its folder → note dropdown (done before). Keep the panel open when a note is chosen.
+- The chip for each answer shows the kind in words, and the sources list is collapsed under it.
+- Light and dark, with the accent colour, as in phases 1 to 3.
+
+### 7.6 Slices and acceptance
+
+**4a (this PR): core and provenance.** `app/16-chat-core.js` with `route`, `buildRules`, `attachSources`, `provenance`. Wired into `nzaiAsk` for the source list and the chip, so model-named sources that were not sent are dropped. Acceptance: core tests pass (route order, recording flag, dropped sources, the four kinds); the full test suite passes; the chat still answers in the browser with no page errors and a provenance chip.
+
+_4a status: done. `app/16-chat-core.js` (route, ruleKey, attachSources, provenance) is wired into `nzaiAsk` and the chip. Tests in `scripts/chat-core.test.mjs`. Browser: a seeded chat shows the cited, suggestion and general chips, with no page errors. Model routing is unchanged._
+
+**4b (next): split the function.** Move retrieval into `retrieve(route)` and the prompt into `buildPrompt`, behind the same entry point. Acceptance: same answers for the same inputs (a fixture test), no page errors.
+
+**4c: suggestion blocks and the voice follow-up rules.** Suggestion rendering with accept, edit and dismiss. Acceptance: a title suggestion cannot be applied without a click; a recording answer carries "From this recording".
+
+**Not in phase 4:** changing which model answers chat. That is a separate decision for the user.

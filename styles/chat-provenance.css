@@ -1,0 +1,11 @@
+/* NotezAi chat, phase 4a: the chip for a suggestion. A suggestion is never styled like
+   a fact from the notes. Built on theme tokens, so light, dark and accent apply. */
+html[data-theme] #nz-ai .nzai-prov.suggestion {
+  background: color-mix(in srgb, var(--p-warn, #b07a12) 10%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--p-warn, #b07a12) 55%, transparent);
+  color: var(--p-warn, #8a5f0e);
+}
+html[data-theme] #nz-ai .nzai-prov.suggestion .nzai-prov-dot {
+  background: transparent;
+  border: 1.5px solid var(--p-warn, #b07a12);
+}
