@@ -1544,6 +1544,11 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       });
       return [...found].sort((x, y) => Number(x.match(/\d+/)[0]) - Number(y.match(/\d+/)[0]));
     }
+    // Replaces one speaker label ("Voice 2:") with a name. Used on a note body and on the parts of a recording, so the names survive every later save.
+    function recRenameVoice(text, voice, name) {
+      const label = String(voice).replace(/\s+/g, '\\s+');
+      return String(text || '').replace(new RegExp(`(^|\\n)((?:\\[[\\d:]+\\]\\s*)?\\s*\\**\\s*)${label}(\\s*\\**\\s*):`, 'gi'), (_, lead, pre, post) => `${lead}${pre}${name}${post}:`);
+    }
     function recOfferNames(noteId, voices) {
       const note = notes.find(item => item.id === noteId); if (!note) return;
       const rows = voices.map(voice => `<label class="rec-name-row"><span>${esc(voice)}</span><input class="nzai-field" data-voice="${esc(voice)}" placeholder="Name (e.g. Teacher, Ali)" value=""></label>`).join('');
@@ -1556,7 +1561,8 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
             dialog.querySelectorAll('[data-voice]').forEach(input => {
               const name = input.value.trim().replace(/[:\n]/g, ' ').slice(0, 40); if (!name) return;
               const label = input.dataset.voice.replace(/\s+/g, '\\s+');
-              body = body.replace(new RegExp(`(^|\\n)((?:\\[[\\d:]+\\]\\s*)?\\s*\\**\\s*)${label}(\\s*\\**\\s*):`, 'gi'), (_, lead, pre, post) => `${lead}${pre}${name}${post}:`);
+              body = recRenameVoice(body, input.dataset.voice, name);
+              if (REC.noteId === note.id) REC.segTexts = REC.segTexts.map(text => recRenameVoice(text, input.dataset.voice, name));
               learned.push([input.dataset.voice, name]);
             });
             // Taught in the background: future transcripts label this voice by
@@ -1564,6 +1570,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
             recLearnNamedVoices(learned);
             note.body = body; note.updatedAt = Date.now();
             persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
+            if (REC.noteId === note.id) recSaveTranscriptNote();   // the transcript note gets the names too
             renderEverything(); if (currentPage === 'reader') openNote(note.id);
             toast('Speaker names applied.');
           }
