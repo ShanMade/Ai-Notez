@@ -56,15 +56,27 @@
       const request = root.indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
         // v0 → v2 (new device) and v1 → v2 (an older build already wrote
-        // part rows). The upgrade transaction creates whatever is missing and
+        // part rows into the `parts` store, keyPath 'key' — preserved
+        // untouched). The upgrade transaction creates whatever is missing and
         // never touches existing rows.
+        // createObjectStore, NOT objectStore: objectStore() only GETS a store
+        // and throws NotFoundError for exactly the stores that are missing,
+        // which would abort the whole version-change transaction and wedge
+        // the DB at its old version (every later open re-fails).
         const tx = request.transaction;
-        if (!tx.objectStoreNames.contains(PARTS)) tx.objectStore(PARTS, { keyPath: 'key' });
-        if (!tx.objectStoreNames.contains(SLICES)) tx.objectStore(SLICES, { keyPath: 'key' });
-        if (!tx.objectStoreNames.contains(SESSIONS)) tx.objectStore(SESSIONS, { keyPath: 'noteId' });
-        if (!tx.objectStoreNames.contains(JOBS)) tx.objectStore(JOBS, { keyPath: 'jobId' });
+        if (!tx.objectStoreNames.contains(PARTS)) tx.createObjectStore(PARTS, { keyPath: 'key' });
+        if (!tx.objectStoreNames.contains(SLICES)) tx.createObjectStore(SLICES, { keyPath: 'key' });
+        if (!tx.objectStoreNames.contains(SESSIONS)) tx.createObjectStore(SESSIONS, { keyPath: 'noteId' });
+        if (!tx.objectStoreNames.contains(JOBS)) tx.createObjectStore(JOBS, { keyPath: 'jobId' });
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const database = request.result;
+        // A future build may open this DB at a higher version from another
+        // tab: close this connection so that upgrade is never blocked, and
+        // drop the cached open so the next call reopens at the new version.
+        database.onversionchange = () => { opening = null; try { database.close(); } catch (e) {} };
+        resolve(database);
+      };
       request.onerror = () => { opening = null; reject(request.error || new Error('Journal could not be opened')); };
       request.onblocked = () => { /* an old tab still holds v1; the open resolves once it goes */ };
     }).catch(error => { opening = null; throw error; });

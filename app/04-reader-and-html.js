@@ -650,7 +650,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         ...(payload ? { body: JSON.stringify(payload) } : {})
       }, timeout);
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw Object.assign(new Error(String(data.detail || data.error?.message || `Notez AI request failed (${response.status}).`)), { status: response.status, code: String(data.code || '') });
+      if (!response.ok) {
+        // Pydantic validation failures arrive as a detail ARRAY of
+        // {loc, msg, type}; surface the real messages instead of the old
+        // String(array) → "Error: [object Object]" (which hid the actual
+        // rejection reason in the console).
+        const rawDetail = data.detail;
+        const detailText = typeof rawDetail === 'string' ? rawDetail
+          : Array.isArray(rawDetail) ? rawDetail.map(item => item?.msg || JSON.stringify(item)).join('; ')
+          : (rawDetail && typeof rawDetail === 'object' ? (rawDetail.message || JSON.stringify(rawDetail)) : '');
+        throw Object.assign(new Error(detailText || data.error?.message || `Notez AI request failed (${response.status}).`), { status: response.status, code: String(data.code || '') });
+      }
       return data;
     }
     window.notezAiBackendConfigured = aiBackendConfigured;
