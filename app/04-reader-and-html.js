@@ -696,12 +696,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       return turns.filter(turn => turn.text).map(turn => (turn.speaker ? `${turn.speaker}: ${turn.text}` : turn.text)).join('\n').trim();
     }
-    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '', timeout = 0, route = '', exact = false, audioTranscription = null, partsOnly = false } = {}) {
+    async function aiCall(provider, prompt, { json = false, temperature: forced, images = [], model: pinnedModel = '', timeout = 0, route = '', exact = false, audioTranscription = null, partsOnly = false, voiceOnly = false } = {}) {
       const key = aiKey(provider), temperature = typeof forced === 'number' ? forced : aiTemperature();
       // Own key first when the user prefers it, then NotezAi's service if that fails.
       // A caller can also pin one route ('own' or 'managed') and get no fallback.
       if (!route && aiHasOwnKey() && aiSourcePref() === 'byok' && aiBackendConfigured()) {
-        const retry = { json, temperature: forced, images, model: pinnedModel, timeout, audioTranscription, partsOnly, exact };
+        const retry = { json, temperature: forced, images, model: pinnedModel, timeout, audioTranscription, partsOnly, exact, voiceOnly };
         try { return await aiCall(provider, prompt, { ...retry, route: 'own' }); }
         catch (error) { console.warn('Own key failed; using the NotezAi service.', error); return aiCall(provider, prompt, { ...retry, route: 'managed' }); }
       }
@@ -719,7 +719,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             temperature,
             json,
             images,
-            ...(audioTranscription ? { audio_transcription: true } : {})
+            ...(audioTranscription ? { audio_transcription: true } : {}),
+            ...(voiceOnly ? { voice_only: true } : {})
           }, 'POST', timeout || undefined, true);
           if (!result.text || !result.provider || !result.model) throw new Error('The Notez AI backend returned an incomplete response.');
           return { text: String(result.text), provider: String(result.provider), model: String(result.model), sources: Array.isArray(result.sources) ? result.sources : [] };
