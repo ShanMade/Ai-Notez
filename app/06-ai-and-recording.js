@@ -300,7 +300,6 @@ async function openWikiLink(title) {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && REC.status === REC_STATUS.RECORDING) recTick();
     });
-    const REC_MAX_MS = 50 * 60 * 1000;
     // Segment status constants
     const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
     // Recording status constants (separate from transcription status)
@@ -671,7 +670,7 @@ Output only the transcript.`;
       const providerLine = REC.provider ? `${recLabel(REC.provider)}` : 'AI';
       const state = finishing ? 'Recording finished' : REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.PAUSED ? 'Recording in progress' : 'Recording';
       const missing = (REC.segStatuses || []).map((status, index) => status === SEG_STATUS.FAILED ? index + 1 : 0).filter(Boolean);
-      const gap = missing.length ? ` Part${missing.length === 1 ? '' : 's'} ${missing.join(', ')} could not be transcribed; the audio is kept in this session so you can retry.` : '';
+      const gap = missing.length ? ` Part${missing.length === 1 ? '' : 's'} ${missing.join(', ')} could not be transcribed; they are held on this device and send when you are back online.` : '';
       const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.${gap}`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
@@ -683,7 +682,7 @@ Output only the transcript.`;
       const state = REC.status === REC_STATUS.PAUSED ? 'Recording paused' : 'Recording in progress';
       const mode = REC.mode === 'meeting' ? 'Meeting' : 'Classroom';
       const started = note?.createdAt ? new Date(note.createdAt).toLocaleString() : '';
-      const progress = `${parts} part${parts === 1 ? '' : 's'} transcribed so far${waiting ? `, ${waiting} waiting to be retried` : ''}.`;
+      const progress = `${parts} part${parts === 1 ? '' : 's'} transcribed so far${waiting ? `, ${waiting} waiting to send` : ''}.`;
       return `> ${state}${started ? ` · ${started}` : ''} · ${mode}\n\n## Overview\n\n${progress}\n\nThe full transcript and AI notes are written here when you finish the recording.`;
     }
     function recSaveNote(finishing = false, notesText = REC.liveNotes) {
@@ -744,38 +743,178 @@ Output only the transcript.`;
       });
       return kept.join('\n').trim();
     }
+    // ---- Held parts and the offline journal ------------------------------
+    // Every part is written to this device's IndexedDB before it is sent. A part
+    // that cannot be sent (no connection, the service is down, a rate limit) stays
+    // held there, in order, and is sent again when the connection is back. The
+    // recording itself never needs the network: the microphone and the encoder
+    // are local, so a dropped connection never stops a recording.
+    const REC_JOURNAL_DB = 'notez-rec-journal';
+    const REC_JOURNAL_STORE = 'parts';
+    let recJournalOpening = null;
+    function recJournalDb() {
+      if (!recJournalOpening) {
+        recJournalOpening = new Promise((resolve, reject) => {
+          if (!window.indexedDB) { reject(new Error('IndexedDB is not available')); return; }
+          const request = indexedDB.open(REC_JOURNAL_DB, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore(REC_JOURNAL_STORE, { keyPath: 'key' });
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        }).catch(error => { recJournalOpening = null; throw error; });
+      }
+      return recJournalOpening;
+    }
+    // Runs one request in its own transaction and resolves with its result.
+    function recJournalRun(mode, work) {
+      return recJournalDb().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(REC_JOURNAL_STORE, mode);
+        let request = null;
+        tx.oncomplete = () => resolve(request ? request.result : undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+        request = work(tx.objectStore(REC_JOURNAL_STORE)) || null;
+      }));
+    }
+    const recJournalKey = (noteId, index) => `${noteId}:${index}`;
+    // The journal is a safety net. If it cannot be written the part is still
+    // held in memory, so a failed write is logged and never stops the session.
+    function recJournalSave(index, noteId = REC.noteId) {
+      if (!noteId || REC.discarding) return Promise.resolve();
+      const record = {
+        key: recJournalKey(noteId, index), noteId, index,
+        blob: REC.segBlobs[index] || null, text: REC.segTexts[index] || '',
+        wall: REC.segWall[index] || 0, mark: REC.segMarks[index] ?? null, status: REC.segStatuses[index] || '',
+      };
+      return recJournalRun('readwrite', store => store.put(record)).catch(error => console.warn('Journal write failed:', error));
+    }
+    // Removes every record of a session. Only called once nothing of it is held.
+    async function recJournalForget(noteId) {
+      if (!noteId) return;
+      try {
+        const rows = await recJournalRun('readonly', store => store.getAll()) || [];
+        const keys = rows.filter(row => row.noteId === noteId).map(row => row.key);
+        if (keys.length) await recJournalRun('readwrite', store => { keys.forEach(key => store.delete(key)); return null; });
+      } catch (error) { console.warn('Journal cleanup failed:', error); }
+    }
+    const recHeldIndices = () => REC.segBlobs.map((blob, index) => blob ? index : -1).filter(index => index >= 0);
+    function recHoldPart(index, error) {
+      REC.segStatuses[index] = SEG_STATUS.FAILED;
+      REC.errors++;
+      if (!navigator.onLine) {
+        REC.notice = 'You are offline. Recording carries on here, and the waiting parts send when you are back online.';
+      } else if (error?.code === 'no-key') {
+        REC.notice = error.message;
+      } else {
+        REC.notice = `The stretch at ${recClockOf(recWallOf(index))} could not be sent. It is held on this device and will be sent again automatically.`;
+      }
+      recJournalSave(index);
+      updateRecLive();
+    }
+    // Sends one part. Resolves true once it is transcribed; a part that cannot be
+    // sent is held instead and resolves false.
+    async function recSendPart(index) {
+      const blob = REC.segBlobs[index];
+      if (!blob) return true;
+      if (!navigator.onLine) { recHoldPart(index, null); return false; }
+      try {
+        const cleaned = recCleanPart(recCanonicalPart(await recTranscribePart(blob, index)));
+        const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
+        if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
+        // A part with no speaker turn used to look exactly like the feature
+        // being gone, because the transcript simply rendered as paragraphs.
+        else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `The words at ${recClockOf(recWallOf(index))} came back without speaker labels. They are kept as plain text.`;
+        REC.segTexts[index] = text;
+        recLiveTranscript();          // settles the Voice numbering before any label is read
+        recRememberVoiceClips(text, blob);
+        REC.segBlobs[index] = null;
+        REC.segStatuses[index] = SEG_STATUS.COMPLETED;
+        REC.processed++;
+        await recJournalSave(index);
+        recSaveNote(REC.status === REC_STATUS.DONE);
+        return true;
+      } catch (error) {
+        console.warn(`Part ${index + 1} could not be sent:`, error);
+        recHoldPart(index, error);
+        return false;
+      }
+    }
+    // Sends every held part, oldest first, one at a time: each part's words are
+    // joined to the part before it, so a later part never goes out before an
+    // earlier one that is still held. Only one flush runs at a time.
+    function recFlushHeld(manual = false) {
+      if (REC.discarding || !recHeldIndices().length) return REC.queue;
+      if (!navigator.onLine) {
+        if (manual) { REC.notice = 'You are offline. The waiting parts send when you are back online.'; updateRecLive(); }
+        return REC.queue;
+      }
+      if (REC.flushing) return REC.flushing;
+      REC.flushing = REC.queue = REC.queue.then(async () => {
+        for (const index of recHeldIndices()) {
+          if (REC.discarding || !navigator.onLine) break;
+          REC.segStatuses[index] = SEG_STATUS.IN_PROGRESS;
+          updateRecLive();
+          if (!(await recSendPart(index))) break;   // later parts wait for this one
+        }
+        if (!recHeldIndices().length && !REC.discarding) {
+          if (REC.status === REC_STATUS.DONE) {
+            recSaveNote(true, REC.liveNotes);
+            recJournalForget(REC.noteId);
+          }
+          REC.notice = 'Every part is transcribed.';
+        }
+      }).finally(() => { REC.flushing = null; updateRecLive(); });
+      return REC.flushing;
+    }
+    // Back online: send what was held, straight away. While a connection keeps
+    // failing, the same check runs once a minute.
+    window.addEventListener('online', () => { if (recHeldIndices().length) recFlushHeld(); });
+    setInterval(() => { if (navigator.onLine && REC.noteId && REC.status !== REC_STATUS.FINALIZING && recHeldIndices().length) recFlushHeld(); }, 60000);
+    // After a reload the held parts are still on this device. Their note is
+    // reopened as a finished session, so the waiting parts can be sent from it.
+    async function recRestoreHeld(attempt = 0) {
+      if (REC.status !== REC_STATUS.IDLE || REC.noteId) return;
+      if (!notes.length && attempt < 20) { setTimeout(() => recRestoreHeld(attempt + 1), 1000); return; }
+      let rows = [];
+      try { rows = await recJournalRun('readonly', store => store.getAll()) || []; } catch { return; }
+      const sessions = new Map();
+      rows.forEach(row => { if (!sessions.has(row.noteId)) sessions.set(row.noteId, []); sessions.get(row.noteId).push(row); });
+      const held = [...sessions.entries()].find(([noteId, list]) => list.some(row => row.blob) && notes.some(item => item.id === noteId));
+      if (!held) return;
+      const [noteId, list] = held;
+      const note = notes.find(item => item.id === noteId);
+      const size = Math.max(...list.map(row => row.index)) + 1;
+      REC.noteId = noteId; REC.mode = (note.tags || []).includes('MEETING') ? 'meeting' : 'class';
+      REC.startedAt = note.createdAt || Date.now();
+      REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segWall = []; REC.segMarks = [];
+      for (let index = 0; index < size; index++) {
+        const row = list.find(item => item.index === index);
+        REC.segTexts[index] = row?.text || '';
+        REC.segBlobs[index] = row?.blob || null;
+        REC.segStatuses[index] = row?.blob ? SEG_STATUS.FAILED : SEG_STATUS.COMPLETED;
+        REC.segWall[index] = row?.wall || REC.startedAt;
+        REC.segMarks[index] = row?.mark ?? null;
+      }
+      REC.segIdx = size; REC.expectedParts = size; REC.processed = list.filter(row => !row.blob).length;
+      REC.stoppedMs = Math.max(0, ...list.map(row => row.mark || 0)); REC.baseMs = REC.stoppedMs;
+      REC.queue = Promise.resolve(); REC.flushing = null;
+      REC.status = REC_STATUS.DONE;
+      REC.notice = `${recHeldIndices().length} part${recHeldIndices().length === 1 ? '' : 's'} from an earlier recording are waiting to be sent.`;
+      recSaveNote(true, REC.liveNotes);
+      updateRecLive();
+      if (navigator.onLine) recFlushHeld();
+    }
+    setTimeout(() => recRestoreHeld(), 1500);
     function enqueuePart(blob, index) {
       REC.queue = REC.queue.then(async () => {
         if (REC.discarding) return;
         if (REC.segMarks[index] == null) REC.segMarks[index] = recElapsed();   // when this part closed
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
-        try {
-          // Each part is numbered on its own before it is stored. A provider that
-          // counts from zero (spk0) then cannot shift the voices of earlier parts.
-          const cleaned = recCleanPart(recCanonicalPart(await recTranscribePart(blob, index)));
-          const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
-          if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
-          // A part with no speaker turn used to look exactly like the feature
-          // being gone, because the transcript simply rendered as paragraphs.
-          else if (!REC.notice && !recHasLabels(text) && text.length > 240) REC.notice = `The words at ${recClockOf(recWallOf(index))} came back without speaker labels. They are kept as plain text.`;
-          REC.segTexts[index] = text;
-          recLiveTranscript();          // settles the Voice numbering before any label is read
-          recRememberVoiceClips(text, blob);
-          REC.segBlobs[index] = null;
-          REC.processed++;
-          recSaveNote(false);
-        } catch (error) {
-          REC.errors++;
-          REC.segTexts[index] = '';
-          REC.segStatuses[index] = SEG_STATUS.FAILED;
-          REC.segBlobs[index] = blob;
-          const noSpare = !aiUsesManaged() && recAudioProviders().length < 2;
-          REC.notice = `The stretch at ${recClockOf(recWallOf(index))} could not be transcribed. `
-            + (noSpare
-              ? 'Add your own key in NotezAi settings so a rate limit cannot stop the recording.'
-              : 'The audio is kept — retry it when the AI is free.');
-          updateRecLive();
-        }
+        // The part is written to this device first, so it survives a dropped
+        // connection, a rate limit or a closed tab.
+        REC.segBlobs[index] = blob;
+        REC.segStatuses[index] = SEG_STATUS.PENDING;
+        await recJournalSave(index);
+        await recSendPart(index);
         updateRecLive();
       });
       return REC.queue;
@@ -838,7 +977,6 @@ Output only the transcript.`;
       const clock = $('#rec-clock');
       if (clock) clock.textContent = fmtClock(recElapsed());
       if (REC.status !== REC_STATUS.RECORDING) return;
-      if (recElapsed() >= REC_MAX_MS) { recStop(); return; }
       // Catches a delayed timeout as soon as the page runs again. Measured
       // against the part's own start so a lost or late timeout cannot stack up.
       if (REC.partStartAt && Date.now() - REC.partStartAt >= recPartTarget()) recRollPart();
@@ -1037,16 +1175,16 @@ Output only the transcript.`;
     }
     function recLiveHtml() {
       const pending = REC.expectedParts ? Math.max(0, REC.expectedParts - REC.processed) : 0;
-      const failedCount = REC.segStatuses ? REC.segStatuses.filter(s => s === SEG_STATUS.FAILED || s === SEG_STATUS.NEEDS_RETRY).length : 0;
+      const failedCount = recHeldIndices().length;   // parts held on this device, waiting to send
       const notes = REC.liveNotes ? markdownToHtml(REC.liveNotes) : `<p class="rec-muted">${REC.status === REC_STATUS.IDLE ? 'Notes are written as the recording goes on. Each refresh adds to the last.' : 'Notes are written when the recording finishes, after the speakers are labelled.'}</p>`;
       const notice = REC.notice ? `<div class="ai-notice rec-notice" role="status">${esc(REC.notice)}</div>` : '';
       if (REC.status === REC_STATUS.IDLE) return `<div class="rec-strip">${recProviderStrip()}</div>${notice}`;
       const tab = REC.tab === 'notes' ? 'notes' : 'transcript';
-      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}${failedCount ? `, ${failedCount} failed` : ''}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
+      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}${failedCount ? `, ${failedCount} waiting` : ''}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
       const pane = tab === 'transcript' ? `<div class="rec-scroll" id="rec-transcript">${recTimeline()}</div>` : `<div class="rec-scroll ai-md">${notes}</div>`;
       // Failed parts keep their audio, so they can be retried instead of telling
       // the user the recording is lost.
-      const retry = failedCount ? `<div class="rec-actions"><button type="button" class="ai-action" data-rec="retry">Retry ${failedCount} failed part${failedCount === 1 ? '' : 's'}</button></div>` : '';
+      const retry = failedCount ? `<div class="rec-actions"><button type="button" class="ai-action" data-rec="retry">${navigator.onLine ? `Send ${failedCount} waiting part${failedCount === 1 ? '' : 's'} now` : `${failedCount} part${failedCount === 1 ? '' : 's'} waiting · offline`}</button><small class="rec-muted">They send by themselves when you are back online.</small></div>` : '';
       return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}${retry}<section class="rec-card">${pane}</section>`;
     }
     function updateRecLive() { const el = $('#rec-live'); if (el) el.innerHTML = recLiveHtml(); }
@@ -1092,13 +1230,12 @@ Output only the transcript.`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
-      const history = recHistoryHtml();
       const live = `<div id="rec-live" class="rec-live">${recLiveHtml()}</div>`;
       // Ready to record: the past sessions come up before the settings, because
       // reading yesterday's lesson is the more likely next move. A session that
       // has just finished keeps its own actions first, history under them.
       const naming = [REC_STATUS.IDLE, REC_STATUS.RECORDING, REC_STATUS.PAUSED].includes(status) ? `<div class="rec-name"><label class="nzai-label" for="rec-name">Name this recording</label><input class="nzai-field" id="rec-name" type="text" maxlength="80" autocomplete="off" placeholder="${esc(recAutoTitle())}" value="${esc(REC.name || '')}"></div>` : '';
-      return `${intro}${naming}${stage}${live}${status === REC_STATUS.IDLE ? history + tail : tail + history}`;
+      return `${intro}${naming}${stage}${live}${tail}`;
     }
     let recMeterCtx = null, recMeterRaf = 0;
     function recStartMeter(stream) {
@@ -1139,7 +1276,7 @@ Output only the transcript.`;
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
           REC.choice = $('#rec-enhance')?.value || 'auto';
-          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();
@@ -1194,7 +1331,7 @@ Output only the transcript.`;
       await Promise.race([REC.queue, recSleep(15000)]);   // let requests in flight settle, never hang the panel
       recResetSession();
       recRender();
-      if (noteId) await deleteNote(noteId, { confirm: false });
+      if (noteId) { await recJournalForget(noteId); await deleteNote(noteId, { confirm: false }); }
       toast('Recording discarded.', 'success', 3000);
     }
     function recPause() { if (REC.status !== REC_STATUS.RECORDING) return; endPart(); REC.status = 'paused'; REC.pausedAt = Date.now(); clearRecTimers(); recRender(); }
@@ -1234,6 +1371,7 @@ Output only the transcript.`;
       const note = notes.find(item => item.id === REC.noteId);
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
       const voices = recDetectVoices(recLiveTranscript());
+      if (!recHeldIndices().length && REC.noteId) recJournalForget(REC.noteId);
       REC.status = REC_STATUS.DONE; recRender(); renderEverything();
       toast('Recording finished and saved to your library.', 'success', 4500);
       if (voices.length && note) recOfferNames(note.id, voices);
@@ -1246,51 +1384,13 @@ Output only the transcript.`;
       if (act === 'discard') { recDiscard(); return; }
       if (act === 'tab') { REC.tab = event.target.closest('[data-rec]').dataset.tab; return updateRecLive(); }
       
-    // Retry failed segments after provider configuration
-    async function recRetryFailedSegments() {
-      const failedIndices = REC.segBlobs.map((blob, index) => blob ? index : -1).filter(idx => idx !== -1);
-      if (!failedIndices.length) { toast('No failed segments to retry.', 'info', 3000); return; }
-      
-      toast(`Retrying ${failedIndices.length} failed segment${failedIndices.length === 1 ? '' : 's'}...`, 'info', 4000);
-      REC.notice = `Retrying ${failedIndices.length} failed segment${failedIndices.length === 1 ? '' : 's'}...`;
-      updateRecLive();
-      
-      let retriedCount = 0;
-      for (const idx of failedIndices) {
-        if (!REC.segBlobs[idx]) continue;
-        
-        try {
-          REC.segStatuses[idx] = SEG_STATUS.IN_PROGRESS;
-          updateRecLive();
-          
-          const text = recTrimOverlap(idx > 0 ? REC.segTexts[idx - 1] : '', recCleanPart(await recTranscribePart(REC.segBlobs[idx], idx)));
-          if (text) {
-            REC.segTexts[idx] = text;
-            REC.segBlobs[idx] = null;
-            REC.segStatuses[idx] = SEG_STATUS.COMPLETED;
-            retriedCount++;
-            // Keep the "Recording finished" header when retrying after the stop.
-            recSaveNote(REC.status === REC_STATUS.DONE);
-          } else {
-            REC.segStatuses[idx] = SEG_STATUS.NEEDS_RETRY;
-          }
-        } catch (error) {
-          REC.segStatuses[idx] = SEG_STATUS.FAILED;
-          console.warn(`Retry failed for segment ${idx + 1}:`, error);
-        }
-        updateRecLive();
-      }
-      
-      if (retriedCount > 0) {
-        toast(`Successfully retried ${retriedCount} segment${retriedCount === 1 ? '' : 's'}.`, 'success', 4000);
-        REC.notice = `Retried ${retriedCount} segment${retriedCount === 1 ? '' : 's'}.`;
-      } else {
-        toast('No segments could be retried. Check your provider configuration.', 'error', 5000);
-        REC.notice = 'No segments could be retried.';
-      }
-      updateRecLive();
+    // The Send button: every part still held on this device is sent now.
+    function recRetryFailedSegments() {
+      if (!recHeldIndices().length) { toast('Nothing is waiting to be sent.', 'info', 3000); return; }
+      if (!navigator.onLine) { toast('You are offline. The parts send when you are back online.', 'info', 4000); return; }
+      recFlushHeld(true);
     }
-if (act === 'pause') return recPause();
+    if (act === 'pause') return recPause();
       if (act === 'resume') return recResume();
       if (act === 'stop') return recStop();
       if (act === 'voices') { if (typeof nzVoiceLibrary === 'function') nzVoiceLibrary(); return; }
