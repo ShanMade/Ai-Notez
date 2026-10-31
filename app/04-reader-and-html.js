@@ -1658,8 +1658,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         n: index + 1, id: item.note.id, title: item.note.title || 'Untitled note', folderPath: item.note.folderPath || '',
         passage: passages ? item.text.slice(0, 300) : '', text: item.text.slice(0, 600),
       }));
-      const blocks = picked.map((item, index) => `[${index + 1}] "${item.note.title || 'Untitled note'}" (${item.note.folderPath || 'General'})\n<note>\n${item.text.slice(0, per)}\n</note>`);
-      return { context: head + blocks.join('\n\n'), sources };
+      return { context: NzChat.numberedContext(picked.map(item => ({ title: item.note.title || 'Untitled note', folderPath: item.note.folderPath || '', body: item.text })), per), sources };
     }
     // The grounding label above an answer. Sourced and unsourced answers never share a label.
     function nzaiProvenanceHtml(msg) {
@@ -1713,44 +1712,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       el.textContent = messages[index];
     }
 
-    async function nzaiAsk(question, { task = '', editAt = null, note: forcedNote = null } = {}) {
-      if (nzai.busy) return;
-      // The lock is taken here, before the first await: retrieval can take a
-      // second, and a second Enter or a double-click used to start a second
-      // answer that pushed the same question twice.
-      nzai.busy = true;
-      nzaiStopReveal();
-      const run = nzai.run = (nzai.run || 0) + 1;
-      nzai.editAt = null;
-      if (!aiReady()) { nzai.busy = false; nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
-      const note = forcedNote || (nzai.scope === 'note' ? nzaiScopeNote() : null);
-      const wantsInventory = (window.NZ_INTENT?.inventory || []).some(pattern => pattern.test(question));
-      const chatBefore = nzaiChat();
+    // Retrieve (phase 4b): gathers the notes an answer may read, as context and as the
+    // sources the answer can cite. It does not build the prompt; see NzChat.buildPrompt.
+    async function nzaiGather(question, { note = null, task = '', wantsInventory = false } = {}) {
       let sources = [], context = '', found = [], retrievalMetadata = null;
 
       // Inventory questions bypass semantic search. Managed AI receives the authoritative
       // Firebase inventory from the backend; BYOK mode uses the current workspace cache.
       if (wantsInventory && !aiUsesManaged()) {
-        const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
-        const inventory = [...notes].sort((a, b) => compact(a.title).localeCompare(compact(b.title))).slice(0, 50);
-        const total = notes.length;
-        context = [
-          'LIBRARY INVENTORY from the current NoteZ workspace cache.',
-          'Exact local note count: ' + total + '.',
-          'Entries shown: ' + inventory.length + ' of ' + total + '.',
-          ...inventory.map((item, index) => {
-            const title = compact(item.title || 'Untitled note').slice(0, 180);
-            const meta = [];
-            if (item.folderPath) meta.push('folder=' + compact(item.folderPath).slice(0, 120));
-            if (item.subject) meta.push('subject=' + compact(item.subject).slice(0, 100));
-            if (Array.isArray(item.tags) && item.tags.length) meta.push('tags=' + item.tags.slice(0, 8).map(tag => compact(tag).slice(0, 50)).join(', '));
-            if (item.updatedAt || item.createdAt) meta.push('date=' + String(item.updatedAt || item.createdAt).slice(0, 40));
-            return '[' + (index + 1) + '] ' + title + (meta.length ? ' — ' + meta.join('; ') : '');
-          }),
-          total > inventory.length ? (total - inventory.length) + ' additional notes are omitted from this compact inventory.' : '',
-          'Use these metadata records for library questions. Do not infer note contents from titles or invent omitted records.'
-        ].filter(Boolean).join('\n');
-        sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180), folderPath: compact(item.folderPath || '').slice(0, 120) })).filter(item => item.id);
+        const inventory = NzChat.inventoryContext(notes);
+        context = inventory.context;
+        sources = inventory.sources;
       }
 
       // Folder and selected-note scopes: only notes inside the scope are sent to the model.
@@ -1826,24 +1798,31 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // Build context from found sources
       if (!context && found.length) {
         sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title, folderPath: item.folderPath || '', text: String(item.body || '').slice(0, 600) }));
-        context = 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n');
+        context = NzChat.numberedContext(found.map(item => ({ title: item.title, folderPath: item.folderPath || '', body: item.body })), aiActive() === 'groq' ? 2500 : 6000);
       }
-      const hasNotes = note || found.length > 0 || wantsInventory || scopedHandled;
+      return { context, sources, found, retrievalMetadata, scopedHandled };
+    }
+    async function nzaiAsk(question, { task = '', editAt = null, note: forcedNote = null } = {}) {
+      if (nzai.busy) return;
+      // The lock is taken here, before the first await: retrieval can take a
+      // second, and a second Enter or a double-click used to start a second
+      // answer that pushed the same question twice.
+      nzai.busy = true;
+      nzaiStopReveal();
+      const run = nzai.run = (nzai.run || 0) + 1;
+      nzai.editAt = null;
+      if (!aiReady()) { nzai.busy = false; nzai.view = 'settings'; nzai.notice = 'Add a Gemini or Groq key to start chatting.'; nzaiRender(); return; }
+      const note = forcedNote || (nzai.scope === 'note' ? nzaiScopeNote() : null);
+      const wantsInventory = (window.NZ_INTENT?.inventory || []).some(pattern => pattern.test(question));
+      const chatBefore = nzaiChat();
+      // Retrieve (phase 4b): nzaiGather finds the notes this answer may read.
+      const gathered = await nzaiGather(question, { note, task, wantsInventory });
+      const { context, found, retrievalMetadata, scopedHandled } = gathered;
+      let sources = gathered.sources;
+      const hasNotes = Boolean(note || found.length > 0 || wantsInventory || scopedHandled);
       const routed = NzChat.route({ wantsInventory, scope: nzai.scope, hasNote: Boolean(note), recording: Boolean(note && (note.tags || []).includes('RECORDING')) });
-      const ruleSet = NzChat.ruleKey(routed, hasNotes);
-      const ruleText = ruleSet === 'inventory'
-        ? 'Answer library inventory questions from the provided LIBRARY INVENTORY metadata. Use its exact count, list only the titles shown, and do not infer note contents from titles. If the backend provides a fresher authoritative inventory, prefer it.'
-        : routed.kind === 'note'
-          ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
-          : hasNotes
-            ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
-            : 'Answer the user\'s question directly using your general knowledge and the context provided in the user\'s message.';
-      // A recording's transcript is labelled by speaker. The rule keeps who-said-what honest.
-      const rules = ruleText + (ruleSet === 'note-recording' ? ' This note is a recording: its lines are stamped and labelled by speaker (Voice 1, or a name). Say who said something only when the line shows that label, and say "unclear" when it does not. Cite the stamped line, for example [00:12].' : '');
-      let prompt = `${nzaiTranscript(chatBefore)}${context}\n\n${rules}\n\nUSER: ${question}`;
-      if (note && nzai.quiz === note.id && !task) {
-        prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
-      }
+      // Build (phase 4b): the rules and the prompt come from NzChat.buildPrompt, which is pure and tested.
+      const { prompt } = NzChat.buildPrompt({ question, context, transcript: nzaiTranscript(chatBefore), routed, hasNotes, quiz: Boolean(note && nzai.quiz === note.id && !task) });
       nzai.notice = ''; nzai.stick = true; nzai.unread = false;
       nzaiUpdateThinking();
       if (nzai.thinkingInterval) clearInterval(nzai.thinkingInterval);
