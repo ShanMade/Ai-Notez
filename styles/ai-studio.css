@@ -1,0 +1,104 @@
+/* NotezAi panel, "Studio" layout. Restyle only: every control keeps its markup, data attributes and behaviour.
+   Scoped to html[data-theme] #nz-ai and built on the workspace tokens (--ink, --panel, --muted, --line,
+   --nz-accent), so light and dark themes and every accent colour apply. Loaded after ai-panel.css. */
+
+/* ---- Shell ---- */
+html[data-theme] #nz-ai { --nzs-rec: #D93036; --nzs-acc: var(--nz-accent, #0F766E); --nzs-on: #fff; --nzs-raised: var(--panel-raised); --nzs-hl: #FFE45C; }
+html[data-theme="dark"] #nz-ai { --nzs-rec: #FF6B70; --nzs-on: #06130F; }
+html[data-theme] #nz-ai .dock-chrome { padding: 14px 12px 10px 16px; min-height: 60px; }
+html[data-theme] #nz-ai .dock-title-tx b { font: 800 20px/1.1 "Bricolage Grotesque", Inter, system-ui, sans-serif; letter-spacing: -.03em; }
+html[data-theme] #nz-ai .dock-title-mark { background: var(--nzs-hl) !important; color: #0E1530 !important; border-radius: 11px 11px 11px 3px; width: 30px; height: 30px; flex-basis: 30px; }
+
+/* ---- Tabs (existing Ask/Voice switch becomes a segmented pill) ---- */
+html[data-theme] #nz-ai .dock-pane, html[data-theme] #nz-ai .nzai-body { background: var(--panel); }
+html[data-theme] #nz-ai .rec-body, html[data-theme] #nz-ai .rec-scroll { color: var(--ink); }
+
+/* ---- Voice: sub copy, mode switch ---- */
+html[data-theme] #nz-ai .rec-sub { color: var(--muted); font-size: 13.5px; margin: 4px 0 12px; line-height: 1.5; }
+html[data-theme] #nz-ai .rec-mode { display: flex; padding: 4px; gap: 4px; background: var(--nzs-raised); border: 1px solid var(--nzc-line, var(--line)); border-radius: 999px; margin: 0 0 14px; }
+html[data-theme] #nz-ai .rec-opt { flex: 1; display: flex; }
+html[data-theme] #nz-ai .rec-opt input { position: absolute; opacity: 0; pointer-events: none; }
+html[data-theme] #nz-ai .rec-opt { position: relative; }
+html[data-theme] #nz-ai .rec-opt:has(input:checked) { background: var(--ink); color: var(--panel); }
+html[data-theme] #nz-ai .rec-opt { height: 38px; align-items: center; justify-content: center; border-radius: 999px; font-weight: 650; color: var(--muted); cursor: pointer; font-size: 13.5px; }
+
+/* ---- Stage: the record button and state ---- */
+html[data-theme] #nz-ai .rec-stage { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 14px 0 8px; }
+html[data-theme] #nz-ai .rec-stage.idle { padding: 18px 0 14px; }
+html[data-theme] #nz-ai .rec-rec { width: 116px; height: 116px; border-radius: 50%; border: 0; background: var(--ink); display: grid; place-items: center; position: relative; cursor: pointer; box-shadow: 0 0 0 8px color-mix(in srgb, var(--ink) 6%, transparent); }
+html[data-theme] #nz-ai .rec-rec i { width: 44px; height: 44px; border-radius: 50%; background: var(--nzs-rec); box-shadow: 0 0 0 6px color-mix(in srgb, var(--nzs-rec) 18%, transparent); transition: transform .15s ease; }
+html[data-theme] #nz-ai .rec-rec:hover i { transform: scale(1.05); }
+html[data-theme] #nz-ai .rec-rec:disabled { opacity: .55; cursor: progress; }
+html[data-theme] #nz-ai .rec-stage-t b { display: block; font: 800 21px/1.15 "Bricolage Grotesque", Inter, system-ui, sans-serif; letter-spacing: -.02em; color: var(--ink); }
+html[data-theme] #nz-ai .rec-stage-t small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
+html[data-theme] #nz-ai .rec-state { display: inline-flex; align-items: center; gap: 8px; font: 650 12.5px Inter, system-ui, sans-serif; color: var(--muted); }
+html[data-theme] #nz-ai .rec-state i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+html[data-theme] #nz-ai .rec-state.recording { color: var(--nzs-rec); }
+html[data-theme] #nz-ai .rec-state.recording i { background: var(--nzs-rec); animation: nzsPulse 1.4s infinite; }
+html[data-theme] #nz-ai .rec-state.paused i { background: #C88A12; }
+html[data-theme] #nz-ai .rec-state.paused { color: var(--muted); }
+html[data-theme] #nz-ai .rec-state.finishing i { background: var(--nzs-acc); animation: nzsBlink 1s infinite; }
+@keyframes nzsPulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--nzs-rec) 22%, transparent); } }
+@keyframes nzsBlink { 50% { opacity: .3; } }
+
+html[data-theme] #nz-ai .rec-clock { font: 800 60px/1 "Bricolage Grotesque", Inter, system-ui, sans-serif; letter-spacing: -.04em; font-variant-numeric: tabular-nums; color: var(--ink); }
+html[data-theme] #nz-ai .rec-meter { width: 100%; max-width: 300px; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; }
+html[data-theme] #nz-ai .rec-meter i { display: block; height: 100%; border-radius: 999px; background: var(--nzs-acc); }
+
+/* ---- Recording controls: each icon sits in its own circle, the label flows underneath ---- */
+html[data-theme] #nz-ai .rec-ctls { display: flex; align-items: flex-start; justify-content: center; gap: 18px; flex-wrap: wrap; margin-top: 6px; }
+html[data-theme] #nz-ai .rec-ctl { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 72px; border: 0; background: none; color: var(--ink); font: 650 12.5px Inter, system-ui, sans-serif; cursor: pointer; padding: 0; }
+html[data-theme] #nz-ai .rec-ctl svg { width: 22px; height: 22px; box-sizing: content-box; padding: 21px; border-radius: 50%; border: 1.5px solid var(--line-strong); background: var(--panel); }
+html[data-theme] #nz-ai .rec-ctl:hover svg { border-color: var(--ink); }
+html[data-theme] #nz-ai .rec-ctl.stop svg { padding: 25px; background: var(--ink); color: var(--panel); border-color: var(--ink); }
+html[data-theme] #nz-ai .rec-ctl.quiet svg { width: 18px; height: 18px; padding: 16px; color: var(--nzs-rec); border-color: color-mix(in srgb, var(--nzs-rec) 40%, transparent); }
+html[data-theme] #nz-ai .rec-ctl.quiet { color: var(--nzs-rec); }
+html[data-theme] #nz-ai .rec-ctl:focus-visible { outline: 3px solid var(--nzs-hl); outline-offset: 4px; border-radius: 50%; }
+
+/* ---- Name, settings, helper text ---- */
+html[data-theme] #nz-ai .rec-name { margin: 14px 0 12px; }
+html[data-theme] #nz-ai .rec-name .nzai-field { border: 0; border-bottom: 1.5px dashed var(--line-strong); border-radius: 0; background: none; padding: 6px 0; font: 700 17px "Bricolage Grotesque", Inter, system-ui, sans-serif; color: var(--ink); }
+html[data-theme] #nz-ai .rec-name .nzai-field:focus { outline: none; border-bottom-style: solid; border-bottom-color: var(--nzs-acc); }
+html[data-theme] #nz-ai .nzai-label { font: 650 12px Inter, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; text-transform: none; margin-top: 12px; }
+html[data-theme] #nz-ai .nzai-field { border-radius: 14px; border: 1px solid var(--line-strong); background: var(--panel); min-height: 42px; }
+html[data-theme] #nz-ai .rec-muted { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+/* ---- Live transcript and notes ---- */
+html[data-theme] #nz-ai .rec-live { margin-top: 12px; }
+html[data-theme] #nz-ai .rec-strip { display: flex; gap: 6px; }
+html[data-theme] #nz-ai .rec-tabs { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--nzs-raised); border: 1px solid var(--line); margin: 6px 0 10px; }
+html[data-theme] #nz-ai .rec-tabs button { height: 32px; padding: 0 14px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-weight: 650; font-size: 13px; }
+html[data-theme] #nz-ai .rec-tabs button[aria-selected="true"] { background: var(--ink); color: var(--panel); }
+html[data-theme] #nz-ai .rec-scroll { font: 15.5px/1.6 Newsreader, Georgia, "Times New Roman", serif; }
+
+/* ---- Buttons: pill style, same actions ---- */
+html[data-theme] #nz-ai .rec-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+html[data-theme] #nz-ai .ai-action { border-radius: 999px; border: 1px solid var(--line-strong); background: var(--panel); min-height: 40px; padding: 0 14px; font-weight: 650; font-size: 13px; color: var(--ink); }
+html[data-theme] #nz-ai .ai-action:hover { border-color: var(--ink); }
+html[data-theme] #nz-ai .ai-action.primary { background: var(--nzs-acc); color: var(--nzs-on); border-color: var(--nzs-acc); }
+html[data-theme] #nz-ai .ai-action.rec-danger { color: var(--nzs-rec); border-color: color-mix(in srgb, var(--nzs-rec) 45%, transparent); }
+html[data-theme] #nz-ai .ai-action.big { min-height: 46px; padding: 0 20px; }
+
+/* ---- History ---- */
+html[data-theme] #nz-ai .rec-hist { border-radius: 18px; border: 1px solid var(--line); background: var(--panel); padding: 4px 0; margin-top: 12px; }
+html[data-theme] #nz-ai .rec-hist-head { font: 700 13px Inter, system-ui, sans-serif; color: var(--ink); }
+
+/* ---- Ask tab: composer and chips ---- */
+html[data-theme] #nz-ai .ai-composer { border: 1.5px solid var(--ink) !important; border-radius: 22px !important; background: var(--nzs-raised) !important; }
+html[data-theme] #nz-ai .ai-composer:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--nzs-acc) 28%, transparent) !important; }
+html[data-theme] #nz-ai .ai-send { background: var(--nzs-acc) !important; color: var(--nzs-on) !important; }
+html[data-theme] #nz-ai .ai-qchip { border-radius: 999px; }
+
+@media (prefers-reduced-motion: reduce) { html[data-theme] #nz-ai .rec-state.recording i, html[data-theme] #nz-ai .rec-state.finishing i { animation: none; } }
+
+/* Final layer: the app's older recorder rules are more specific, so the controls above are pinned here. */
+html[data-theme] #nz-ai .rec-stage.idle { flex-direction: column !important; align-items: center !important; gap: 12px !important; text-align: center !important; background: none !important; border: 0 !important; padding: 14px 0 10px !important; }
+html[data-theme] #nz-ai .rec-stage.idle .rec-stage-t { text-align: center !important; }
+html[data-theme] #nz-ai .rec-rec { flex: none !important; width: 116px !important; height: 116px !important; border: 0 !important; background: var(--ink) !important; color: var(--panel) !important; box-shadow: 0 0 0 8px color-mix(in srgb, var(--ink) 6%, transparent) !important; }
+html[data-theme] #nz-ai .rec-rec::before, html[data-theme] #nz-ai .rec-rec::after { display: none !important; }
+html[data-theme] #nz-ai .rec-rec i { width: 44px !important; height: 44px !important; background: var(--nzs-rec) !important; }
+html[data-theme] #nz-ai .rec-ctl { height: auto !important; min-height: 0 !important; border: 0 !important; background: none !important; border-radius: 0 !important; box-shadow: none !important; color: var(--ink) !important; padding: 0 !important; gap: 8px !important; }
+html[data-theme] #nz-ai .rec-ctl svg { width: 22px !important; height: 22px !important; padding: 21px !important; border: 1.5px solid var(--line-strong) !important; background: var(--panel) !important; color: var(--ink) !important; border-radius: 50% !important; }
+html[data-theme] #nz-ai .rec-ctl.stop svg { padding: 25px !important; background: var(--ink) !important; color: var(--panel) !important; border-color: var(--ink) !important; }
+html[data-theme] #nz-ai .rec-ctl.quiet svg { width: 18px !important; height: 18px !important; padding: 16px !important; color: var(--nzs-rec) !important; border-color: color-mix(in srgb, var(--nzs-rec) 40%, transparent) !important; background: var(--panel) !important; }
