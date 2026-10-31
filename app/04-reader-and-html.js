@@ -996,13 +996,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // The phone layout keeps three controls in the bar and moves the rest into a
     // sheet that rises from the bottom edge, where a thumb already is. Nothing is
     // removed on a phone: every action is one tap away, the same handlers run.
-    // Recent voice notes, listed in the More menu so they can be reopened in one tap.
-    function nzaiSheetRecent() {
-      const box = $('#nzai-sheet-recent'); if (!box) return;
-      const voices = (typeof recSessionList === 'function' ? recSessionList() : []).slice(0, 3);
-      const voiceHtml = voices.length ? `<p class="nzai-sheet-grp">Recent voice notes</p><div class="nzai-sheet-rows">${voices.map(item => `<button type="button" class="nzai-sheet-row" data-nzai="open-voice" data-id="${esc(item.note.id)}"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>${esc(item.title)}</b><small>${esc([item.day, item.time].filter(Boolean).join(' · '))}</small></button>`).join('')}<button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>View all voice notes</b><small>Record and transcribe</small></button></div>` : '';
-      box.innerHTML = voiceHtml;
-    }
     function nzaiSheet(open) {
       const panel = $('#nz-ai'); if (!panel) return;
       const sheet = $('#nzai-sheet', panel), scrim = $('#nzai-scrim', panel), more = panel.querySelector('[data-nzai="sheet"]');
@@ -1011,7 +1004,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (scrim) scrim.hidden = !on;
       panel.dataset.sheet = on ? 'true' : 'false';
       if (more) more.setAttribute('aria-expanded', String(on));
-      if (on) nzaiSheetRecent();
       if (on) { const first = sheet && sheet.querySelector('.nzai-sheet-row'); if (first) setTimeout(() => first.focus({ preventScroll: true }), 40); }
     }
     // The sheet is a popover, not a modal: a click anywhere outside it (or on
@@ -1066,7 +1058,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <button type="button" class="nzai-sheet-row" data-nzai="history" data-nav="history"><span class="ic" aria-hidden="true">${nzaiSolidIcon('history')}</span><b>History</b><small>Saved chats on this device</small></button>
             <button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>Voice notes</b><small>Record and transcribe</small></button>
           </div>
-          <div id="nzai-sheet-recent"></div>
           <p class="nzai-sheet-grp">Answer</p>
           <div class="nzai-sheet-rows">
             <button type="button" class="nzai-sheet-row" data-nzai="scope-toggle"><span class="ic" aria-hidden="true">${nzaiSolidIcon('layers')}</span><b>Answer scope</b><small id="nzai-sheet-scope">This note</small></button>
@@ -1966,7 +1957,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       if (act === 'quiz') { const note = nzaiScopeNote(); if (!note) return; nzai.quiz = note.id; return nzaiAsk('Start the quiz. Ask me the first question.'); }
       if (act === 'stop-quiz') { nzai.quiz = ''; nzai.notice = 'Quiz stopped.'; return nzaiRender(); }
-      if (act === 'open-voice') { nzaiSheet(false); nzaiClose(); return openNote(el.dataset.id); }
       if (act === 'open-chat') { nzaiSheet(false); nzai.chatId = el.dataset.id; const chat = nzaiChat(); if (chat) { nzai.scope = chat.scope || 'library'; nzai.noteId = chat.noteId || nzai.noteId; } nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'delete-chat') { if (!(await uiConfirm({ title: 'Delete this chat?', message: 'The conversation is removed from this device.', confirmLabel: 'Delete chat', danger: true }))) return; nzaiWriteChats(nzaiReadChats().filter(chat => chat.id !== el.dataset.id)); if (nzai.chatId === el.dataset.id) nzai.chatId = ''; return nzaiRender(); }
       if (act === 'toggle-sources') {

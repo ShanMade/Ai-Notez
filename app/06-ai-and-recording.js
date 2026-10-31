@@ -866,6 +866,7 @@ Output only the transcript.`;
     // Forgets the recording session but keeps the note it produced (if any).
     function recResetSession() {
       REC.status = REC_STATUS.IDLE;
+      REC.name = '';
       REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = [];
       REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
       REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set();
@@ -1049,6 +1050,23 @@ Output only the transcript.`;
       return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}${retry}<section class="rec-card">${pane}</section>`;
     }
     function updateRecLive() { const el = $('#rec-live'); if (el) el.innerHTML = recLiveHtml(); }
+    // The title a recording gets when no name is typed.
+    function recAutoTitle(when = new Date()) {
+      const mode = REC.mode === 'meeting' ? 'Meeting' : 'Class';
+      return `${mode} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    }
+    // Typing keeps the name for the note; leaving the box renames a note that already exists.
+    function recNameCommit(value) {
+      REC.name = value;
+      const note = REC.noteId && notes.find(item => item.id === REC.noteId);
+      if (!note) return;
+      note.title = value.trim() || recAutoTitle(new Date(REC.startedAt || Date.now()));
+      note.updatedAt = Date.now();
+      persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
+      renderEverything();
+    }
+    document.addEventListener('input', event => { if (event.target?.id === 'rec-name') REC.name = event.target.value; });
+    document.addEventListener('change', event => { if (event.target?.id === 'rec-name') recNameCommit(event.target.value); });
     function recBodyHtml() {
       const status = REC.status;
       const stateLabel = { idle: 'Ready', recording: 'Recording', paused: 'Paused', finishing: 'Finishing', done: 'Saved' }[status] || 'Ready';
@@ -1079,7 +1097,8 @@ Output only the transcript.`;
       // Ready to record: the past sessions come up before the settings, because
       // reading yesterday's lesson is the more likely next move. A session that
       // has just finished keeps its own actions first, history under them.
-      return `${intro}${stage}${live}${status === REC_STATUS.IDLE ? history + tail : tail + history}`;
+      const naming = [REC_STATUS.IDLE, REC_STATUS.RECORDING, REC_STATUS.PAUSED].includes(status) ? `<div class="rec-name"><label class="nzai-label" for="rec-name">Name this recording</label><input class="nzai-field" id="rec-name" type="text" maxlength="80" autocomplete="off" placeholder="${esc(recAutoTitle())}" value="${esc(REC.name || '')}"></div>` : '';
+      return `${intro}${naming}${stage}${live}${status === REC_STATUS.IDLE ? history + tail : tail + history}`;
     }
     let recMeterCtx = null, recMeterRaf = 0;
     function recStartMeter(stream) {
@@ -1125,7 +1144,7 @@ Output only the transcript.`;
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();
           const when = new Date();
-          const note = normalizeNote({ id: uid(), title: `${REC.mode === 'meeting' ? 'Meeting' : 'Class'} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
+          const note = normalizeNote({ id: uid(), title: (REC.name || '').trim() || recAutoTitle(when), subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
           REC.noteId = note.id; notes = [note, ...notes]; addFolderPath(note.folderPath); persistNote(note).catch(() => {}); renderEverything();
         } else {
           // Continue: the clock picks up where the last recording stopped and the
