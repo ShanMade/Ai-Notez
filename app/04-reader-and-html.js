@@ -1303,6 +1303,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     function nzaiRender() {
       const panel = nzaiEnsurePanel(), body = $('#nzai-body');
       nzaiSyncChrome();
+      body.classList.toggle('nzai-settings-body', nzai.view === 'settings');
       if (nzai.view === 'settings') return nzaiRenderSettings(body);
       if (nzai.view === 'history') return nzaiRenderHistory(body);
       nzaiRenderChat(body);
