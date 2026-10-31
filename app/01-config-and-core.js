@@ -1406,7 +1406,6 @@
       reviewClockId = window.setInterval(refreshReviewIndicators, 60_000);
     }
     async function persistNote(note) {
-      window.nzNoteChanged?.(note); // refreshes the connections panel on every save
       if (noteSaving) return; // Prevent duplicate saves
       noteSaving = true;
       if (currentSession?.mode === 'demo') { localNotesWrite(); noteSaving = false; return; }
