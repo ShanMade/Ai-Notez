@@ -1664,7 +1664,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     // The grounding label above an answer. Sourced and unsourced answers never share a label.
     function nzaiProvenanceHtml(msg) {
       if (!msg.provenance || msg.error) return '';
-      const hint = msg.provenance.kind === 'general' ? 'Written by the AI without your notes.' : 'Sources are listed below the answer.';
+      const hint = msg.provenance.kind === 'general' ? 'Written by the AI without your notes.' : msg.provenance.kind === 'suggestion' ? 'Suggested by the AI. Check it before you use it.' : 'Sources are listed below the answer.';
       return `<div class="nzai-prov ${esc(msg.provenance.kind)}" title="${esc(hint)}"><span class="nzai-prov-dot" aria-hidden="true"></span>${esc(msg.provenance.label)}</div>`;
     }
     function nzaiFollowUpsHtml(msg) {
@@ -1829,13 +1829,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         context = 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n');
       }
       const hasNotes = note || found.length > 0 || wantsInventory || scopedHandled;
-      const rules = wantsInventory
+      const routed = NzChat.route({ wantsInventory, scope: nzai.scope, hasNote: Boolean(note), recording: Boolean(note && (note.tags || []).includes('RECORDING')) });
+      const ruleSet = NzChat.ruleKey(routed, hasNotes);
+      const ruleText = ruleSet === 'inventory'
         ? 'Answer library inventory questions from the provided LIBRARY INVENTORY metadata. Use its exact count, list only the titles shown, and do not infer note contents from titles. If the backend provides a fresher authoritative inventory, prefer it.'
-        : note
+        : routed.kind === 'note'
           ? 'Answer using the note when it helps. Say clearly when the note does not cover something.'
           : hasNotes
             ? 'Answer ONLY from the numbered notes. Cite them as [1], [2] after the sentences they support. If the notes do not contain the answer, say so instead of guessing.'
             : 'Answer the user\'s question directly using your general knowledge and the context provided in the user\'s message.';
+      // A recording's transcript is labelled by speaker. The rule keeps who-said-what honest.
+      const rules = ruleText + (ruleSet === 'note-recording' ? ' This note is a recording: its lines are stamped and labelled by speaker (Voice 1, or a name). Say who said something only when the line shows that label, and say "unclear" when it does not. Cite the stamped line, for example [00:12].' : '');
       let prompt = `${nzaiTranscript(chatBefore)}${context}\n\n${rules}\n\nUSER: ${question}`;
       if (note && nzai.quiz === note.id && !task) {
         prompt = `You are a strict but kind tutor quizzing a student on the note below. The student's latest message is their answer to your previous question (or a request to start if this is the first turn). Grade the answer as Correct, Partly correct or Incorrect, give the right answer in one or two sentences, then ask ONE new short question about an important idea in the note. Never reveal the next answer. Base everything only on the note.\n\n${context}\n\n${nzaiTranscript(chatBefore)}STUDENT: ${question}`;
@@ -1869,9 +1873,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         const taskLimit = aiActive() === 'groq' ? 9000 : 40000;
         const answer = await aiGenerate(taskDef ? `${taskDef.prompt}\n\nNote title: ${note.title}\n<note>\n${taskText.slice(0, taskLimit)}\n</note>` : prompt, { json: Boolean(taskDef?.json) });
         if (run !== nzai.run) return;
-        if (Array.isArray(answer.sources) && answer.sources.length) {
-          sources = answer.sources.map((source, index) => ({ n: index + 1, id: String(source.id || ''), title: String(source.title || 'Untitled'), folderPath: String(source.folderPath || '') })).filter(source => source.id);
-        }
+        // Only notes that were sent are shown as sources. A source the model names on its own is dropped.
+        sources = NzChat.attachSources(sources, answer.sources);
         // Add retrieval metadata to the response if available
         let bodyText = answer.text;
         let suggestions = null;
@@ -1889,7 +1892,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           suggestions,
           model: `${AI_PROVIDERS[answer.provider]?.label || ''} \u00b7 ${answer.model}`,
           sources,
-          provenance: NzConn.provenance(bodyText, sources),
+          provenance: NzChat.provenance(bodyText, sources, { task }),
           followUps: !taskDef && !wantsInventory ? NzConn.followUps(question, sources, nzai.scope === 'folder' ? nzai.folder : '') : [],
           replace: Boolean(taskDef?.replace),
           t: Date.now(),
