@@ -656,6 +656,13 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     window.notezAiIndexNote = noteId => aiBackendRequest(`/v1/index/notes/${encodeURIComponent(noteId)}`, {});
     window.notezAiDeleteIndexedNote = noteId => aiBackendRequest(`/v1/index/notes/${encodeURIComponent(noteId)}`, undefined, 'DELETE');
     window.notezAiRebuildIndex = () => aiBackendRequest('/v1/index/rebuild', {}, 'POST', 600000);
+    // Bridge for the semantic index queue (app/13), which lives outside this scope.
+    window.nzSindexEnv = {
+      notes: () => notes,
+      available: () => !!(currentSession?.mode === 'cloud' && aiBackendSession()),
+      toast: (...args) => toast(...args),
+      showModal: (...args) => showModal(...args),
+    };
     // `timeout` is for the slow calls: one minute of audio takes longer to
     // transcribe than a chat answer takes to write.
     // A diarized reply arrives as audioTranscription parts (speakerLabel + words)
@@ -1557,7 +1564,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         ? `<div class="nzai-source" role="radiogroup" aria-label="AI source"><button type="button" role="radio" aria-checked="${!byok}" class="nzai-src ${!byok ? 'on' : ''}" data-nzai="source" data-v="managed"><b>NotezAi (default)</b><small>Included. Chat, note tools and Voice-to-Note. Works as a guest or signed in.</small></button><button type="button" role="radio" aria-checked="${byok}" class="nzai-src ${byok ? 'on' : ''}" data-nzai="source" data-v="byok"><b>My own key (BYOK)</b><small>Gemini or Groq. Requests go straight to your provider, including Voice-to-Note.</small></button></div>`
         : '';
       const managedBlock = !byok
-        ? `<div class="nzai-keybox"><b>Using NotezAi</b><small>No API key is needed.${aiBackendSession() ? '' : ' You are using it as a guest; sign in to also sync notes and build the semantic index.'}</small>${aiBackendSession() ? '<div class="nzai-actions"><button type="button" data-nzai="check-backend">Check service</button><button type="button" data-nzai="rebuild-index">Build / refresh semantic index</button></div>' : ''}</div>`
+        ? `<div class=\"nzai-keybox\"><b>Using NotezAi</b><small>No API key is needed.${aiBackendSession() ? '' : ' You are using it as a guest; sign in to also sync notes and build the semantic index.'}</small>${aiBackendSession() ? '<div class=\"nzai-actions\"><button type=\"button\" data-nzai=\"check-backend\">Check service</button><button type=\"button\" data-nzai=\"rebuild-index\">Semantic index…</button>' + (window.nzSindexHasRest?.() ? '<button type=\"button\" data-nzai=\"sindex-rest\">Build remaining notes</button>' : '') + '</div>' + (window.nzSindexStatusHtml?.() || '') : ''}</div>`
         : '';
       const keyBlock = !byok ? '' : key
         ? `<div class="nzai-keybox"><b>Key saved</b><span>••••${esc(key.slice(-4))}</span><small>Saved on this device only and never synced with your notes. Requests go straight to ${esc(info.label)}. ${esc(info.privacy)}</small><div class="nzai-actions"><button type="button" data-nzai="change-key">Change key</button><button type="button" class="danger" data-nzai="remove-key">Remove key</button></div></div>`
@@ -2125,14 +2132,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         } catch (error) { console.warn('Backend check failed:', error); nzai.notice = `Could not connect to the Notez AI service: ${window.nzSafeError(error, 'it did not answer.')}`; }
         nzaiRenderSettings($('#nzai-body')); return;
       }
-      if (act === 'rebuild-index') {
-        say('Building a semantic index from your existing Firebase notes. This may take a while…');
-        try {
-          const result = await window.notezAiRebuildIndex();
-          nzai.notice = `Semantic index refreshed: ${result.indexedNotes} notes, ${result.indexedChunks} chunks.`;
-        } catch (error) { console.warn('Index rebuild failed:', error); nzai.notice = `Could not refresh the semantic index: ${window.nzSafeError(error, 'the service did not answer.')}`; }
-        nzaiRenderSettings($('#nzai-body')); return;
-      }
+      if (act === 'rebuild-index') { window.nzSindexOpenPicker?.(); return; }
+      if (act === 'sindex-rest') { window.nzSindexBuildRest?.(); return; }
       if (act === 'load-models') {
         const key = aiKey(nzai.tab); if (!key) return say('Save a key first.');
         say('Loading models…');

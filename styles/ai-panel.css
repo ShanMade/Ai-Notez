@@ -351,3 +351,18 @@ mark.nzc-passage { background: color-mix(in srgb, var(--nzc-acc) 28%, transparen
 /* Long folder lists: the sidebar still scrolls (wheel, touch, keyboard) but its scrollbar is hidden. */
 .app-shell .sidebar { overflow-y: auto; scrollbar-width: none; }
 .app-shell .sidebar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Semantic index: status line in NotezAi settings and the "choose what to build first" picker. */
+#nz-ai .nzai-sindex { margin: 8px 0 0; font-size: 12px; line-height: 1.45; opacity: .8; }
+.nzsi p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; }
+.nzsi-list { max-height: 48vh; overflow: auto; border: 1px solid rgba(128,148,170,.28); border-radius: 10px; padding: 4px; }
+.nzsi-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border-radius: 8px; cursor: pointer; }
+.nzsi-row:hover { background: rgba(128,148,170,.12); }
+.nzsi-row input { margin-top: 3px; }
+.nzsi-row span { display: flex; flex-direction: column; min-width: 0; }
+.nzsi-row b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nzsi-row small { font-size: 11.5px; opacity: .7; }
+.nzsi-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.nzsi-foot #nzsi-count { margin-right: auto; font-size: 12px; opacity: .75; }
+.nzsi-btn { padding: 8px 13px; border-radius: 8px; cursor: pointer; font: 600 12px system-ui, sans-serif; border: 1px solid rgba(128,148,170,.4); background: transparent; color: inherit; }
+.nzsi-btn.primary { background: #2f6fb0; border-color: #2f6fb0; color: #fff; }
