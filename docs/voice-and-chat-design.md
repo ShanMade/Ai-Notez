@@ -63,6 +63,8 @@ Acceptance: core tests pass; the recorder still works with the same behaviour fo
 
 **Phase 3:** session state machine in the browser (`idle → … → done`, per-part states), replacing the scattered flags in `REC`. Acceptance: unit tests for the transitions; no page errors.
 
+_Phase 3 status: done. `app/15-recording-state.js` holds the session table (begin, granted, denied, pause, resume, stop, discard, finished, restore, reset) and the part table (queue, send, done, hold). Every status write in `app/06` goes through `recMove` or `recPartMove`, and a move the table refuses is logged and not applied. Tests: `scripts/recording-state.test.mjs`. Browser: start, pause, resume, stop, and discard from both paused and finished, with no page errors or refused moves._
+
 **Phase 4:** main NotezAi chat rebuild, after the voice work is merged. It covers the chat architecture (routing for normal questions, library answers, and voice-note follow-ups), the source and provenance display, and the chat UX. Its plan is written when phase 3 is merged. Chat must keep its current model routing until then.
 
 ## 6. Out of scope for now
