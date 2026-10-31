@@ -116,3 +116,7 @@ test('class and meeting keep the exact setting wording the recorder used before'
   assert.match(V.buildTranscriptPrompt({ mode: 'casual' }), /Setting: everyday conversation/);
   assert.match(V.buildTranscriptPrompt({ mode: 'call' }), /Setting: a phone or video call/);
 });
+
+test('every mode has a short hint for the picker', () => {
+  for (const [id, mode] of Object.entries(V.MODES)) assert.ok(mode.hint && mode.hint.length < 90, id);
+});

@@ -12,31 +12,37 @@
   const MODES = {
     casual: {
       label: 'Casual talk',
+      hint: 'Everyday talk or a voice memo. A short summary and any follow-ups.',
       setting: 'Setting: everyday conversation or a voice memo. One or several people talking informally, sometimes interrupting each other.',
       notes: 'Write a short summary of this conversation, then the key points, and any plans or follow-ups people agreed to. Use only what is in the transcript.',
     },
     class: {
       label: 'Class',
+      hint: 'A lecture or lesson. In-depth notes for someone who missed it.',
       setting: 'Setting: a classroom lecture. Usually one teacher and some students.',
       notes: 'Write in-depth classroom notes from this transcript, for a student who missed the lesson: topics in the order they were taught, every important concept, definition, fact, formula, date, name and example, explained accurately. Use Markdown. Use only what is in the transcript.',
     },
     meeting: {
       label: 'Meeting',
+      hint: 'Several people, sometimes at once. Minutes with decisions and actions.',
       setting: 'Setting: a meeting. Several adults may speak, sometimes over each other.',
       notes: 'Write formal meeting minutes from this transcript: date and time if said; attendees (by name or Voice label); agenda items in order; the discussion under each item in short points; decisions made; action items with owner and deadline if stated. Use Markdown. Use only what is in the transcript.',
     },
     call: {
       label: 'Call',
+      hint: 'A phone or video call, with a remote side. Summary and agreed follow-ups.',
       setting: 'Setting: a phone or video call. Speakers may be remote and far from the microphone, and one side may be a single voice.',
       notes: 'Write a summary of this call: what it was about, what each side said or asked, what was agreed, and the follow-ups with owners if stated. Use Markdown. Use only what is in the transcript.',
     },
     chat: {
       label: 'Chat',
+      hint: 'Friends or colleagues talking. The highlights, and who said what.',
       setting: 'Setting: an informal chat between friends or colleagues, read aloud or recorded in the room. Speakers may use slang and switch languages.',
       notes: 'Write the highlights of this chat: the main topics, who said what on each, and anything decided or promised. Use Markdown. Use only what is in the transcript.',
     },
     custom: {
       label: 'Custom',
+      hint: 'Your own format. Describe it in Instructions.',
       setting: 'Setting: a recording of the user\'s choice.',
       notes: 'Write notes from this transcript, following the user\'s instructions. Use Markdown. Use only what is in the transcript.',
     },
