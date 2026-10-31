@@ -5,9 +5,12 @@ import base64
 import binascii
 import hashlib
 import logging
+import os
 import re
+import secrets
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -21,6 +24,7 @@ from .firebase import user_note, user_notes
 from .automatic_rag import augment_prompt
 from .vector_store import note_text
 from .providers import MODEL_DEFAULTS, configured_providers, cool_down, embed_query, embed_texts, generate, provider_cooling_down, provider_key, transcribe_audio
+from .jobs import AiJob, ai_job_queue
 from .indexing import (
     index_manager,
     indexing_queue,
@@ -31,7 +35,107 @@ from .indexing import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Notez AI API", version="1.0.0")
+
+# =============================================================================
+# Durable AI transcription jobs (recording)
+# =============================================================================
+# POST /v1/ai/transcribe creates a ROW in the durable job queue (SQLite,
+# app/jobs.py) and returns a jobId immediately; this worker claims and runs
+# it. The queue survives a restart (recover() puts lease-expired jobs back to
+# queued), job_key makes a retried request idempotent, and a job is claimed
+# by exactly one transaction — so a crash never duplicates a transcription.
+
+_WORKER_OWNER = f"notez-be-{os.getpid()}"
+
+
+async def _transcribe_job_payload(job: AiJob) -> tuple[str, str]:
+    """Run one transcription job. Uses the same Gemini model walk the inline
+    /v1/ai/generate path uses: the requested model first, then the configured
+    transcribe chain on a 404 (missing) or 429/503 (quota/busy)."""
+    payload = job.payload
+    audio = next((item for item in payload.get("images", []) if str(item.get("mime", "")).startswith("audio/")), None)
+    if not audio:
+        raise HTTPException(status_code=422, detail="The job has no audio part.")
+    key = provider_key("gemini")
+    if not key:
+        raise HTTPException(status_code=503, detail="The managed Gemini provider is not configured. Set AI_GEMINI_API_KEY in the backend environment.")
+    requested = str(payload.get("model") or "").strip()
+    models = list(dict.fromkeys(
+        item for item in (
+            requested or settings.gemini_transcribe_model,
+            *settings.gemini_transcribe_fallbacks,
+            *settings.gemini_audio_models,
+        ) if item
+    ))
+    last_error: HTTPException | None = None
+    for index, model in enumerate(models):
+        try:
+            result = await generate(
+                "gemini",
+                model,
+                key,
+                str(payload.get("prompt") or ""),
+                str(payload.get("system_prompt") or ""),
+                float(payload.get("temperature") or 0.0),
+                False,
+                [dict(item) for item in payload.get("images", [])],
+                audio_transcription=bool(payload.get("audio_transcription")),
+            )
+            text = str(result.get("text") or "").strip()
+            return text, str(result.get("model") or model)
+        except HTTPException as exc:
+            last_error = exc
+            model_missing = exc.status_code == 404 or any(
+                marker in str(exc.detail or "").lower()
+                for marker in ("not found", "not supported", "decommissioned", "does not exist")
+            )
+            exhausted = exc.status_code in {429, 503} or "quota" in str(exc.detail or "").lower() or "exhaust" in str(exc.detail or "").lower()
+            unsupported = bool(payload.get("audio_transcription")) and exc.status_code in {400, 404, 422, 501}
+            if index < len(models) - 1 and (model_missing or exhausted or unsupported):
+                continue
+            break
+    raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
+
+
+async def _ai_job_worker() -> None:
+    while True:
+        try:
+            # Cheap and idempotent: lease-expired jobs go back to queued.
+            await asyncio.to_thread(ai_job_queue.recover)
+            job = await asyncio.to_thread(ai_job_queue.claim_next, _WORKER_OWNER)
+            if job is not None:
+                logger.info("AI job %s (%s) claimed, attempt %d", job.job_id, job.type, job.attempts)
+                try:
+                    text, model = await _transcribe_job_payload(job)
+                    await asyncio.to_thread(ai_job_queue.complete, job.job_id, _WORKER_OWNER, {"text": text, "model": model, "at": time.time()})
+                except HTTPException as exc:
+                    await asyncio.to_thread(ai_job_queue.fail, job.job_id, _WORKER_OWNER, str(exc.detail))
+                except Exception as exc:
+                    logger.warning("AI job %s failed: %s", job.job_id, exc)
+                    await asyncio.to_thread(ai_job_queue.fail, job.job_id, _WORKER_OWNER, str(exc))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("AI job worker: %s", exc)
+        await asyncio.sleep(2)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    recovered = await asyncio.to_thread(ai_job_queue.recover)
+    if recovered:
+        logger.info("Recovered %d transcription job(s) from a previous run.", recovered)
+    await asyncio.to_thread(ai_job_queue.purge)
+    worker = asyncio.create_task(_ai_job_worker())
+    yield
+    worker.cancel()
+    try:
+        await worker
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+app = FastAPI(title="Notez AI API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -65,6 +169,16 @@ limiter = RequestLimiter()
 
 # Separate rate limiter for embedding operations (higher limit, different window)
 embedding_limiter = RequestLimiter(limit=60, window_seconds=60)
+
+# Polling a transcription job is cheap and expected to be frequent; it gets
+# its own lighter limit so a long transcription never trips the general
+# 30/minute limit while the browser polls every few seconds.
+transcribe_poll_limiter = RequestLimiter(limit=120, window_seconds=60)
+
+
+async def transcribe_poll_limit(user: AuthenticatedUser) -> dict:
+    await transcribe_poll_limiter.check(str(user["uid"]))
+    return user
 
 
 async def rate_limit(user: AuthenticatedUser) -> dict:
@@ -162,6 +276,9 @@ async def public_config(user: AuthenticatedUser):
             "generate": True,
             "images": True,
             "semanticSearch": EMBEDDING.enabled,
+            # Durable transcription jobs (POST /v1/ai/transcribe, poll GET):
+            # the job outlives the HTTP request and the browser tab.
+            "asyncTranscribe": True,
         },
     }
 
@@ -171,6 +288,13 @@ async def firebase_config():
     """
     Serve Firebase client configuration to frontend.
     This prevents exposing Firebase API keys in frontend code.
+
+    storageEnabled tells the recording module whether this deployment has
+    Firebase Storage set up for recording audio (bucket + rules). It defaults
+    to false: the recording audio then uses the Realtime Database chunk
+    layout, which needs no Storage plan, bucket or rule change. Enabling it
+    is an operator action documented in docs/durable-recording.md — this
+    endpoint only reports it.
     """
     return JSONResponse(content={
         "apiKey": settings.firebase_api_key,
@@ -179,7 +303,8 @@ async def firebase_config():
         "projectId": settings.firebase_project_id,
         "storageBucket": settings.firebase_storage_bucket or f"{settings.firebase_project_id}.firebasestorage.app",
         "messagingSenderId": settings.firebase_messaging_sender_id,
-        "appId": settings.firebase_app_id
+        "appId": settings.firebase_app_id,
+        "storageEnabled": settings.storage_enabled,
     })
 
 
@@ -322,6 +447,83 @@ async def ai_generate(body: GenerateRequest, user: AuthenticatedUser):
                 ) from failure
             raise failure
     raise last_error or HTTPException(status_code=503, detail="No AI provider is currently available.")
+
+
+class TranscribeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note_id: str = Field(min_length=1, max_length=160)
+    part_slot: int = Field(ge=0, le=100000)
+    prompt: str = Field(min_length=1, max_length=settings.max_prompt_chars)
+    system_prompt: str = Field(default="", max_length=4000)
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    model: str = Field(default="", max_length=120)
+    images: list[ImagePayload] = Field(default_factory=list, max_length=10)
+    audio_transcription: bool = Field(default=False)
+
+
+@app.post("/v1/ai/transcribe", dependencies=[Depends(rate_limit)])
+async def ai_transcribe_create(body: TranscribeRequest, user: RateLimitedUser):
+    """Create a durable transcription job and return its id.
+
+    Idempotent on (note_id, part_slot, model): a browser retrying the same
+    part with the same model gets the existing job back — a finished one
+    resolves instantly, a running one is polled, and a duplicate
+    transcription is impossible. The model is part of the key (not the part
+    alone) so the browser's model walk is not blocked by a job that failed
+    on an earlier model of that walk. The response carries the job's current
+    status; poll GET /v1/ai/transcribe/{id} for the result. BYOK keys are
+    intentionally not accepted here: a job row is durable, and a user's own
+    key is not the kind of secret to keep in one — a browser that holds its
+    own key transcribes inline as before."""
+    if not NOTE_ID.fullmatch(body.note_id):
+        raise HTTPException(status_code=422, detail="Invalid note identifier.")
+    audio = next((item for item in body.images if item.mime.startswith("audio/")), None)
+    if audio is None:
+        raise HTTPException(status_code=422, detail="The transcription request has no audio part.")
+    uid = str(user["uid"])
+    job_key = f"transcribe:{body.note_id}:{body.part_slot}:{body.model or 'default'}"
+    job_id = f"tr-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+    payload = {
+        "note_id": body.note_id,
+        "part_slot": body.part_slot,
+        "prompt": body.prompt,
+        "system_prompt": body.system_prompt,
+        "temperature": body.temperature,
+        "model": body.model,
+        "images": [image.model_dump() for image in body.images],
+        "audio_transcription": body.audio_transcription,
+    }
+    job, created = await asyncio.to_thread(ai_job_queue.create_or_get, job_id, job_key, uid, "transcribe", payload)
+    return {"jobId": job.job_id, "created": created, "status": job.status, "attempts": job.attempts}
+
+
+@app.get("/v1/ai/transcribe/{job_id}", dependencies=[Depends(transcribe_poll_limit)])
+async def ai_transcribe_status(job_id: str, user: RateLimitedUser):
+    """Poll a transcription job. A job belongs to the user who created it."""
+    job = await asyncio.to_thread(ai_job_queue.get, job_id)
+    if job is None or job.uid != str(user["uid"]):
+        raise HTTPException(status_code=404, detail="Transcription job not found.")
+    out: dict = {"jobId": job.job_id, "status": job.status, "attempts": job.attempts}
+    if job.status == "done" and job.result is not None:
+        out["text"] = str(job.result.get("text") or "")
+        out["model"] = str(job.result.get("model") or "")
+    if job.status == "failed":
+        out["error"] = job.error or "Transcription failed."
+    return out
+
+
+@app.post("/v1/ai/transcribe/{job_id}/retry", dependencies=[Depends(rate_limit)])
+async def ai_transcribe_retry(job_id: str, user: RateLimitedUser):
+    """Explicitly re-queue a failed job (resets the attempt count). A done
+    job is never re-run — a retry of it is a 409, so the same part can never
+    be transcribed twice into the same job."""
+    job = await asyncio.to_thread(ai_job_queue.get, job_id)
+    if job is None or job.uid != str(user["uid"]):
+        raise HTTPException(status_code=404, detail="Transcription job not found.")
+    if job.status == "done":
+        raise HTTPException(status_code=409, detail="This transcription already finished; it is not re-run.")
+    retried = await asyncio.to_thread(ai_job_queue.retry, job_id) if job.status == "failed" else job
+    return {"jobId": job_id, "status": retried.status if retried is not None else job.status, "attempts": retried.attempts if retried is not None else job.attempts}
 
 
 @app.post("/v1/index/notes/{note_id}", dependencies=[Depends(embedding_rate_limit)])

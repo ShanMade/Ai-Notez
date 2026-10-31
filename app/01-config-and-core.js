@@ -666,13 +666,25 @@
             dbRef: databaseModule.ref,
             dbGet: databaseModule.get,
             dbSet: databaseModule.set,
-            dbRemove: databaseModule.remove
+            dbRemove: databaseModule.remove,
+            // runTransaction: atomic claim/heartbeat for the recording claim
+            // (app/17-rec-cloud.js). onDisconnect: the claim lets go of itself
+            // when this tab's connection dies, so a crash never holds a claim
+            // that a live tab would have to reclaim.
+            dbTransaction: databaseModule.runTransaction,
+            onDisconnect: databaseModule.onDisconnect
           };
           if (!authListenerStarted) {
             authListenerStarted = true;
             dbSdk.onAuthStateChanged(dbSdk.auth, user => {
               try { if (user) localStorage.setItem('notez-auth-hint', '1'); else localStorage.removeItem('notez-auth-hint'); } catch {}
-              if (!user) window.nzAuthNoUser = true;
+              if (!user) {
+                window.nzAuthNoUser = true;
+                // R1: an expired token or sign-out never orphans an active
+                // recording — the durable jobs park (awaiting-auth) and the
+                // audio on disk is untouched; everything resumes on sign-in.
+                window.nzRecAuthLost?.();
+              }
               if (user && !userChoseDemo) enterCloudWorkspace(user);
               else if (!user && currentSession?.mode === 'cloud') leaveWorkspace(false);
             });

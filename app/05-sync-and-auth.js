@@ -691,7 +691,7 @@ function openNotezAi(note = null, preset = '') {
     $('#nz-lock-forgot').addEventListener('click', async () => {
       if (!(await uiConfirm({ title: 'Remove the lock?', message: 'You will be signed out and the PIN lock will be removed. Your notes stay in your account and on this device.', confirmLabel: 'Sign out', danger: true }))) return;
       try { localStorage.removeItem(LOCK_KEY); sessionStorage.removeItem('notez-unlocked'); } catch {}
-      try { const sdk = await ensureFirebase(); await sdk.signOut(sdk.auth); } catch {}
+      try { window.nzRecAuthLost?.(); const sdk = await ensureFirebase(); await sdk.signOut(sdk.auth); } catch {}
       location.reload();
     });
     function showLockSettings() {
