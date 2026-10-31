@@ -37,7 +37,8 @@
 
   // The chip under an answer. `suggestion` is set by the quick tasks that propose
   // a title or tags: those are never labelled as facts from the notes.
-  function provenance(text, sources, { task = '' } = {}) {
+  // `recording` is set when the note is a recording: the chip then says "From this recording".
+  function provenance(text, sources, { task = '', recording = false } = {}) {
     if (task === 'title' || task === 'tags') {
       return { kind: 'suggestion', label: 'AI suggestions · review before using', cited: [] };
     }
@@ -45,8 +46,9 @@
     if (!list.length) return { kind: 'general', label: 'AI answer · not from your notes', cited: [] };
     const cited = [...new Set([...String(text || '').matchAll(/\[(\d{1,2})\]/g)].map(match => Number(match[1])))]
       .filter(n => list.some(source => source.n === n));
-    if (!cited.length) return { kind: 'context', label: 'Used your notes as context · no specific citation', cited: [] };
-    return { kind: 'cited', label: `From your notes · ${cited.length} of ${list.length} source${list.length === 1 ? '' : 's'} cited`, cited };
+    if (!cited.length) return { kind: 'context', label: recording ? 'Used this recording as context · no specific citation' : 'Used your notes as context · no specific citation', cited: [] };
+    const count = `${cited.length} of ${list.length} source${list.length === 1 ? '' : 's'} cited`;
+    return { kind: 'cited', label: `${recording ? 'From this recording' : 'From your notes'} · ${count}`, cited };
   }
 
   // ---- Phase 4b: the prompt is built from pure parts. The wording below is copied
@@ -110,7 +112,27 @@
     return { rules, prompt: `${transcript}${context}\n\n${rules}\n\nUSER: ${question}` };
   }
 
-  const api = { route, ruleKey, attachSources, provenance, inventoryContext, numberedContext, rulesFor, buildPrompt };
+  // ---- Phase 4c: suggestions. A suggestion is saved only when the user accepts it
+  // (or accepts an edited version). Nothing here touches a note.
+  const TITLE_MAX = 180;
+  const TAG_MAX = 40;
+  // The text a suggestion would be saved as, or null when nothing usable is left.
+  function normalizeSuggestion(task, value) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) return null;
+    return text.slice(0, task === 'tags' ? TAG_MAX : TITLE_MAX);
+  }
+  // One row per suggestion. `states` maps a row index to 'applied' or 'dismissed'.
+  // `appliedValues` is read for answers saved before rows had states.
+  function suggestionRows(values, states = {}, appliedValues = []) {
+    const applied = Array.isArray(appliedValues) ? appliedValues : [];
+    return (Array.isArray(values) ? values : []).map((value, index) => {
+      const state = states[index] || (applied.includes(value) ? 'applied' : 'open');
+      return { index, value, state };
+    });
+  }
+
+  const api = { route, ruleKey, attachSources, provenance, inventoryContext, numberedContext, rulesFor, buildPrompt, normalizeSuggestion, suggestionRows };
   root.NzChat = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

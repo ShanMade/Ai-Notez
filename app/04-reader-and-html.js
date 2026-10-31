@@ -1475,10 +1475,20 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (!note || nzai.reveal) return '';
       const suggestions = Array.isArray(msg.suggestions) ? msg.suggestions : null;
       if (suggestions && suggestions.length) {
-        const action = msg.task === 'title' ? 'apply-title' : 'apply-tags';
-        const applied = Array.isArray(msg.appliedValues) ? msg.appliedValues : [];
-        const chips = suggestions.map(value => `<button type="button" class="ai-suggest-chip${applied.includes(value) ? ' on' : ''}" data-nzai="${action}" data-i="${index}" data-value="${esc(value)}" title="${msg.task === 'title' ? 'Use this title' : 'Add this tag'}" aria-pressed="${applied.includes(value)}">${esc(value)}</button>`).join('');
-        return `<div class="ai-task-card"><div class="ai-task-head"><b>${msg.task === 'title' ? 'Apply a title' : 'Add tags'}</b><span>${applied.length ? 'Applied' : 'Tap to apply'}</span></div><div class="ai-task-chips">${chips}</div></div>`;
+        // Phase 4c: each suggestion is a row with Accept, Edit and Dismiss. Nothing is applied until Accept or Save.
+        const rows = NzChat.suggestionRows(suggestions, msg.suggestStates || {}, msg.appliedValues);
+        const shown = rows.filter(row => row.state !== 'dismissed');
+        if (!shown.length) return '';
+        const label = msg.task === 'title' ? 'Suggested title' : 'Suggested tags';
+        const max = msg.task === 'title' ? 180 : 40;
+        const items = shown.map(row => {
+          if (row.state === 'applied') return `<div class="ai-suggest-row on"><span class="ai-suggest-value">${esc(row.value)}</span><span class="ai-suggest-state">Applied</span></div>`;
+          if (nzai.suggestEdit && nzai.suggestEdit.i === index && nzai.suggestEdit.j === row.index) {
+            return `<div class="ai-suggest-row editing"><input type="text" class="ai-suggest-input" value="${esc(row.value)}" maxlength="${max}" aria-label="Edit this suggestion"><span class="ai-suggest-actions"><button type="button" class="ai-suggest-btn primary" data-nzai="suggest-save" data-i="${index}" data-j="${row.index}">Save and apply</button><button type="button" class="ai-suggest-btn" data-nzai="suggest-cancel">Cancel</button></span></div>`;
+          }
+          return `<div class="ai-suggest-row"><span class="ai-suggest-value">${esc(row.value)}</span><span class="ai-suggest-actions"><button type="button" class="ai-suggest-btn primary" data-nzai="suggest-accept" data-i="${index}" data-j="${row.index}">Accept</button><button type="button" class="ai-suggest-btn" data-nzai="suggest-edit" data-i="${index}" data-j="${row.index}">Edit</button><button type="button" class="ai-suggest-btn" data-nzai="suggest-dismiss" data-i="${index}" data-j="${row.index}">Dismiss</button></span></div>`;
+        }).join('');
+        return `<div class="ai-task-card ai-suggest-card" role="group" aria-label="${label}"><div class="ai-task-head"><b>${label}</b><span>Nothing changes until you accept</span></div>${items}</div>`;
       }
       if (NZAI_APPLY_TASKS.has(msg.task)) {
         return `<div class="ai-task-card"><div class="ai-task-head"><b>${msg.task === 'improve' ? 'Rewritten note' : msg.task === 'grammar' ? 'Corrected note' : 'Translated note'}</b><span>The attached file is never changed</span></div><div class="ai-task-actions"><button type="button" class="ai-action primary" data-nzai="apply-body" data-i="${index}">Apply to note</button><button type="button" class="ai-action" data-nzai="replace" data-i="${index}">Replace without undo</button></div></div>`;
@@ -1714,6 +1724,24 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
 
     // Retrieve (phase 4b): gathers the notes an answer may read, as context and as the
     // sources the answer can cite. It does not build the prompt; see NzChat.buildPrompt.
+    // Accept (or Save an edited suggestion): the only place a suggestion changes a note.
+    async function nzaiAcceptSuggestion(index, j, typed = null) {
+      const msg = nzaiChat()?.messages[index], note = nzaiScopeNote();
+      if (!msg || !note || !msg.task) return;
+      const value = NzChat.normalizeSuggestion(msg.task, typed ?? (msg.suggestions || [])[j]);
+      if (!value) { toast('Write a title or tag first.', 'error'); return; }
+      const before = JSON.parse(JSON.stringify(note));
+      if (msg.task === 'title') note.title = value;
+      else note.tags = [...new Set([...(Array.isArray(note.tags) ? note.tags : []), value])].slice(0, 30);
+      note.updatedAt = Date.now();
+      nzai.suggestEdit = null;
+      nzaiUpdateChat(c => { const m = c.messages[index]; if (m) m.suggestStates = { ...(m.suggestStates || {}), [j]: 'applied' }; });
+      try { offerUndo(await snapshotNotesForUndo([before]), msg.task === 'title' ? 'Title changed' : 'Tags updated'); } catch {}
+      try { await persistNote(note); } catch { toast('Saved on this device; sync is queued.', 'error'); }
+      renderEverything(); if (currentPage === 'reader') openNote(note.id);
+      toast(msg.task === 'title' ? 'Title updated.' : `Tag “${value}” added.`);
+      nzaiRender();
+    }
     async function nzaiGather(question, { note = null, task = '', wantsInventory = false } = {}) {
       let sources = [], context = '', found = [], retrievalMetadata = null;
 
@@ -1871,7 +1899,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           suggestions,
           model: `${AI_PROVIDERS[answer.provider]?.label || ''} \u00b7 ${answer.model}`,
           sources,
-          provenance: NzChat.provenance(bodyText, sources, { task }),
+          provenance: NzChat.provenance(bodyText, sources, { task, recording: routed.recording }),
           followUps: !taskDef && !wantsInventory ? NzConn.followUps(question, sources, nzai.scope === 'folder' ? nzai.folder : '') : [],
           replace: Boolean(taskDef?.replace),
           t: Date.now(),
@@ -2147,22 +2175,19 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         notes = [created, ...notes]; addFolderPath(created.folderPath);
         persistNote(created).catch(() => toast('Saved locally; sync is queued.', 'error')); renderEverything(); toast('Saved as a new note.'); return;
       }
-      if (act === 'apply-title' || act === 'apply-tags') {
-        const chat = nzaiChat(), idx = Number(el.dataset.i), msg = chat?.messages[idx], note = nzaiScopeNote();
-        const value = String(el.dataset.value || '').trim();
-        if (!msg || !note || !value) return;
-        const before = JSON.parse(JSON.stringify(note));
-        if (act === 'apply-title') { note.title = value.slice(0, 180); }
-        else { note.tags = [...new Set([...(Array.isArray(note.tags) ? note.tags : []), value.slice(0, 40)])].slice(0, 30); }
-        note.updatedAt = Date.now();
-        const applied = Array.isArray(msg.appliedValues) ? msg.appliedValues : [];
-        nzaiUpdateChat(c => { const m = c.messages[idx]; if (m) m.appliedValues = [...new Set([...applied, value])]; });
-        try { offerUndo(await snapshotNotesForUndo([before]), act === 'apply-title' ? 'Title changed' : 'Tags updated'); } catch {}
-        try { await persistNote(note); } catch { toast('Saved on this device; sync is queued.', 'error'); }
-        renderEverything(); if (currentPage === 'reader') openNote(note.id);
-        toast(act === 'apply-title' ? 'Title updated.' : `Tag “${value}” added.`);
-        nzaiRender();
-        return;
+      // Phase 4c: suggestions. Accept, Save and Dismiss are the only ways a suggestion changes anything.
+      if (act === 'suggest-edit') { nzai.suggestEdit = { i: Number(el.dataset.i), j: Number(el.dataset.j) }; return nzaiRender(); }
+      if (act === 'suggest-cancel') { nzai.suggestEdit = null; return nzaiRender(); }
+      if (act === 'suggest-dismiss') {
+        const i = Number(el.dataset.i), j = Number(el.dataset.j);
+        nzai.suggestEdit = null;
+        nzaiUpdateChat(c => { const m = c.messages[i]; if (m) m.suggestStates = { ...(m.suggestStates || {}), [j]: 'dismissed' }; });
+        return nzaiRender();
+      }
+      if (act === 'suggest-accept' || act === 'suggest-save') {
+        const i = Number(el.dataset.i), j = Number(el.dataset.j);
+        const typed = act === 'suggest-save' ? (el.closest('.ai-suggest-row')?.querySelector('.ai-suggest-input')?.value ?? '') : null;
+        return nzaiAcceptSuggestion(i, j, typed);
       }
       if (act === 'apply-body') {
         const chat = nzaiChat(), idx = Number(el.dataset.i), msg = chat?.messages[idx], note = nzaiScopeNote();

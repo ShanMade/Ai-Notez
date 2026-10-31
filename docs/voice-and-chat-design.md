@@ -124,6 +124,8 @@ _4b status: done. `nzaiAsk` is split. `nzaiGather` (app/04) retrieves the contex
 
 **4b : split the function.** Move retrieval into `retrieve(route)` and the prompt into `buildPrompt`, behind the same entry point. Acceptance: same answers for the same inputs (a fixture test), no page errors.
 
+_4c status: done. Title and tag suggestions are rows with Accept, Edit and Dismiss. Nothing changes until Accept or Save (Save applies the edited text). Dismiss hides a row. Undo is kept. A recording answer's chip reads "From this recording". Pure logic: `NzChat.normalizeSuggestion`, `suggestionRows`, `provenance({ recording })`, tested in `scripts/chat-suggest.test.mjs`. Browser: `/home/user/qa/suggest.mjs`, 12 checks pass (render changes nothing, Dismiss, Edit then Save, chip wording, no page errors). The recording chip is seeded, not produced by a live recording._
+
 **4c: suggestion blocks and the voice follow-up rules.** Suggestion rendering with accept, edit and dismiss. Acceptance: a title suggestion cannot be applied without a click; a recording answer carries "From this recording".
 
 **Not in phase 4:** changing which model answers chat. That is a separate decision for the user.

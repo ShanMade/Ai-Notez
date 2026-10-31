@@ -9,3 +9,12 @@ html[data-theme] #nz-ai .nzai-prov.suggestion .nzai-prov-dot {
   background: transparent;
   border: 1.5px solid var(--p-warn, #b07a12);
 }
+
+/* Phase 4c: suggestion rows. Accept, Edit and Dismiss are the only controls, and each row is one suggestion. */
+html[data-theme] #nz-ai .ai-suggest-card .ai-suggest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--nzc-line); }
+html[data-theme] #nz-ai .ai-suggest-value { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+html[data-theme] #nz-ai .ai-suggest-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+html[data-theme] #nz-ai .ai-suggest-btn { border: 1px solid var(--nzc-line); background: transparent; color: inherit; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+html[data-theme] #nz-ai .ai-suggest-btn.primary { background: var(--nzc-acc); border-color: var(--nzc-acc); color: #fff; }
+html[data-theme] #nz-ai .ai-suggest-input { flex: 1 1 160px; min-width: 0; padding: 4px 8px; border: 1px solid var(--nzc-line); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+html[data-theme] #nz-ai .ai-suggest-state { font-size: 12px; color: var(--muted); }
