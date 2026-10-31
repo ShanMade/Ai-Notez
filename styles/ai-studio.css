@@ -102,3 +102,50 @@ html[data-theme] #nz-ai .rec-ctl { height: auto !important; min-height: 0 !impor
 html[data-theme] #nz-ai .rec-ctl svg { width: 22px !important; height: 22px !important; padding: 21px !important; border: 1.5px solid var(--line-strong) !important; background: var(--panel) !important; color: var(--ink) !important; border-radius: 50% !important; }
 html[data-theme] #nz-ai .rec-ctl.stop svg { padding: 25px !important; background: var(--ink) !important; color: var(--panel) !important; border-color: var(--ink) !important; }
 html[data-theme] #nz-ai .rec-ctl.quiet svg { width: 18px !important; height: 18px !important; padding: 16px !important; color: var(--nzs-rec) !important; border-color: color-mix(in srgb, var(--nzs-rec) 40%, transparent) !important; background: var(--panel) !important; }
+
+/* ================= Ask tab ================= */
+/* One surface for the whole panel in both themes: no darker boxes behind the welcome or thread. */
+html[data-theme] #nz-ai .dock-pane,
+html[data-theme] #nz-ai .nzai-body,
+html[data-theme] #nz-ai .ai-thread-wrap,
+html[data-theme] #nz-ai .ai-welcome,
+html[data-theme] #nz-ai .ai-thread,
+html[data-theme] #nz-ai .ai-composer-wrap { background: var(--panel) !important; }
+html[data-theme] #nz-ai .ai-welcome { padding: 14px 18px 8px; }
+
+/* Scope: a single pill, reads as the answer source */
+html[data-theme] #nz-ai .ai-ctx-chip { margin: 8px 16px 2px; min-height: 40px; border: 1.5px solid var(--ink) !important; border-radius: 999px; background: var(--nzs-raised) !important; font-weight: 700; color: var(--ink) !important; }
+html[data-theme] #nz-ai .ai-ctx-pill { background: var(--nzs-acc) !important; color: var(--nzs-on) !important; border-radius: 999px; padding: 5px 11px; font-weight: 700; }
+
+/* Welcome heading, display type with a highlighter word */
+html[data-theme] #nz-ai .ai-welcome-kicker { display: none; }
+html[data-theme] #nz-ai .ai-welcome-head h3 { font: 800 clamp(28px, 4.6vw, 36px)/1.04 "Bricolage Grotesque", Inter, system-ui, sans-serif !important; letter-spacing: -.035em !important; color: var(--ink) !important; margin: 10px 0 6px; }
+html[data-theme] #nz-ai .ai-welcome-head h3 em { font-style: normal !important; color: var(--ink) !important; background: linear-gradient(transparent 58%, var(--nzs-hl) 58%, var(--nzs-hl) 92%, transparent 92%) !important; -webkit-text-fill-color: currentColor !important; padding: 0 .08em; }
+html[data-theme="dark"] #nz-ai .ai-welcome-head h3 em { background: var(--nzs-hl) !important; color: #0E1530 !important; -webkit-text-fill-color: #0E1530 !important; border-radius: 4px; padding: 0 .2em; }
+html[data-theme] #nz-ai .ai-welcome-head p { color: var(--muted) !important; font-size: 14px !important; line-height: 1.5 !important; }
+
+/* Suggestions: list rows with a divider, not boxed cards */
+html[data-theme] #nz-ai .ai-suggest { display: flex !important; flex-direction: column !important; gap: 0 !important; margin-top: 14px !important; border-top: 1px solid var(--line); }
+html[data-theme] #nz-ai .ai-card { display: grid !important; grid-template-columns: 1fr auto !important; align-items: center !important; min-height: 64px !important; padding: 10px 4px !important; border: 0 !important; border-bottom: 1px solid var(--line) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }
+html[data-theme] #nz-ai .ai-card:hover { background: var(--nzs-raised) !important; }
+html[data-theme] #nz-ai .ai-card-ic { display: none !important; }
+html[data-theme] #nz-ai .ai-card-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+html[data-theme] #nz-ai .ai-card-tx b { font: 700 16px/1.25 "Bricolage Grotesque", Inter, system-ui, sans-serif; color: var(--ink); }
+html[data-theme] #nz-ai .ai-card-tx small { color: var(--muted); font-size: 12.5px; }
+html[data-theme] #nz-ai .ai-card-go { color: var(--nzs-acc); }
+
+/* Quick chips sit above the composer with room to breathe, never on top of it */
+html[data-theme] #nz-ai .ai-quickbar { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 14px 6px; }
+html[data-theme] #nz-ai .ai-qchip { flex: none; min-height: 36px; border-radius: 999px; border: 1px solid var(--line-strong) !important; background: var(--panel) !important; color: var(--ink) !important; padding: 0 12px; font-weight: 650; font-size: 13px; }
+html[data-theme] #nz-ai .ai-composer-wrap { padding: 8px 14px 14px; position: relative; z-index: 2; }
+
+/* Messages */
+html[data-theme] #nz-ai .ai-bubble-user { font: 800 17px/1.25 "Bricolage Grotesque", Inter, system-ui, sans-serif !important; letter-spacing: -.02em; }
+html[data-theme] #nz-ai .ai-md { font: 16px/1.62 Newsreader, Georgia, "Times New Roman", serif !important; }
+html[data-theme] #nz-ai .ai-md blockquote { border-left-color: var(--nzs-acc) !important; font-size: 1.02em; }
+html[data-theme] #nz-ai .ai-sources { margin-top: 14px; border-top: 1px solid var(--line-strong) !important; }
+html[data-theme] #nz-ai .ai-src-n { background: var(--nzs-hl) !important; color: #0E1530 !important; }
+
+/* Composer and send button follow the accent in both themes */
+html[data-theme] #nz-ai .ai-composer { border-radius: 24px !important; }
+html[data-theme] #nz-ai .ai-foot { color: var(--muted) !important; }
