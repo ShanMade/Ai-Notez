@@ -217,7 +217,14 @@ def _json_error(code: int, detail: str):
 class ImagePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mime: str = Field(min_length=1, max_length=80)
-    data: str = Field(min_length=1, max_length=1_500_000)
+    # Voice-to-Note sends one recording part plus learned-voice samples. A
+    # part arrives either as the original Opus (forced part roll at the
+    # chunk deadline: ≤ ~240 s ≈ 1.3 MB base64 at 32 kb/s) or as the
+    # client-enhanced mono WAV (capped at 4,000,000 bytes client-side ≈
+    # 5,333,392 base64 chars). 6,000,000 covers both with margin; the
+    # 8,000,000-byte body limit (request_limits middleware) stays the hard
+    # ceiling for the whole request.
+    data: str = Field(min_length=1, max_length=6_000_000)
 
     @field_validator("mime")
     @classmethod
