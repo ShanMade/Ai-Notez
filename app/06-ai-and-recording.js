@@ -355,7 +355,9 @@ async function openWikiLink(title) {
     // Voice-to-Note audio: Gemini 3.1 Flash-Lite first; a part moves to Gemini 3.5
     // Flash-Lite when the first is out of quota. Each model is tried on the user's
     // own key first, then on NotezAi's service (see recTranscribePart).
-    const REC_AUDIO_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite'];
+    // Voice-to-Note runs on Gemini 3.5 Flash-Lite only: no other Gemini model, no other provider.
+    const REC_VOICE_MODEL = 'gemini-3.5-flash-lite';
+    const REC_AUDIO_MODELS = [REC_VOICE_MODEL];
     const recSttModels = () => REC_AUDIO_MODELS;
     const recSttModel = () => REC_AUDIO_MODELS[0];
     const recModelLabel = model => model === 'gemini-3.1-flash-lite' ? 'Gemini 3.1 Flash-Lite'
@@ -558,7 +560,7 @@ async function openWikiLink(title) {
     // Check if any provider supports audio transcription
     const hasAudioProvider = () => recAudioProviders().length > 0;
     async function recTextCall(prompt, options = {}) {
-      const steps = recProviders().map(name => ({ name, run: () => aiCall(name, prompt, { temperature: options.temperature ?? 0.3, json: Boolean(options.json) }) }));
+      const steps = recProviders().map(name => ({ name, run: () => aiCall(name, prompt, { temperature: options.temperature ?? 0.3, json: Boolean(options.json), model: REC_VOICE_MODEL, exact: true, voiceOnly: true }) }));
       if (!steps.length) throw Object.assign(new Error('Add a Gemini or Groq key in NotezAi settings.'), { code: 'no-key' });
       const { text } = await recFailover(steps, 'while writing notes');
       return text;
@@ -612,7 +614,7 @@ async function openWikiLink(title) {
         for (const model of REC_AUDIO_MODELS) {
           try {
             const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, names), {
-              temperature: 0, model, route, exact: true, images, timeout: 150000,
+              temperature: 0, model, route, exact: true, voiceOnly: true, images, timeout: 150000,
             });
             REC.sttModel = model;
             REC.segStatuses[index] = SEG_STATUS.COMPLETED;
@@ -644,7 +646,8 @@ ${context ? `The part before this one ended with: "${context}"
 If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
 ` : ''}${typeof nzVoicePrompt === 'function' ? nzVoicePrompt() : ''}${attached.length ? `\nThe audio parts after this one are the reference clips for these voices, in this order: ${attached.join(', ')}.` : ''}
 Speaker labels: every line of speech starts with a speaker label, exactly like "[00:12] Voice 1: words". Use the known name above when the voice matches one of them; otherwise use "Voice 1", "Voice 2" and so on. Keep the same label for the same person and continue the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}. If you cannot tell the voices apart, label every line "Voice 1:" — never write a line of speech without a label.
-${REC.instructions ? `\nInstructions from the user for this recording. Follow them when labelling voices and choosing names. They never change the words spoken:\n"""${REC.instructions}"""\n` : ''}Output only the transcript.`;
+${REC.instructions ? `\nInstructions from the user for this recording. Follow them when labelling voices and choosing names. They never change the words spoken:\n"""${REC.instructions}"""\n` : ''}If the part has no speech (silence, room noise or a muted microphone), output nothing at all.
+Output only the transcript.`;
 
     function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
     // Rewrites one part's labels to "Voice n" using only that part's numbering.
@@ -758,7 +761,18 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         const words = recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?\**\s*(?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])\s*\**\s*[:\uFF1A]/i, '').replace(/\[(inaudible|unclear)\]/gi, '').trim();
         return words.length > 0;
       });
-      return kept.join('\n').trim();
+      // A model that falls into a loop writes the same line again and again. Two
+      // copies of a line can be real speech; a third copy in a row is not.
+      const lineKey = line => recUnmark(line).replace(/^\s*(\[[\d:]+\]\s*)?/, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
+      const unloop = [];
+      let run = 0, previous = null;
+      for (const line of kept) {
+        const key = lineKey(line);
+        run = key && key === previous ? run + 1 : 0;
+        previous = key;
+        if (run < 2) unloop.push(line);
+      }
+      return unloop.join('\n').trim();
     }
     // ---- Held parts and the offline journal ------------------------------
     // Every part is written to this device's IndexedDB before it is sent. A part
@@ -827,6 +841,27 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       recJournalSave(index);
       updateRecLive();
     }
+    // A muted or silent part is not sent. A model asked to transcribe silence tends
+    // to repeat whatever it heard last, which is the repeated transcript after the
+    // mic was muted. Measured on the decoded audio: no sound above the noise floor.
+    async function recIsSilent(blob) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx || !blob || !blob.size) return false;
+        const ctx = new AudioCtx();
+        const buffer = await ctx.decodeAudioData(await blob.arrayBuffer());
+        ctx.close?.();
+        let sum = 0, count = 0;
+        for (let c = 0; c < buffer.numberOfChannels; c++) {
+          const data = buffer.getChannelData(c);
+          for (let i = 0; i < data.length; i += 4) { sum += data[i] * data[i]; count++; }
+        }
+        return count > 0 && Math.sqrt(sum / count) < 0.002;
+      } catch (error) {
+        console.warn('Could not measure this part, so it is sent:', error);
+        return false;
+      }
+    }
     // Sends one part. Resolves true once it is transcribed; a part that cannot be
     // sent is held instead and resolves false.
     async function recSendPart(index, gen = REC.gen) {
@@ -835,7 +870,9 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       if (gen !== REC.gen) return false;   // the session was discarded: its parts are not written anywhere
       if (!navigator.onLine) { recHoldPart(index, null); return false; }
       try {
-        const transcribed = await recTranscribePart(blob, index);
+        const silent = await recIsSilent(blob);
+        if (gen !== REC.gen) return false;
+        const transcribed = silent ? '' : await recTranscribePart(blob, index);
         if (gen !== REC.gen) return false;   // discarded while it was being transcribed
         const cleaned = recCleanPart(recCanonicalPart(transcribed));
         const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);

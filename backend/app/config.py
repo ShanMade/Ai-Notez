@@ -74,9 +74,13 @@ class Settings:
     gemini_audio_models: tuple[str, ...] = tuple(
         item.strip() for item in os.getenv(
             "AI_GEMINI_AUDIO_MODELS",
-            "gemini-3.1-flash-lite,gemini-3.5-flash-lite",
+            "gemini-3.5-flash-lite",
         ).split(",") if item.strip()
     )
+
+    # Voice-to-Note text (labels, notes, summaries) runs on this one model only,
+    # with no other provider or model behind it. Chat does not use it.
+    voice_model: str = os.getenv("AI_VOICE_MODEL", "gemini-3.5-flash-lite")
 
     @property
     def gemini_transcribe_models(self) -> tuple[str, ...]:
