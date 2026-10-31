@@ -59,7 +59,9 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     $('#import-backup').addEventListener('click', () => { closeAccountMenu(); $('#backup-input').click(); });
     $('#backup-input').addEventListener('change', event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importNotesJson(file); });
     $('#export-library').addEventListener('click', () => { closeAccountMenu(); void exportNotesJson(); });
-    $('#logout-button').addEventListener('click', () => leaveWorkspace(true));
+    // R1: park the durable recording jobs before the sign-in goes away, so an
+    // in-flight recording is never claimed backed up mid-sign-out.
+    $('#logout-button').addEventListener('click', () => { window.nzRecAuthLost?.(); leaveWorkspace(true); });
     $('#sync-now').addEventListener('click', () => {
       if (currentSession?.mode === 'cloud') {
         syncCloudWorkspace().then(() => toast('Cloud and device mirror are up to date.')).catch(error => { console.warn(error); setSyncState('offline'); toast('Could not reach Firebase. Your local mirror is safe.', 'error'); });

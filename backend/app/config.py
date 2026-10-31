@@ -26,6 +26,13 @@ class Settings:
     firebase_messaging_sender_id: str = os.getenv("FIREBASE_MESSAGING_SENDER_ID", "")
     firebase_app_id: str = os.getenv("FIREBASE_APP_ID", "")
     firebase_service_account_json: str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+    # Recording audio can go to Firebase Storage INSTEAD of the RTDB chunk
+    # layout, but only when the operator has set up the bucket and rules for
+    # it (see docs/durable-recording.md). Default false: the RTDB fallback is
+    # the default, not a degraded mode, and no Storage call is ever made
+    # unless this flag says so. Served to the frontend as `storageEnabled`
+    # on GET /v1/firebase-config.
+    storage_enabled: bool = os.getenv("FIREBASE_STORAGE_ENABLED", "false").strip().lower() in {"true", "1", "yes"}
     data_dir: Path = Path(
         os.getenv("NOTEZ_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
     ).expanduser()

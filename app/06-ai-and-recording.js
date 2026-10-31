@@ -606,10 +606,81 @@ async function openWikiLink(title) {
     // model is out of quota the same part goes to Gemini 3.5 Flash-Lite. Each model
     // is tried on the user's own key first, then on NotezAi's service. A part is only
     // given up when every model on every route has failed, and its audio is kept.
+    // Backend async transcription: the part becomes a durable job on the
+    // server (POST → jobId, poll → text). The job outlives this tab — a
+    // refresh or crash mid-transcription does not lose the work, and the job
+    // key makes a retried request idempotent (a finished job resolves
+    // instantly, a duplicate transcription is impossible). Only the managed
+    // route uses it: a BYOK key is not a secret that belongs in a durable
+    // job row, so own-key parts stay inline exactly as before.
+    let recAsyncCapabilities = null;
+    async function recAsyncCaps() {
+      if (recAsyncCapabilities == null) {
+        try { recAsyncCapabilities = await aiBackendRequest('/v1/config', undefined, 'GET', 15000, true); }
+        catch { recAsyncCapabilities = { capabilities: {} }; }
+      }
+      return recAsyncCapabilities;
+    }
+    // `images` is the same array the inline path sends (the audio part first,
+    // then the learned voice samples), so both paths give the model the same
+    // input and only the transport (inline call vs durable job) differs.
+    async function recAsyncTranscribe(index, model, prompt, images) {
+      const created = await aiBackendRequest('/v1/ai/transcribe', {
+        note_id: REC.noteId,
+        part_slot: index,
+        prompt,
+        temperature: 0,
+        model,
+        images,
+        audio_transcription: true,
+      }, 'POST', 60000);
+      const jobId = created.jobId;
+      // Poll with growing delay (3 s → 5 s → 8 s …) so a long transcription
+      // never burns the request limit, and cap the whole wait at 4 minutes:
+      // past that the part goes held and the queue's own retry picks it up
+      // (the job is still on the server, so the retry re-attaches, not
+      // re-sends).
+      const deadline = Date.now() + 240000;
+      let delay = 3000;
+      for (;;) {
+        if (Date.now() > deadline) throw Object.assign(new Error('The transcription job is taking too long.'), { status: 408 });
+        await recSleep(delay);
+        delay = Math.min(15000, Math.round(delay * 1.6));
+        const status = await aiBackendRequest(`/v1/ai/transcribe/${jobId}`, undefined, 'GET', 15000, true);
+        if (status.status === 'done') {
+          const text = String(status.text || '').trim();
+          if (!text) throw new Error('The transcription job came back empty.');
+          return text;
+        }
+        if (status.status === 'failed') throw Object.assign(new Error(status.error || 'The transcription job failed.'), { status: 502 });
+      }
+    }
     async function recTranscribePart(blob, index) {
       const context = recBoundaryTail(index);
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      const audio = { mime: blob.type || 'audio/webm', data: bytesToB64Safe(bytes) };
+      // Pre-transcription enhancement (app/17-rec-enhance.js): the provider gets
+      // a derived, level-normalized + high-passed + limited mono WAV for THIS
+      // part. The original part audio is never touched — it stays byte-identical
+      // in the durable journal and the cloud copy, and voice samples are not
+      // enhanced. The derivative is built fresh on every call and never
+      // persisted, so a retry always enhances the pristine original, never an
+      // already-enhanced file. Any failure (unsupported browser, size limit,
+      // decode/render error) falls back to the original blob, so enhancement
+      // can never block or lose a transcription. The per-part meta is kept on
+      // REC.enhance for diagnostics only — it is not shown in the recording UI.
+      let audioBlob = blob, audioMime = blob.type || 'audio/webm';
+      if (typeof NzRecEnhance !== 'undefined' && NzRecEnhance) {
+        try {
+          const enhanced = await NzRecEnhance.enhanceForTranscription(blob);
+          REC.enhance = REC.enhance || {};
+          REC.enhance[index] = enhanced.meta;
+          if (enhanced.meta.succeeded && enhanced.blob !== blob) { audioBlob = enhanced.blob; audioMime = enhanced.meta.outputFormat || 'audio/wav'; }
+          console.debug('rec enhance part ' + (index + 1) + ':', enhanced.meta);
+        } catch (error) {
+          console.warn('Enhancement unavailable for part ' + (index + 1) + ', using original audio:', error);
+        }
+      }
+      const bytes = new Uint8Array(await audioBlob.arrayBuffer());
+      const audio = { mime: audioMime, data: bytesToB64Safe(bytes) };
       const samples = await recVoiceContext(index);   // saved voices and voices already heard here
       const images = [audio, ...samples.map(sample => ({ mime: sample.mime, data: sample.data }))];
       const names = samples.map(sample => sample.name);
@@ -628,12 +699,22 @@ async function openWikiLink(title) {
         if (route !== routes[0]) { REC.notice = "Your key did not answer this part. Trying NotezAi's service."; updateRecLive(); }
         for (const model of REC_AUDIO_MODELS) {
           try {
-            const answer = await aiCall('gemini', RECORD_TRANSCRIBE_GEMINI_PART(index, context, names), {
-              temperature: 0, model, route, exact: true, voiceOnly: true, images, timeout: 150000,
-            });
+            const prompt = RECORD_TRANSCRIBE_GEMINI_PART(index, context, names);
+            let transcript;
+            if (route === 'managed' && (await recAsyncCaps()).capabilities?.asyncTranscribe) {
+              // Managed route: durable backend job (see recAsyncTranscribe).
+              // The backend walks its own transcribe-model chain inside the
+              // job, so a job that fails here has used every fallback.
+              transcript = await recAsyncTranscribe(index, model, prompt, images);
+            } else {
+              const answer = await aiCall('gemini', prompt, {
+                temperature: 0, model, route, exact: true, voiceOnly: true, images, timeout: 150000,
+              });
+              transcript = String(answer.text || '');
+            }
             REC.sttModel = model;
             recPartMove(index, 'done');
-            const transcript = String(answer.text || '').replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+            transcript = String(transcript || '').replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
             return await recLabelPart(transcript, index);
           } catch (error) {
             lastError = error;
@@ -741,20 +822,63 @@ Output only the transcript.`;
     // week later should say when something was said, not which audio chunk it
     // arrived in - and because each chunk restarts its offsets at zero, the raw
     // stamps jumped backwards every minute.
+    const recPartTextForNote = index => {
+      let lastClock = recClockOf(recWallOf(index));
+      return String(recApplyRenames(recNormalizeLabels(REC.segTexts[index] || ''))).split('\n').map(raw => {
+        const line = recUnmark(raw);
+        if (!line.trim()) return '';
+        const own = recStampWall(index, (line.match(/^\[([\d:]{3,12})\]/) || [])[1]);
+        const clock = own || lastClock;
+        lastClock = clock;
+        if (!own) return `[${clock}] ${line}`;
+        return line.replace(/^\[([\d:]{3,12})\]/, `[${clock}]`);
+      }).filter(Boolean).join('\n');
+    };
     function recTranscriptForNote() {
       recLiveTranscript();   // settles the Voice numbering before any line is read
-      return REC.segTexts.map((text, index) => {
-        let lastClock = recClockOf(recWallOf(index));
-        return String(recApplyRenames(recNormalizeLabels(text || ''))).split('\n').map(raw => {
-          const line = recUnmark(raw);
-          if (!line.trim()) return '';
-          const own = recStampWall(index, (line.match(/^\[([\d:]{3,12})\]/) || [])[1]);
-          const clock = own || lastClock;
-          lastClock = clock;
-          if (!own) return `[${clock}] ${line}`;
-          return line.replace(/^\[([\d:]{3,12})\]/, `[${clock}]`);
-        }).filter(Boolean).join('\n');
-      }).filter(Boolean).join('\n');
+      return REC.segTexts.map((text, index) => text ? recPartTextForNote(index) : '').filter(Boolean).join('\n');
+    }
+    // ---- Transcript commit: machine text vs user edits -----------------------
+    // Two transcript surfaces exist: the "## Transcript" section inside the
+    // recording note, and the dedicated transcript note ("{id}-tx"). Both use
+    // one rule. While the user leaves the text alone, the machine rewrites it
+    // in full on every save (that is how new parts appear). The moment the
+    // stored text differs from what the machine last wrote, the section
+    // becomes user-owned: its existing lines are never touched again — not
+    // even by speaker renames — and newly finished parts are appended below,
+    // each block marked, so a reader can tell machine text from user text.
+    // Partial vs final stays explicit in the note header ("Recording in
+    // progress" vs "Recording finished").
+    const recTxState = key => (REC[key] = REC[key] || { userOwned: false, lastWritten: '', lastPartCount: 0 });
+    function recCommitSection(key, storedSection) {
+      const state = recTxState(key);
+      const clean = text => String(text || '').replace(/\s+$/, '');
+      const section = clean(storedSection);
+      const fresh = clean(recTranscriptForNote());
+      if (!state.userOwned && state.lastWritten && section !== clean(state.lastWritten)) state.userOwned = true;
+      if (!state.userOwned) {
+        state.lastWritten = fresh;
+        state.lastPartCount = REC.segIdx;
+        return fresh || section || '_Listening… the first part appears within about 30 seconds._';
+      }
+      // user-owned: append only the parts finished after the last write.
+      const from = state.lastPartCount || 0;
+      const added = REC.segTexts.slice(from).map((text, i) => text ? recPartTextForNote(from + i) : '').filter(Boolean).join('\n');
+      if (added) {
+        state.lastPartCount = REC.segIdx;
+        state.lastWritten = `${section}${section ? '\n' : ''}<!-- rec: machine-appended part -->\n${added}`;
+        return state.lastWritten;
+      }
+      return section;
+    }
+    // The "## Transcript" section of a recording note's body, or null.
+    function recTranscriptSectionOf(body) {
+      const text = String(body || '');
+      const at = text.search(REC_HEADING('Transcript'));
+      if (at < 0) return null;
+      const rest = text.slice(at).replace(/^#{1,6}\s*Transcript[^\n]*\n?/, '');
+      const notesAt = rest.search(REC_HEADING('AI notes'));
+      return notesAt < 0 ? rest : rest.slice(0, notesAt);
     }
     function recNoteBody(transcript, notesText, finishing) {
       const when = new Date(REC.startedAt);
@@ -780,7 +904,11 @@ Output only the transcript.`;
       if (REC.discarding) return;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
       const complete = finishing || REC.status === REC_STATUS.DONE;
-      note.body = (complete ? recNoteBody(recTranscriptForNote(), notesText, finishing) : recOverviewBody(note)).slice(0, recNoLimits() ? undefined : 200000);
+      // Complete save: the transcript section goes through the commit rule,
+      // so a transcript the user has edited is kept and only new parts are
+      // appended; an untouched section is rewritten in full as before.
+      const transcript = complete ? recCommitSection('txBodyState', recTranscriptSectionOf(note.body)) : recTranscriptForNote();
+      note.body = (complete ? recNoteBody(transcript, notesText, finishing) : recOverviewBody(note)).slice(0, recNoLimits() ? undefined : 200000);
       note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', recTagOf(REC.mode)];
       persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
       renderEverything();
@@ -852,35 +980,19 @@ Output only the transcript.`;
     // held there, in order, and is sent again when the connection is back. The
     // recording itself never needs the network: the microphone and the encoder
     // are local, so a dropped connection never stops a recording.
-    const REC_JOURNAL_DB = 'notez-rec-journal';
+    // The journal database is owned by app/17-rec-journal.js (version 2: the
+    // v1 "parts" store plus the durably committed capture slices, the session
+    // rows and the durable job queue). One owner of the database means the
+    // old v1 part rows keep working untouched, and every write here resolves
+    // only on a committed transaction (the commit ack).
     const REC_JOURNAL_STORE = 'parts';
-    let recJournalOpening = null;
-    function recJournalDb() {
-      if (!recJournalOpening) {
-        recJournalOpening = new Promise((resolve, reject) => {
-          if (!window.indexedDB) { reject(new Error('IndexedDB is not available')); return; }
-          const request = indexedDB.open(REC_JOURNAL_DB, 1);
-          request.onupgradeneeded = () => request.result.createObjectStore(REC_JOURNAL_STORE, { keyPath: 'key' });
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        }).catch(error => { recJournalOpening = null; throw error; });
-      }
-      return recJournalOpening;
-    }
     // Runs one request in its own transaction and resolves with its result.
-    function recJournalRun(mode, work) {
-      return recJournalDb().then(db => new Promise((resolve, reject) => {
-        const tx = db.transaction(REC_JOURNAL_STORE, mode);
-        let request = null;
-        tx.oncomplete = () => resolve(request ? request.result : undefined);
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-        request = work(tx.objectStore(REC_JOURNAL_STORE)) || null;
-      }));
-    }
+    function recJournalRun(mode, work) { return NzRecJournal.run(REC_JOURNAL_STORE, mode, work); }
     const recJournalKey = (noteId, index) => `${noteId}:${index}`;
     // The journal is a safety net. If it cannot be written the part is still
     // held in memory, so a failed write is logged and never stops the session.
+    // The blob is merged, never nulled: once a part's audio is journaled it
+    // stays (retention), even after the in-memory copy is dropped.
     function recJournalSave(index, noteId = REC.noteId) {
       if (!noteId || REC.discarding) return Promise.resolve();
       const record = {
@@ -888,17 +1000,175 @@ Output only the transcript.`;
         blob: REC.segBlobs[index] || null, text: REC.segTexts[index] || '',
         wall: REC.segWall[index] || 0, mark: REC.segMarks[index] ?? null, status: REC.segStatuses[index] || '',
       };
-      return recJournalRun('readwrite', store => store.put(record)).catch(error => console.warn('Journal write failed:', error));
+      return NzRecJournal.savePart(record).catch(error => console.warn('Journal write failed:', error));
     }
-    // Removes every record of a session. Only called once nothing of it is held.
-    async function recJournalForget(noteId) {
-      if (!noteId) return;
+    // ---- Durable session lifecycle -----------------------------------------
+    // Session row (journal) + cloud claim, opened when capture begins. The uid
+    // is fixed at this moment and never rebound (R1). A claim conflict never
+    // stops the local recording — the audio is safe on this device; only the
+    // cloud copy waits until the claim is free.
+    async function recOpenDurableSession() {
+      const noteId = REC.noteId; if (!noteId) return;
+      const uid = currentSession?.user?.uid || '';
       try {
-        const rows = await recJournalRun('readonly', store => store.getAll()) || [];
-        const keys = rows.filter(row => row.noteId === noteId).map(row => row.key);
-        if (keys.length) await recJournalRun('readwrite', store => { keys.forEach(key => store.delete(key)); return null; });
-      } catch (error) { console.warn('Journal cleanup failed:', error); }
+        await NzRecJournal.updateSession(noteId, {
+          uid, mode: REC.mode, mime: REC.mime.split(';')[0],
+          startedAt: REC.startedAt || Date.now(), capture: 'recording', finalizedAt: 0, deletedAt: 0,
+        });
+      } catch (error) { console.warn('Durable session open:', error); }
+      if (!uid) return;
+      let claimed = 0;
+      try {
+        const claim = await NzRecCloud.acquireClaim(noteId);
+        if (claim === 'own') {
+          claimed = 1;
+          await NzRecCloud.syncSession(noteId, { uid, mode: REC.mode, mime: REC.mime.split(';')[0], startedAt: REC.startedAt || Date.now(), capture: 'recording' });
+        } else if (claim === 'conflict' && !REC.discarding) {
+          // The other device holds the cloud copy of this note. This device
+          // records on (the audio is safe locally) but stays out of the
+          // shared note entirely — uploading into an overlapping part
+          // numbering could overwrite the first device's audio, which is
+          // never allowed.
+          REC.notice = 'This recording is open on another device. Recording continues here; its audio stays on this device for the time being.';
+          updateRecLive();
+        }
+      } catch (error) { console.warn('Cloud claim:', error); }
+      try { await NzRecJournal.updateSession(noteId, { cloudClaimed: claimed }); } catch { /* non-critical */ }
     }
+    // Capture stopped (or discarded): the session row says so, the claim is
+    // released, and every part that has audio gets a durable, idempotent
+    // upload job. The jobs outlive the tab; a part whose cloud copy already
+    // matches its sha256 is skipped, so retries never upload twice.
+    async function recCloseDurableSession() {
+      const noteId = REC.noteId; if (!noteId) return;
+      try {
+        const session = await NzRecJournal.getSession(noteId).catch(() => null);
+        await NzRecJournal.updateSession(noteId, { capture: REC.discarding ? 'discarded' : 'stopped', finalizedAt: Date.now() });
+        if (session?.cloudClaimed) {
+          await NzRecCloud.syncSession(noteId, { capture: REC.discarding ? 'discarded' : 'stopped', finalizedAt: Date.now() });
+          await NzRecCloud.releaseClaim(noteId);
+        }
+      } catch (error) { console.warn('Durable session close:', error); }
+      const count = REC.segIdx;
+      for (let index = 0; index < count; index++) {
+        try {
+          const session = await NzRecJournal.getSession(noteId).catch(() => null);
+          const uid = session?.uid || currentSession?.user?.uid || '';
+          // No cloud copy for this session: a guest, or a device that lost
+          // the claim at session open (its audio stays local, never written
+          // into another device's part numbering).
+          if (!uid || !session?.cloudClaimed) break;
+          await NzRecJobs.enqueueJob({
+            type: 'rec-audio',
+            dedupKey: `up:${noteId}:${index}`,
+            ref: { noteId, slot: index },
+            payload: { mime: REC.mime.split(';')[0] },
+            uid,
+          });
+        } catch (error) { console.warn('Audio upload job:', error); }
+      }
+    }
+    // A session row that still says "recording" when this page loaded was
+    // interrupted (refresh, closed tab, crash). Before the v1 restore runs,
+    // each interrupted part is rebuilt from its COMMITTED slices — the
+    // EBML-aware recovery keeps every complete second and discards only the
+    // incomplete final region — and written back as an ordinary held part, so
+    // the existing restore/send path picks it up unchanged. A part whose
+    // audio cannot be rebuilt stays lost and is reported as such, never
+    // guessed at.
+    async function recRecoverInterrupted() {
+      let sessions = [];
+      try { sessions = await NzRecJournal.listSessions(); } catch { return; }
+      for (const session of sessions) {
+        if (session.deletedAt || session.capture !== 'recording') continue;
+        if (!notes.some(item => item.id === session.noteId)) {
+          await NzRecJournal.removeSession(session.noteId).catch(() => {});
+          continue;
+        }
+        try {
+          await NzRecJournal.updateSession(session.noteId, { capture: 'recovered' });
+          if (session.cloudClaimed) await NzRecCloud.syncSession(session.noteId, { capture: 'recovered' });
+          const slots = await NzRecJournal.listSlots(session.noteId);
+          for (const slot of slots) {
+            const existing = await NzRecJournal.getPartRow(session.noteId, slot).catch(() => null);
+            if (existing?.blob) continue;   // already a held part with its audio
+            const built = await NzRecJournal.rebuildPart(session.noteId, slot).catch(() => null);
+            if (!built?.blob) { console.warn(`Recovery: part ${slot + 1} of ${session.noteId} has committed slices but none could be rebuilt — its audio stays lost.`); continue; }
+            await NzRecJournal.savePart({
+              key: recJournalKey(session.noteId, slot), noteId: session.noteId, index: slot,
+              blob: built.blob, text: '', wall: session.startedAt || Date.now(), mark: null, status: SEG_STATUS.FAILED,
+            }).catch(error => console.warn('Recovery write failed:', error));
+          }
+          // Completed parts of an interrupted session still owe their upload
+          // job when the tab died right after the last part finished (only
+          // for sessions that had a signed-in workspace).
+          const rows = (await NzRecJournal.getAllParts().catch(() => [])).filter(row => row.noteId === session.noteId);
+          for (const row of rows) {
+            if (!row.blob || !session.uid || !session.cloudClaimed) continue;
+            try {
+              await NzRecJobs.enqueueJob({
+                type: 'rec-audio', dedupKey: `up:${session.noteId}:${row.index}`,
+                ref: { noteId: session.noteId, slot: row.index },
+                payload: { mime: session.mime || 'audio/webm' }, uid: session.uid,
+              });
+            } catch (error) { console.warn('Audio upload job:', error); }
+          }
+        } catch (error) { console.warn('Session recovery:', error); }
+      }
+    }
+    // A held part also gets a durable transcribe job: if this tab dies
+    // mid-send, the queue still owns the part. Idempotent (dedupKey per
+    // note+part); the handler resolves through the ordinary send path.
+    // Signed-in sessions only: a guest's held parts keep the existing
+    // protection (the v1 journal rows plus the 30 s live re-flush), and a
+    // guest is never claimed backed up.
+    function recQueueTranscribeJob(index) {
+      if (!REC.noteId || !currentSession?.user?.uid) return;
+      void NzRecJobs.enqueueJob({
+        type: 'rec-transcribe',
+        dedupKey: `tr:${REC.noteId}:${index}`,
+        ref: { noteId: REC.noteId, slot: index, index },
+        payload: { index },
+        uid: currentSession.user.uid,
+      }).catch(error => console.warn('Transcribe job:', error));
+    }
+    // ---- Durable queue handlers ---------------------------------------------
+    // rec-transcribe: re-run one held part through the ordinary send pipeline.
+    // Outcomes: the part is gone (sent, discarded, note deleted) → terminal
+    // skip; the session is not open on this tab → defer (the restore on the
+    // next load reopens it); the part is still held after another attempt →
+    // defer, so an offline device does not burn retry attempts while the
+    // in-session flush keeps its own cadence.
+    NzRecJobs.addHandler('rec-transcribe', async job => {
+      const index = job.ref?.index;
+      if (index == null) return { skip: true, reason: 'no-part' };
+      const note = notes.find(item => item.id === job.ref.noteId);
+      if (!note || note.tombstoned) return { skip: true, reason: 'note-gone' };
+      if (REC.noteId !== job.ref.noteId) return { defer: true, reason: 'session-closed' };
+      if (!REC.segBlobs[index]) return { skip: true, reason: 'already-sent' };
+      const sent = await recSendPart(index, REC.gen);
+      return sent ? { sent: true, index } : { defer: true, reason: 'still-held' };
+    });
+    // rec-audio: upload one finished part's audio to the cloud workspace. The
+    // audio comes from the journal (part row, else committed slices), never
+    // from memory, so the job works whether or not the session is open.
+    // Idempotent: the sha256 in the cloud meta makes a retry a no-op.
+    NzRecJobs.addHandler('rec-audio', async job => {
+      const noteId = job.ref?.noteId, slot = job.ref?.slot;
+      if (!noteId || slot == null) return { skip: true, reason: 'bad-ref' };
+      const note = notes.find(item => item.id === noteId);
+      if (!note || note.tombstoned) return { skip: true, reason: 'note-gone' };
+      const built = await NzRecJournal.rebuildPart(noteId, slot).catch(() => null);
+      if (!built?.blob || built.blob.size < 500) return { skip: true, reason: 'no-audio' };
+      const sha = await NzRecCloud.sha256Hex(built.blob);
+      const out = await NzRecCloud.putPartAudio(noteId, slot, built.blob, { mime: built.blob.type || job.payload?.mime || 'audio/webm', sha });
+      if (out.mode === 'failed') throw new Error(out.error || 'cloud upload failed');
+      return out;
+    });
+    // One queue loop for the whole app (auth-aware, Web-Locked), and the lazy
+    // cloud config load. Both are no-ops for a guest or an offline device.
+    NzRecJobs.init({ onUid: () => (!window.nzAuthNoUser && currentSession?.mode === 'cloud') ? (currentSession.user?.uid || '') : '' });
+    NzRecCloud.init();
     const recHeldIndices = () => REC.segBlobs.map((blob, index) => blob ? index : -1).filter(index => index >= 0);
     function recHoldPart(index, error) {
       recPartMove(index, 'hold');
@@ -996,7 +1266,10 @@ Output only the transcript.`;
           if (REC.status === REC_STATUS.DONE) {
             recSaveNote(true, REC.liveNotes);
             recSaveTranscriptNote();
-            recJournalForget(REC.noteId);
+            // The journal is kept on a normal finish (audio retention): the
+            // part blobs and committed slices stay on this device, and the
+            // durable rec-audio jobs make sure the cloud has its copy.
+            void recCloseDurableSession();
           }
           REC.notice = 'Every part is transcribed.';
         }
@@ -1014,6 +1287,7 @@ Output only the transcript.`;
     async function recRestoreHeld(attempt = 0) {
       if (REC.status !== REC_STATUS.IDLE || REC.noteId) return;
       if (!notes.length && attempt < 20) { setTimeout(() => recRestoreHeld(attempt + 1), 1000); return; }
+      await recRecoverInterrupted();   // rebuild interrupted parts from committed slices
       let rows = [];
       try { rows = await recJournalRun('readonly', store => store.getAll()) || []; } catch { return; }
       const sessions = new Map();
@@ -1039,8 +1313,30 @@ Output only the transcript.`;
       REC.gen = (REC.gen || 0) + 1; REC.queue = Promise.resolve(); REC.flushing = null;
       recMove('restore');
       REC.notice = `${recHeldIndices().length} part${recHeldIndices().length === 1 ? '' : 's'} from an earlier recording are waiting to be sent.`;
+      // Transcript state after a reload: a stored transcript that already
+      // differs from what the machine would write was edited by the user and
+      // wins from now on (the machine appends only new parts, never rewrites).
+      const restoredNote = notes.find(item => item.id === REC.noteId);
+      if (restoredNote) {
+        const machine = recTranscriptForNote();
+        const storedSection = recTranscriptSectionOf(restoredNote.body);
+        if (storedSection != null && storedSection.trim() && storedSection.trim() !== machine.trim()) {
+          const bodyState = recTxState('txBodyState');
+          bodyState.userOwned = true; bodyState.lastWritten = storedSection.trim(); bodyState.lastPartCount = REC.segIdx;
+        }
+        const txNote = notes.find(item => item.id === `${REC.noteId}-tx`);
+        if (txNote) {
+          const txSection = String(txNote.body || '').replace(/^>[^\n]*\n*/, '').trim();
+          const noteState = recTxState('txNoteState');
+          if (txSection && txSection !== machine.trim()) { noteState.userOwned = true; noteState.lastWritten = txSection; noteState.lastPartCount = REC.segIdx; }
+          else if (txSection) noteState.lastWritten = txSection;
+        }
+      }
       recSaveNote(true, REC.liveNotes);
       updateRecLive();
+      // Held parts get a durable transcribe job too: a send that outlives this
+      // tab (or a reload mid-send) is picked up by the queue, idempotently.
+      for (const index of recHeldIndices()) recQueueTranscribeJob(index);
       if (navigator.onLine) recFlushHeld();
     }
     setTimeout(() => recRestoreHeld(), 1500);
@@ -1055,10 +1351,25 @@ Output only the transcript.`;
         REC.segBlobs[index] = blob;
         recPartMove(index, 'queue');
         await recJournalSave(index);
+        await recSweepPartSlices(index);   // the part row now holds the whole part
         await recSendPart(index, gen);
         updateRecLive();
       });
       return REC.queue;
+    }
+    // Once the part row durably holds the whole part blob, this part's ~1 s
+    // slices are redundant — they exist to recover parts that never
+    // completed, and a completed part keeps its audio in the part row. The
+    // drop is verified, not assumed: the row's blob is re-read and matched
+    // against the part just written before any slice is removed.
+    async function recSweepPartSlices(index) {
+      const noteId = REC.noteId; if (!noteId) return;
+      try {
+        const row = await NzRecJournal.getPartRow(noteId, index);
+        if (row?.blob && row.blob.size >= (REC.segBlobs[index]?.size || 0)) {
+          await NzRecJournal.discardSlices(noteId, index);
+        }
+      } catch (error) { console.warn('Slice sweep:', error); }
     }
     function startPart() {
       const recorder = new MediaRecorder(REC.stream, { mimeType: REC.mime, audioBitsPerSecond: 32000 });
@@ -1067,9 +1378,25 @@ Output only the transcript.`;
       // cleared by the next part before this one's stop event runs, so a part
       // could be sent with the wrong audio or none at all.
       const chunks = [];
-      recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
-      recorder.onstop = () => { const blob = new Blob(chunks, { type: REC.mime.split(';')[0] }); enqueuePart(blob, index); };
-      recorder.start();
+      // Durability: the recorder now timeslices at ~1 s. Each slice is the
+      // same stream as before (the part blob on stop is the concatenation of
+      // these very chunks), and each one is committed to the journal's slice
+      // store BEFORE it is counted. A part rebuilt after a crash is made only
+      // from committed slices, so the audio never depends on memory. A failed
+      // commit is logged and the slice stays in memory only — it degrades the
+      // recovery granularity, it never stops the recording.
+      const noteId = REC.noteId;
+      const mime = REC.mime.split(';')[0];
+      let sliceSeq = 0;
+      recorder.ondataavailable = event => {
+        if (!event.data?.size) return;
+        chunks.push(event.data);
+        const seq = sliceSeq++;
+        NzRecJournal.commitSlice({ noteId, slot: index, seq, blob: event.data, mime, at: Date.now() })
+          .catch(error => console.warn('Slice commit failed (kept in memory only):', error));
+      };
+      recorder.onstop = () => { const blob = new Blob(chunks, { type: mime }); enqueuePart(blob, index); };
+      recorder.start(1000);
       REC.recorder = recorder;
       REC.partStartAt = Date.now();
       REC.segWall[index] = REC.partStartAt;   // the wall clock this part began at
@@ -1462,6 +1789,7 @@ Output only the transcript.`;
           REC.notice = '';
           recSaveNote(false);
         }
+        recOpenDurableSession();   // session row + cloud claim (fire and forget)
         startPart(); recRunTimers(); recStartMeter(stream); recRender();
       }).catch(error => {
         recMove('denied');
@@ -1499,7 +1827,16 @@ Output only the transcript.`;
       await Promise.race([REC.queue, recSleep(15000)]);   // let requests in flight settle, never hang the panel
       recResetSession();
       recRender();
-      if (noteId) { await recJournalForget(noteId); await deleteNote(noteId, { confirm: false }); }
+      if (noteId) {
+        // Explicit, confirmed deletion. The cloud copy goes first, with the
+        // tombstone written LAST so no other device can resurrect the session;
+        // then the local journal and the note itself.
+        try { await NzRecCloud.discardSession(noteId); } catch (error) { console.warn('Cloud discard failed (local delete goes on):', error); }
+        // forgetSession drops parts + slices + session row + this session's
+        // queued jobs in one go.
+        try { await NzRecJournal.forgetSession(noteId); } catch (error) { console.warn('Journal cleanup failed:', error); }
+        await deleteNote(noteId, { confirm: false });
+      }
       toast('Recording discarded.', 'success', 3000);
     }
     function recPause() { if (REC.status !== REC_STATUS.RECORDING) return; endPart(); recMove('pause'); REC.pausedAt = Date.now(); clearRecTimers(); recRender(); }
@@ -1540,7 +1877,11 @@ Output only the transcript.`;
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
       recSaveTranscriptNote();
       const voices = recDetectVoices(recLiveTranscript());
-      if (!recHeldIndices().length && REC.noteId) recJournalForget(REC.noteId);
+      // The journal is never cleared on a normal finish (audio retention):
+      // the part blobs and committed slices stay on this device, the session
+      // row says capture stopped, and every completed part gets its durable
+      // cloud-upload job (idempotent — a part already uploaded is skipped).
+      if (REC.noteId) void recCloseDurableSession();
       recMove('finished'); recRender(); renderEverything();
       toast('Recording finished and saved to your library.', 'success', 4500);
       if (voices.length && note) recOfferNames(note.id, voices);
@@ -1550,10 +1891,13 @@ Output only the transcript.`;
     // in place when parts arrive late.
     function recSaveTranscriptNote() {
       const source = notes.find(item => item.id === REC.noteId); if (!source || REC.discarding) return;
-      const transcript = recTranscriptForNote(); if (!transcript.trim()) return;
+      const machineTranscript = recTranscriptForNote(); if (!machineTranscript.trim()) return;
       const id = `${source.id}-tx`;
-      const body = `> Transcript of "${source.title}" · ${new Date(REC.startedAt || Date.now()).toLocaleString()}\n\n${transcript}`.slice(0, recNoLimits() ? undefined : 200000);
       let note = notes.find(item => item.id === id);
+      // Same commit rule as the note body: an edited transcript note is kept,
+      // new parts are appended below with a machine marker.
+      const section = note ? recCommitSection('txNoteState', String(note.body || '').replace(/^>[^\n]*\n*/, '')) : machineTranscript;
+      const body = `> Transcript of "${source.title}" · ${new Date(REC.startedAt || Date.now()).toLocaleString()}\n\n${section}`.slice(0, recNoLimits() ? undefined : 200000);
       if (note) { note.body = body; note.updatedAt = Date.now(); }
       else {
         note = normalizeNote({ id, title: `Transcript · ${source.title}`, subject: source.subject, folderPath: source.folderPath, body, tags: ['TRANSCRIPT'] });
