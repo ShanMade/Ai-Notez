@@ -32,6 +32,13 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // Global object for property-style references: self/window in the browser
+  // (platform globals and the window.NzRec* modules ARE properties of it),
+  // globalThis in Node so every access degrades to undefined instead of
+  // throwing. App-level `let`/`const` globals are NOT properties of the
+  // global object — never reference those via root.
+  const root = (typeof self !== 'undefined' && self) || (typeof window !== 'undefined' && window) || (typeof globalThis !== 'undefined' && globalThis) || {};
+
   const DB_NAME = 'notez-rec-journal';
   const DB_VERSION = 2;
   const PARTS = 'parts';

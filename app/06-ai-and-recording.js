@@ -1166,9 +1166,18 @@ Output only the transcript.`;
       return out;
     });
     // One queue loop for the whole app (auth-aware, Web-Locked), and the lazy
-    // cloud config load. Both are no-ops for a guest or an offline device.
-    NzRecJobs.init({ onUid: () => (!window.nzAuthNoUser && currentSession?.mode === 'cloud') ? (currentSession.user?.uid || '') : '' });
-    NzRecCloud.init();
+    // cloud config load. Both are no-ops for a guest or an offline
+    // device. If either fails to start, local recording must continue
+    // anyway — a broken cloud queue can never abort the rest of this module
+    // (a throw here would leave every later top-level const in this file in
+    // the temporal dead zone, breaking the recorder UI for the whole page
+    // load). Cloud sync degrades; capture never does.
+    try {
+      NzRecJobs.init({ onUid: () => (!window.nzAuthNoUser && currentSession?.mode === 'cloud') ? (currentSession.user?.uid || '') : '' });
+      NzRecCloud.init();
+    } catch (error) {
+      console.warn('Durable cloud queue did not start (local recording unaffected):', error);
+    }
     const recHeldIndices = () => REC.segBlobs.map((blob, index) => blob ? index : -1).filter(index => index >= 0);
     function recHoldPart(index, error) {
       recPartMove(index, 'hold');

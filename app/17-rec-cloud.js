@@ -36,6 +36,16 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // Global object for property-style references: self/window in the browser
+  // (platform globals, the window.NzRec* modules and top-level FUNCTION
+  // declarations ARE properties of it), globalThis in Node so every access
+  // degrades to undefined instead of throwing.
+  // IMPORTANT: app-level `let`/`const` globals (e.g. currentSession in 01,
+  // aiBackendBase in 04, firebaseConfig in 01) are NOT properties of the
+  // global object — they live in the global lexical environment. Those are
+  // referenced by bare name with a typeof guard below, never via root.
+  const root = (typeof self !== 'undefined' && self) || (typeof window !== 'undefined' && window) || (typeof globalThis !== 'undefined' && globalThis) || {};
+
   const CLAIM_TTL_MS = 30 * 1000;
   const CLAIM_HEARTBEAT_MS = 10 * 1000;
   const CHUNK_BYTES = 510000;   // multiple of 3 so base64 chunks join cleanly
@@ -55,7 +65,11 @@
   const log = (...args) => root.console?.warn?.('[rec-cloud]', ...args);
 
   function uidOf() {
-    return root.currentSession?.user?.uid || '';
+    // `currentSession` is a top-level `let` in 01 — a global-lexical binding,
+    // not a property of the global object — so it is referenced by name. The
+    // typeof guard keeps this from throwing in non-browser environments where
+    // it is undeclared (it simply means "no signed-in session" there).
+    return (typeof currentSession !== 'undefined' ? currentSession?.user?.uid : '') || '';
   }
 
   async function sdk() {
@@ -72,7 +86,9 @@
   function loadConfig() {
     if (state.configPromise) return state.configPromise;
     state.configPromise = (async () => {
-      const base = (root.aiBackendBase?.() || '').trim();
+      // `aiBackendBase` is a top-level `const` in 04 (global-lexical, not a
+      // global-object property) — referenced by name, typeof-guarded.
+      const base = (typeof aiBackendBase === 'function' ? (aiBackendBase() || '') : '').trim();
       if (!base) return;
       try {
         const controller = new AbortController();
@@ -107,9 +123,13 @@
       ]);
       // Find the SAME app the rest of the app initialised (01 matches by the
       // whole options object; the guest app is excluded by name).
-      const app = appModule.getApps().find(candidate =>
+      // `firebaseConfig` is a top-level `const` in 01 (global-lexical, not a
+      // global-object property) — referenced by name, typeof-guarded. An empty
+      // match set would wrongly accept the first app, so require the config.
+      const fc = (typeof firebaseConfig !== 'undefined' ? firebaseConfig : null);
+      const app = fc && appModule.getApps().find(candidate =>
         candidate.name !== 'notez-ai-guest' &&
-        Object.entries(root.firebaseConfig || {}).every(([key, value]) => candidate.options?.[key] === value)
+        Object.entries(fc).every(([key, value]) => candidate.options?.[key] === value)
       );
       if (!app) { log('Storage enabled but the Firebase app was not found.'); return null; }
       state.storageModule = { appModule, storageModule, storage: storageModule.getStorage(app, { bucket: state.storageBucket }) };
