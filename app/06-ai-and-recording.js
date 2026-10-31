@@ -622,9 +622,17 @@ async function openWikiLink(title) {
       }
       throw lastError || new Error('No transcription model is available.');
     }
+    // The languages chosen in NotezAi settings. Read at each call, so a change
+    // applies to the next part and the next notes write.
+    const recLangLabel = code => (NZAI_LANGUAGES.find(([value]) => value === code) || [code, code])[1];
+    const recTranscriptLang = () => aiStore.get('notez-ai-transcript-lang', 'original');
+    const recNotesLang = () => aiStore.get('notez-ai-notes-lang', 'same');
+    const recTranscriptRule = () => recTranscriptLang() === 'original'
+      ? 'Keep the original language (English, Urdu or a mix of both) and never translate.'
+      : `Write every line in ${recLangLabel(recTranscriptLang())}. If someone speaks another language, translate it faithfully into ${recLangLabel(recTranscriptLang())}; keep names, numbers and technical terms exact.`;
     const RECORD_TRANSCRIBE_GEMINI_PART = (index, context = '', attached = []) => `Transcribe audio part ${index + 1} of a recording, word for word.
 ${REC.mode === 'meeting' ? 'Setting: a meeting. Several adults may speak, sometimes over each other.' : 'Setting: a classroom lecture. Usually one teacher and some students.'}
-Accuracy rules: write every sentence you can hear, in order. Never summarise, never skip a sentence, never paraphrase and never correct the speaker's grammar. Keep the original language (English, Urdu or a mix of both) and never translate. Use [inaudible] only for a word you truly cannot hear.
+Accuracy rules: write every sentence you can hear, in order. Never summarise, never skip a sentence, never paraphrase and never correct the speaker's grammar. ${recTranscriptRule()} Use [inaudible] only for a word you truly cannot hear.
 ${context ? `The part before this one ended with: "${context}"
 If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
 ` : ''}${typeof nzVoicePrompt === 'function' ? nzVoicePrompt() : ''}${attached.length ? `\nThe audio parts after this one are the reference clips for these voices, in this order: ${attached.join(', ')}.` : ''}
@@ -700,7 +708,8 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       const choice = $('#rec-enhance')?.value || REC.choice || 'auto';
       if (choice === 'none') return;
       const base = choice === 'custom' ? RECORD_MODES.custom : RECORD_MODES[choice === 'auto' ? key : choice] || RECORD_MODES[key];
-      const instruction = REC.instructions ? `${base}\n\nThe user's own instructions (follow them; they override the default format where they conflict): """${REC.instructions}"""` : base;
+      const notesRule = choice === 'clean' ? '' : recNotesLang() === 'same' ? 'Write the notes in the same language as the transcript.' : `Write the notes in ${recLangLabel(recNotesLang())}, including the headings.`;
+      const instruction = [base, notesRule, REC.instructions ? `The user's own instructions (follow them; they override the default format where they conflict): """${REC.instructions}"""` : ''].filter(Boolean).join('\n\n');
       try {
         if (final) {
           REC.liveNotes = await recEnhance(transcript, instruction, text => { REC.notice = text; updateRecLive(); });
@@ -1326,6 +1335,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
     // Continue an earlier recording in the same note.
     function recContinue() {
       if (REC.status !== REC_STATUS.DONE || !REC.noteId) return;
+      if (recHeldIndices().length) { toast('Send or discard the waiting parts of the earlier recording first.', 'info', 5000); return; }
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('This browser cannot record audio. Use Chrome or Edge on https.', 'error', 6000); return; }
       if (!hasAudioProvider()) { toast('Recording needs NotezAi or your own Gemini/Groq key. Check AI source in NotezAi settings.', 'error', 6000); return; }
       recBeginCapture(false);
@@ -1424,7 +1434,10 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       const act = event.target.closest('[data-rec]')?.dataset.rec; if (!act) return;
       if (act === 'start') return recStart();
       if (act === 'continue') return recContinue();
-      if (act === 'new') { recResetSession(); return recRender(); }
+      if (act === 'new') {
+        if (recHeldIndices().length) { toast('Send or discard the waiting parts of the earlier recording first.', 'info', 5000); return; }
+        recResetSession(); return recRender();
+      }
       if (act === 'discard') { recDiscard(); return; }
       if (act === 'tab') { REC.tab = event.target.closest('[data-rec]').dataset.tab; return updateRecLive(); }
       
