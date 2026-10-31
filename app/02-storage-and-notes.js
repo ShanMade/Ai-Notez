@@ -295,6 +295,7 @@ function noteRowMarkup(note, dateMode = 'updated') {
       renderSideRecent();
     }
     function renderEverything() {
+      window.nzSindexCheck?.();
       if (searchRenderTimer) { clearTimeout(searchRenderTimer); searchRenderTimer = 0; }
       if (!$('#note-view').classList.contains('hidden') && readerRenderedId) saveReaderPositionNow(readerRenderedId);
       if (currentPage !== 'editor') removeHtmlExtractionProbe();
