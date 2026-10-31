@@ -49,12 +49,89 @@
 
   let opening = null;
 
+  // A wedged database must not be re-tried on every ~1 s slice commit: each
+  // open re-runs the failing versionchange transaction, aborts it and floods
+  // the console. After an open failure we wait before trying again (30 s,
+  // doubling, capped at 5 min), and after repeated failures we move to a
+  // FRESH database file. The broken file is left on disk untouched — never
+  // deleted, never overwritten — so no recorded audio is lost; the app just
+  // stops pointing at a file this browser cannot work with.
+  let openFailure = { count: 0, nextTry: 0 };
+  let upgradeDiag = false;
+  let degraded = false;
+  let degradedNotice = '';
+  const GEN_KEY = 'notez-rec-journal-gen';
+  const MAX_GENERATION = 2;   // at most one automatic file switch
+  let generation = 1;
+  try {
+    const stored = Number(root.localStorage?.getItem?.(GEN_KEY) || 0);
+    if (stored >= 1 && stored <= MAX_GENERATION) generation = stored;
+  } catch (e) { /* private windows: the generation stays in memory */ }
+  const dbFileName = () => DB_NAME + (generation > 1 ? `-g${generation}` : '');
+
+  function bumpGeneration(why) {
+    generation += 1;
+    try { root.localStorage?.setItem?.(GEN_KEY, String(generation)); } catch (e) { /* in-memory only */ }
+    degraded = true;
+    degradedNotice = 'Storage note: the previous recording storage could not be upgraded in this browser, so a fresh one is in use. The old file is kept on disk; recording and transcription are unaffected.';
+    // The fresh file gets the very next open — no backoff in between.
+    openFailure = { count: 0, nextTry: 0 };
+    justBumped = true;
+    console.error(`Journal: ${why} — using fresh database file ${dbFileName()}. The previous file is left on disk untouched.`);
+  }
+
+  let justBumped = false;
+
+  function noteOpenFailure() {
+    if (justBumped) { justBumped = false; return; }   // the fresh file opens right away
+    openFailure.count += 1;
+    if (openFailure.count >= 3 && generation < MAX_GENERATION) {
+      bumpGeneration(`the database file could not be opened ${openFailure.count} times in a row`);
+      return;
+    }
+    const backoff = Math.min(30000 * Math.pow(2, openFailure.count - 1), 300000);
+    openFailure.nextTry = Date.now() + backoff;
+    // At the last generation and still failing, storage is unusable in this
+    // browser — escalate to the honest "kept in the tab only" warning (this
+    // also covers a fresh file that is itself broken).
+    if (openFailure.count >= 3 && generation >= MAX_GENERATION) {
+      degraded = true;
+      degradedNotice = 'Storage warning: recording storage could not be opened in this browser, so this recording is kept in the tab only. Try reloading or a different browser.';
+    }
+  }
+
   function db() {
     if (opening) return opening;
+    if (openFailure.count > 0 && Date.now() < openFailure.nextTry) {
+      return Promise.reject(new Error('Journal is waiting to retry (storage problem)'));
+    }
     opening = new Promise((resolve, reject) => {
       if (!root.indexedDB) { opening = null; reject(new Error('IndexedDB is not available')); return; }
-      const request = root.indexedDB.open(DB_NAME, DB_VERSION);
+      const request = root.indexedDB.open(dbFileName(), DB_VERSION);
       request.onupgradeneeded = () => {
+        const tx = request.transaction;
+        if (!tx || typeof tx.createObjectStore !== 'function') {
+          // The versionchange transaction has no createObjectStore: the
+          // missing stores cannot be created and this file can never reach
+          // version 2 here. Log what the transaction really is (once) and
+          // switch to a fresh file; the broken one is kept on disk.
+          if (!upgradeDiag) {
+            upgradeDiag = true;
+            try {
+              console.error('Journal: the upgrade transaction has no createObjectStore; this database file cannot be upgraded in this browser.', {
+                file: dbFileName(), oldVersion: request.oldVersion, requested: DB_VERSION,
+                transaction: String(tx),
+                constructor: tx && tx.constructor ? tx.constructor.name : '',
+                stores: tx && tx.objectStoreNames ? Array.prototype.slice.call(tx.objectStoreNames) : [],
+                userAgent: (typeof navigator !== 'undefined' && navigator.userAgent) || '',
+              });
+            } catch (e) { /* the diagnostic must never throw */ }
+            if (generation < MAX_GENERATION) bumpGeneration('the upgrade transaction is broken for this file in this browser');
+          }
+          // Abort this open with a clear error; the next db() call uses the
+          // fresh file name.
+          throw new Error('Journal upgrade cannot create the missing stores in this browser');
+        }
         // v0 → v2 (new device) and v1 → v2 (an older build already wrote
         // part rows into the `parts` store, keyPath 'key' — preserved
         // untouched). The upgrade transaction creates whatever is missing and
@@ -63,13 +140,17 @@
         // and throws NotFoundError for exactly the stores that are missing,
         // which would abort the whole version-change transaction and wedge
         // the DB at its old version (every later open re-fails).
-        const tx = request.transaction;
         if (!tx.objectStoreNames.contains(PARTS)) tx.createObjectStore(PARTS, { keyPath: 'key' });
         if (!tx.objectStoreNames.contains(SLICES)) tx.createObjectStore(SLICES, { keyPath: 'key' });
         if (!tx.objectStoreNames.contains(SESSIONS)) tx.createObjectStore(SESSIONS, { keyPath: 'noteId' });
         if (!tx.objectStoreNames.contains(JOBS)) tx.createObjectStore(JOBS, { keyPath: 'jobId' });
       };
       request.onsuccess = () => {
+        openFailure = { count: 0, nextTry: 0 };
+        // On a normal file the storage note clears on success. On a switched
+        // file (generation > 1, sticky in localStorage) the note stays: it is
+        // still true that the previous storage is not in use.
+        if (generation === 1) { degraded = false; degradedNotice = ''; }
         const database = request.result;
         // A future build may open this DB at a higher version from another
         // tab: close this connection so that upgrade is never blocked, and
@@ -77,7 +158,7 @@
         database.onversionchange = () => { opening = null; try { database.close(); } catch (e) {} };
         resolve(database);
       };
-      request.onerror = () => { opening = null; reject(request.error || new Error('Journal could not be opened')); };
+      request.onerror = () => { opening = null; noteOpenFailure(); reject(request.error || new Error('Journal could not be opened')); };
       request.onblocked = () => { /* an old tab still holds v1; the open resolves once it goes */ };
     }).catch(error => { opening = null; throw error; });
     return opening;
@@ -357,9 +438,15 @@
     return { blob: new Blob([bytes], { type: mime }), mime, source: `slices-${report.mode}`, report };
   }
 
+  /** What the UI should know without digging: which file is in use and
+   *  whether the storage is degraded (and what to tell the user). */
+  function state() {
+    return { file: dbFileName(), generation, degraded, notice: degradedNotice, retries: openFailure.count };
+  }
+
   return {
     DB_NAME, DB_VERSION, PARTS, SLICES, SESSIONS, JOBS,
-    db, run,
+    db, run, state,
     partKey, savePart, getPartRow, getAllParts, forgetParts,
     sliceKey, commitSlice, discardSlices, slicesForSlot, listSlots, sliceExtent,
     getSession, listSessions, updateSession, removeSession,

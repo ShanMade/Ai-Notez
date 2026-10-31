@@ -810,6 +810,11 @@ Output only the transcript.`;
     function recStatusLine(failedCount) {
       const parts = [];
       if (failedCount) parts.push(`${failedCount} part${failedCount === 1 ? '' : 's'} waiting${navigator.onLine ? ', they send by themselves' : ' · offline'}`);
+      // Durable storage degrades visibly: when the journal cannot open its
+      // database the UI says so, instead of the console being the only place
+      // to see it.
+      const jstate = (typeof NzRecJournal !== 'undefined' && typeof NzRecJournal.state === 'function') ? NzRecJournal.state() : null;
+      if (jstate && jstate.degraded) parts.push(jstate.notice);
       if (REC.notice) parts.push(REC.notice);
       if (!parts.length) return '';
       const send = failedCount && navigator.onLine ? '<button type="button" class="ai-action" data-rec="retry">Send now</button>' : '';
@@ -1291,7 +1296,10 @@ Output only the transcript.`;
             // durable rec-audio jobs make sure the cloud has its copy.
             void recCloseDurableSession();
           }
-          REC.notice = 'Every part is transcribed.';
+          // Parts join the note one at a time, so "every part is transcribed"
+          // is only true once the queue has actually worked through.
+          const pendingParts = REC.expectedParts ? Math.max(0, REC.expectedParts - REC.processed) : 0;
+          REC.notice = pendingParts ? `${pendingParts} part${pendingParts === 1 ? '' : 's'} still being transcribed` : 'Every part is transcribed.';
         }
       }).finally(() => { if (REC.flushing === run) REC.flushing = null; updateRecLive(); });
       REC.flushing = REC.queue = run;
@@ -1391,6 +1399,7 @@ Output only the transcript.`;
         }
       } catch (error) { console.warn('Slice sweep:', error); }
     }
+    let recSliceWarnAt = 0;
     function startPart() {
       const recorder = new MediaRecorder(REC.stream, { mimeType: REC.mime, audioBitsPerSecond: 32000 });
       const index = REC.segIdx++;
@@ -1413,7 +1422,13 @@ Output only the transcript.`;
         chunks.push(event.data);
         const seq = sliceSeq++;
         NzRecJournal.commitSlice({ noteId, slot: index, seq, blob: event.data, mime, at: Date.now() })
-          .catch(error => console.warn('Slice commit failed (kept in memory only):', error));
+          .catch(error => {
+            // While storage is broken this fires for every ~1 s slice with
+            // the same message — one warning per 30 s is enough.
+            if (Date.now() - recSliceWarnAt < 30000) return;
+            recSliceWarnAt = Date.now();
+            console.warn('Slice commit failed (kept in memory only):', error);
+          });
       };
       recorder.onstop = () => { const blob = new Blob(chunks, { type: mime }); enqueuePart(blob, index); };
       recorder.start(1000);
