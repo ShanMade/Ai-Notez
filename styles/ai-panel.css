@@ -372,3 +372,17 @@ html[data-theme] #nz-ai .nzai-follow-q:hover { border-color: var(--nzc-acc); }
 #note-connections .nzc-row.editing .nzc-edit { display: block; }
 #note-connections .nzc-muted { font-size: 12px; color: var(--muted); }
 mark.nzc-passage { background: color-mix(in srgb, var(--nzc-acc) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+
+/* Settings: the body scrolls so the whole panel can be reached on short screens. */
+#nz-ai .nzai-body.nzai-settings-body { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+
+/* Home: the sidebar shows only the folders section. Workspace navigation,
+   the sync card and the profile are hidden here; the folders stay. */
+.app-shell.home-sidebar .sidebar > .space-label,
+.app-shell.home-sidebar .sidebar > .new-note-side,
+.app-shell.home-sidebar .sidebar > .nav-section,
+.app-shell.home-sidebar .sidebar > .storage-card,
+.app-shell.home-sidebar .sidebar > .sidebar-profile { display: none !important; }
+
+/* Long folder lists: the sidebar scrolls, and a scrollbar gutter stays reserved so it does not shift the layout. */
+.app-shell .sidebar { overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
