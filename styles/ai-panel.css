@@ -383,3 +383,6 @@ mark.nzc-passage { background: color-mix(in srgb, var(--nzc-acc) 28%, transparen
 .app-shell.home-sidebar .sidebar > .nav-section,
 .app-shell.home-sidebar .sidebar > .storage-card,
 .app-shell.home-sidebar .sidebar > .sidebar-profile { display: none !important; }
+
+/* Long folder lists: the sidebar scrolls, and a scrollbar gutter stays reserved so it does not shift the layout. */
+.app-shell .sidebar { overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
