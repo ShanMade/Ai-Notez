@@ -296,7 +296,6 @@ function noteRowMarkup(note, dateMode = 'updated') {
     }
     function renderEverything() {
       if (searchRenderTimer) { clearTimeout(searchRenderTimer); searchRenderTimer = 0; }
-      $('#app-shell')?.classList.toggle('home-sidebar', currentPage === 'home');
       if (!$('#note-view').classList.contains('hidden') && readerRenderedId) saveReaderPositionNow(readerRenderedId);
       if (currentPage !== 'editor') removeHtmlExtractionProbe();
       let current = notes.find(note => note.id === activeId);
