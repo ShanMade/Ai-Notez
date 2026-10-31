@@ -455,9 +455,10 @@ def test_the_transcription_flag_reaches_the_provider(monkeypatch):
 def test_the_transcription_chain_is_the_two_flash_lite_audio_models():
     from app.config import settings
 
-    # Voice-to-Note audio: 3.1 Flash-Lite first, 3.5 Flash-Lite when it is out of
-    # quota. The browser moves the part between them; the backend runs one model.
-    assert settings.gemini_audio_models == ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite")
+    # Voice-to-Note (audio and its text) runs on Gemini 3.5 Flash-Lite only: no
+    # other Gemini model, no other provider. The backend runs that one model.
+    assert settings.gemini_audio_models == ("gemini-3.5-flash-lite",)
+    assert settings.voice_model == "gemini-3.5-flash-lite"
     assert settings.gemini_transcribe_fallbacks == ()
     assert set(settings.gemini_audio_models) <= set(settings.gemini_transcribe_models)
 
