@@ -168,6 +168,7 @@
       priority: ['high', 'medium', 'low'].includes(note?.priority) ? note.priority : '',
       bookmarks: Array.isArray(note?.bookmarks) ? note.bookmarks.slice(0, 30).map(item => ({ id: String(item?.id || uid()), label: String(item?.label || 'Bookmark').slice(0, 80), pos: Math.max(0, Math.min(1, Number(item?.pos) || 0)), t: Number(item?.t) || 0 })) : [],
       kind: ['note','markdown','html','text','pdf','image','audio','video','file'].includes(note?.kind) ? note.kind : 'note',
+      noteType: ['lecture','meeting','research','personal'].includes(note?.noteType) ? note.noteType : '',
       body: String(note?.body || ''),
       bodyPreviewOnly: Boolean(note?.bodyPreviewOnly),
       htmlSource: String(note?.htmlSource || ''),
@@ -1405,6 +1406,7 @@
       reviewClockId = window.setInterval(refreshReviewIndicators, 60_000);
     }
     async function persistNote(note) {
+      window.nzNoteChanged?.(note); // refreshes the connections panel on every save
       if (noteSaving) return; // Prevent duplicate saves
       noteSaving = true;
       if (currentSession?.mode === 'demo') { localNotesWrite(); noteSaving = false; return; }

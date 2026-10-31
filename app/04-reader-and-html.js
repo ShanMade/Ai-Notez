@@ -943,7 +943,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
     }
     // ================= NotezAi docked panel with chat history =================
     const NZAI_CHAT_KEY = () => 'notez-ai-chats-v2-' + (currentSession?.mode === 'cloud' ? currentSession.user.uid : 'demo');
-    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, rendering: false, sourcesOpen: new Set() };
+    const nzai = { open: false, view: 'chat', chatId: '', scope: 'note', noteId: '', folder: '', noteIds: [], busy: false, tab: 'gemini', notice: '', quiz: '', moreOpen: false, rendering: false, sourcesOpen: new Set() };
     function nzaiReadChats() { try { const list = JSON.parse(localStorage.getItem(NZAI_CHAT_KEY())); return Array.isArray(list) ? list : []; } catch { return []; } }
     function nzaiWriteChats(list) {
       const trimmed = list.slice(0, 50).map(chat => ({ ...chat, messages: (chat.messages || []).slice(-100) }));
@@ -980,29 +980,22 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         scopeButton.title = scoped ? 'Change the note this chat reads' : 'Choose what this chat reads: all notes, a folder or one note';
         scopeButton.setAttribute('aria-label', scopeButton.title);
         const name = panel.querySelector('#dock-scope-name');
-        if (name) name.textContent = scoped ? note.title : 'All notes';
+        if (name) name.textContent = nzaiScopeLabel();
         const swap = panel.querySelector('#dock-scope-swap');
-        if (swap) swap.textContent = scoped ? 'This note' : 'Folders';
+        if (swap) swap.textContent = { note: 'This note', folder: 'Folder', selected: 'Selected', library: 'Folders' }[nzai.scope] || 'Folders';
       }
       const lead = panel.querySelector('#dock-lead');
       if (lead) { const home = screen === 'chat'; lead.dataset.nzai = home ? 'close' : 'back'; lead.classList.toggle('is-back', !home); lead.setAttribute('aria-label', home ? 'Close panel' : 'Back to chat'); lead.title = home ? 'Close (Esc)' : 'Back to chat'; }
       panel.querySelectorAll('[data-nav]').forEach(btn => { const on = btn.dataset.nav === screen; btn.classList.toggle('on', on); if (on) btn.setAttribute('aria-current', 'page'); else btn.removeAttribute('aria-current'); });
       panel.dataset.screen = screen;
       const sheetScope = panel.querySelector('#nzai-sheet-scope');
-      if (sheetScope) sheetScope.textContent = nzai.scope === 'note' && nzaiScopeNote() ? 'This note' : 'All notes';
+      if (sheetScope) sheetScope.textContent = nzaiScopeLabel();
       const sub = panel.querySelector('#dock-sub');
       if (sub) sub.textContent = screen === 'voice' ? 'Voice notes' : screen === 'history' ? 'Chat history' : screen === 'settings' ? 'Settings' : aiUsesManaged() ? 'Managed AI' : aiReady() ? `${AI_PROVIDERS[aiActive()]?.label || 'AI'} · your key` : 'Setup needed';
     }
     // The phone layout keeps three controls in the bar and moves the rest into a
     // sheet that rises from the bottom edge, where a thumb already is. Nothing is
     // removed on a phone: every action is one tap away, the same handlers run.
-    // Recent voice notes, listed in the More menu so they can be reopened in one tap.
-    function nzaiSheetRecent() {
-      const box = $('#nzai-sheet-recent'); if (!box) return;
-      const voices = (typeof recSessionList === 'function' ? recSessionList() : []).slice(0, 3);
-      const voiceHtml = voices.length ? `<p class="nzai-sheet-grp">Recent voice notes</p><div class="nzai-sheet-rows">${voices.map(item => `<button type="button" class="nzai-sheet-row" data-nzai="open-voice" data-id="${esc(item.note.id)}"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>${esc(item.title)}</b><small>${esc([item.day, item.time].filter(Boolean).join(' · '))}</small></button>`).join('')}<button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>View all voice notes</b><small>Record and transcribe</small></button></div>` : '';
-      box.innerHTML = voiceHtml;
-    }
     function nzaiSheet(open) {
       const panel = $('#nz-ai'); if (!panel) return;
       const sheet = $('#nzai-sheet', panel), scrim = $('#nzai-scrim', panel), more = panel.querySelector('[data-nzai="sheet"]');
@@ -1011,7 +1004,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (scrim) scrim.hidden = !on;
       panel.dataset.sheet = on ? 'true' : 'false';
       if (more) more.setAttribute('aria-expanded', String(on));
-      if (on) nzaiSheetRecent();
       if (on) { const first = sheet && sheet.querySelector('.nzai-sheet-row'); if (first) setTimeout(() => first.focus({ preventScroll: true }), 40); }
     }
     // The sheet is a popover, not a modal: a click anywhere outside it (or on
@@ -1066,7 +1058,6 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
             <button type="button" class="nzai-sheet-row" data-nzai="history" data-nav="history"><span class="ic" aria-hidden="true">${nzaiSolidIcon('history')}</span><b>History</b><small>Saved chats on this device</small></button>
             <button type="button" class="nzai-sheet-row" data-dock="voice" data-nav="voice"><span class="ic" aria-hidden="true">${nzaiSolidIcon('mic')}</span><b>Voice notes</b><small>Record and transcribe</small></button>
           </div>
-          <div id="nzai-sheet-recent"></div>
           <p class="nzai-sheet-grp">Answer</p>
           <div class="nzai-sheet-rows">
             <button type="button" class="nzai-sheet-row" data-nzai="scope-toggle"><span class="ic" aria-hidden="true">${nzaiSolidIcon('layers')}</span><b>Answer scope</b><small id="nzai-sheet-scope">This note</small></button>
@@ -1460,7 +1451,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         // distinguishes the many identically titled notes on hover.
         const snippet = String(src.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 120);
         const hint = snippet ? `${label} · ${snippet}` : label;
-        return `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" title="Open: ${esc(hint)}" aria-label="Open source note: ${esc(label)}"><span class="ai-src-n" aria-hidden="true">${Number(src.n) || ''}</span><span class="ai-src-t">${esc(title)}</span></button>`;
+        return `<button type="button" class="ai-src" data-nzai="open-source" data-id="${esc(src.id)}" data-passage="${esc(String(src.passage || '').slice(0, 300))}" title="Open: ${esc(hint)}" aria-label="Open source note: ${esc(label)}"><span class="ai-src-n" aria-hidden="true">${Number(src.n) || ''}</span><span class="ai-src-t">${esc(title)}</span></button>`;
       }).join('');
       const toggle = list.length > NZAI_SOURCE_PREVIEW
         ? `<button type="button" class="ai-sources-toggle" data-nzai="toggle-sources" data-i="${index}" aria-expanded="${open}" aria-controls="${gridId}">${open ? 'Show less' : `Show all ${list.length}`}</button>`
@@ -1498,7 +1489,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       const shown = revealing ? msg.text.slice(0, nzai.reveal.pos) : msg.text;
       const tools = msg.text && !msg.error && !revealing ? `<div class="ai-actions-row"><button type="button" class="ai-action ai-ic" data-nzai="copy" data-i="${index}" aria-label="Copy answer" title="Copy"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="save" data-i="${index}" aria-label="Save answer as note" title="Save as note"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M12 11v6M9 14h6"/></g></svg></button><button type="button" class="ai-action ai-ic" data-nzai="regen" data-i="${index}" aria-label="Regenerate answer" title="Regenerate"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></g></svg></button><span class="ai-fb" role="group" aria-label="Rate this answer"><button type="button" class="ai-action ai-ic${msg.fb === 'up' ? ' on' : ''}" data-nzai="fb" data-fb="up" data-i="${index}" aria-pressed="${msg.fb === 'up'}" aria-label="Helpful" title="Helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H3V10Z"/><path d="M7 10l4-8a3 3 0 0 1 3 3v4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 18.6 21H7"/></g></svg></button><button type="button" class="ai-action ai-ic${msg.fb === 'down' ? ' on' : ''}" data-nzai="fb" data-fb="down" data-i="${index}" aria-pressed="${msg.fb === 'down'}" aria-label="Not helpful" title="Not helpful"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h4v11Z"/><path d="M17 14l-4 8a3 3 0 0 1-3-3v-4H4a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 5.4 3H17"/></g></svg></button></span>${note && nzai.scope === 'note' ? `<button type="button" class="ai-action ai-txt" data-nzai="replace" data-i="${index}" title="Replace this note's text with this answer">Use as note text</button>` : ''}</div>` : '';
       const retryBtn = msg.error ? `<div class="ai-actions-row"><button type="button" class="ai-action primary" data-nzai="retry" data-i="${index}" aria-label="Retry this request">Retry</button></div>` : '';
-      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><span class="ai-avatar" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 14) : ''}</span><div class="ai-body"><div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${nzaiTaskCard(msg, index)}${folderAction}${tools}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
+      return `<div class="ai-msg ai${msg.error ? ' error' : ''}" data-msg="${index}"><span class="ai-avatar" aria-hidden="true">${window.nzIcon ? window.nzIcon('spark', 14) : ''}</span><div class="ai-body">${nzaiProvenanceHtml(msg)}<div class="ai-md" data-i="${index}" data-note-grounded="${(msg.sources || []).length > 0 ? 'true' : 'false'}" role="article">${nzaiCodeBlocks(nzaiFormat(shown))}</div>${revealing ? '<span class="ai-caret" aria-hidden="true"></span>' : ''}${sources}${nzaiTaskCard(msg, index)}${folderAction}${tools}${nzaiFollowUpsHtml(msg)}${retryBtn}${msg.model && !revealing ? `<div class="ai-model">${esc(msg.model)}</div>` : ''}</div></div>`;
     }
     // Typing reveal: new answers appear word by word; Stop shows the full text at once.
     function nzaiStartReveal() {
@@ -1593,6 +1584,82 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // follow-ups can be resolved against the previous user message.
       return 'Earlier in this chat:\n' + earlier.map(msg => `${msg.role === 'user' ? 'USER' : 'ASSISTANT'}: ${String(msg.text).slice(0, 600)}`).join('\n') + '\n\n';
     }
+    // ---- Answer scope: note, folder, selected notes, or the whole library ----
+    const nzaiInFolder = (path, note) => {
+      const own = String(note.folderPath || '').trim();
+      return path ? own === path || own.startsWith(path + '/') : own === '';
+    };
+    function nzaiScopedNotes() {
+      if (nzai.scope === 'folder') return notes.filter(note => nzaiInFolder(nzai.folder, note));
+      if (nzai.scope === 'selected') return nzai.noteIds.map(id => notes.find(note => note.id === id)).filter(Boolean);
+      return null;
+    }
+    function nzaiScopeLabel() {
+      if (nzai.scope === 'note') return nzaiScopeNote()?.title || 'This note';
+      if (nzai.scope === 'folder') return `Folder · ${nzai.folder || 'Unfiled'}`;
+      if (nzai.scope === 'selected') { const count = nzaiScopedNotes().length; return `${count} selected note${count === 1 ? '' : 's'}`; }
+      return 'All notes';
+    }
+    // Keyword ranking over a given list of notes (the scoped version of nzaiRetrieve).
+    function nzaiRankIn(question, list, k = 5) {
+      const terms = [...new Set(nzWords(question).filter(word => word.length > 2))];
+      if (!terms.length) return list.slice(0, k);
+      return list.map(note => {
+        const title = (note.title || '').toLowerCase(), body = (note.body || '').toLowerCase(), tags = (note.tags || []).join(' ').toLowerCase();
+        let score = 0;
+        terms.forEach(term => { if (title.includes(term)) score += 3; if (tags.includes(term)) score += 2; score += Math.min(body.split(term).length - 1, 10); });
+        return { note, score };
+      }).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, k).map(item => item.note);
+    }
+    // Context for a folder or selected-notes scope. Only notes inside the scope are sent.
+    // Small scopes send every note in full; larger ones send the most relevant passages.
+    async function nzaiScopedContext(question, list) {
+      const budget = aiActive() === 'groq' ? 9000 : 40000;
+      const head = "NUMBERED NOTES FROM THE USER'S LIBRARY:\n";
+      const readable = [];
+      for (const note of list) {
+        const text = String(await notesTextForAi(note) || '').trim();
+        if (text) readable.push({ note, text });
+      }
+      if (!readable.length) return { context: `${head}(None of the notes in this scope has readable text.)`, sources: [] };
+      let picked = readable.map(item => ({ note: item.note, text: item.text }));
+      let passages = false;
+      if (picked.reduce((sum, item) => sum + item.text.length, 0) > budget) {
+        passages = true;
+        let ranked = [];
+        if (nzai.scope === 'folder' && aiBackendSession()) {
+          try {
+            const result = await aiBackendRequest('/v1/index/search/hybrid', { query: question, limit: 6, scope: 'folder', folder_path: nzai.folder }, 'POST', undefined, true);
+            const byId = new Map(picked.map(item => [item.note.id, item.note]));
+            ranked = (result.results || [])
+              .map(hit => ({ note: byId.get(String(hit.id)), text: String(hit.text || '') }))
+              .filter(hit => hit.note && hit.text);
+          } catch (error) { console.warn('Scoped semantic search unavailable; ranking locally.', error); }
+        }
+        if (!ranked.length) {
+          ranked = nzaiRankIn(question, picked.map(item => item.note), 6).map(note => picked.find(item => item.note.id === note.id));
+        }
+        picked = ranked.slice(0, 6);
+      }
+      const per = Math.max(600, Math.floor(budget / picked.length));
+      const sources = picked.map((item, index) => ({
+        n: index + 1, id: item.note.id, title: item.note.title || 'Untitled note', folderPath: item.note.folderPath || '',
+        passage: passages ? item.text.slice(0, 300) : '', text: item.text.slice(0, 600),
+      }));
+      const blocks = picked.map((item, index) => `[${index + 1}] "${item.note.title || 'Untitled note'}" (${item.note.folderPath || 'General'})\n<note>\n${item.text.slice(0, per)}\n</note>`);
+      return { context: head + blocks.join('\n\n'), sources };
+    }
+    // The grounding label above an answer. Sourced and unsourced answers never share a label.
+    function nzaiProvenanceHtml(msg) {
+      if (!msg.provenance || msg.error) return '';
+      const hint = msg.provenance.kind === 'general' ? 'Written by the AI without your notes.' : 'Sources are listed below the answer.';
+      return `<div class="nzai-prov ${esc(msg.provenance.kind)}" title="${esc(hint)}"><span class="nzai-prov-dot" aria-hidden="true"></span>${esc(msg.provenance.label)}</div>`;
+    }
+    function nzaiFollowUpsHtml(msg) {
+      const items = Array.isArray(msg.followUps) ? msg.followUps : [];
+      if (!items.length || msg.error) return '';
+      return `<div class="nzai-follow" role="group" aria-label="Suggested follow-up questions"><span class="nzai-follow-h">Suggested follow-ups · from your notes</span>${items.map(q => `<button type="button" class="nzai-follow-q" data-nzai="followup" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`;
+    }
     function nzaiRetrieve(question, k = 5) {
       const terms = [...new Set(nzWords(question).filter(word => word.length > 2))];
       if (!terms.length) return [];
@@ -1674,8 +1741,17 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         sources = inventory.map((item, index) => ({ n: index + 1, id: String(item.id || ''), title: compact(item.title || 'Untitled note').slice(0, 180), folderPath: compact(item.folderPath || '').slice(0, 120) })).filter(item => item.id);
       }
 
+      // Folder and selected-note scopes: only notes inside the scope are sent to the model.
+      let scopedHandled = false;
+      const scopedList = !task && !wantsInventory ? nzaiScopedNotes() : null;
+      if (scopedList) {
+        scopedHandled = true;
+        const scoped = await nzaiScopedContext(question, scopedList);
+        context = scoped.context;
+        sources = scoped.sources;
+      }
       // Topic questions can use semantic retrieval; inventory questions must not.
-      if (!wantsInventory && aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
+      if (!wantsInventory && !scopedHandled && aiBackendSession() && typeof window.retrieveRelevantContext === 'function') {
         try {
           const retrievalResult = await window.retrieveRelevantContext(question, { 
             limit: 5,
@@ -1708,7 +1784,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       // (The old `wantsLibrary` guard skipped retrieval exactly for questions
       // phrased "from my notes" / "across all notes", so BYOK chats answered
       // without any note context.)
-      if ((!found.length || !note) && !wantsInventory) {
+      if ((!found.length || !note) && !wantsInventory && !scopedHandled) {
         if (note) {
           const body = (await notesTextForAi(note)).trim().slice(0, aiActive() === 'groq' ? 9000 : 40000);
           context = body ? `NOTE "${note.title}":\n<note>\n${body}\n</note>` : 'This note has no text the assistant can read. Scanned PDFs and images have no text layer. Try a text PDF, a .pptx, or type the content into the note.';
@@ -1731,12 +1807,16 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         }
       }
       
+      // A note-scoped answer cites the note it read.
+      if (note && !scopedHandled && !sources.length && context.startsWith('NOTE "')) {
+        sources = [{ n: 1, id: note.id, title: note.title || 'Untitled note', folderPath: note.folderPath || '', passage: '', text: '' }];
+      }
       // Build context from found sources
       if (!context && found.length) {
-        sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title }));
+        sources = found.map((item, index) => ({ n: index + 1, id: item.id, title: item.title, folderPath: item.folderPath || '', text: String(item.body || '').slice(0, 600) }));
         context = 'NUMBERED NOTES FROM THE USER\'S LIBRARY:\n' + found.map((item, index) => `[${index + 1}] "${item.title}" (${item.folderPath || 'General'})\n<note>\n${(item.body || '').slice(0, aiActive() === 'groq' ? 2500 : 6000)}\n</note>`).join('\n\n');
       }
-      const hasNotes = note || found.length > 0 || wantsInventory;
+      const hasNotes = note || found.length > 0 || wantsInventory || scopedHandled;
       const rules = wantsInventory
         ? 'Answer library inventory questions from the provided LIBRARY INVENTORY metadata. Use its exact count, list only the titles shown, and do not infer note contents from titles. If the backend provides a fresher authoritative inventory, prefer it.'
         : note
@@ -1755,7 +1835,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       nzaiUpdateChat(chat => {
         if (editAt != null && editAt < chat.messages.length) chat.messages.splice(editAt);
         if (!chat.messages.length) chat.title = (task ? AI_TASKS[task]?.label || 'Quick action' : question).slice(0, 60);
-        chat.scope = nzai.scope; chat.noteId = note ? note.id : '';
+        chat.scope = nzai.scope; chat.noteId = note ? note.id : ''; chat.folder = nzai.folder; chat.noteIds = [...nzai.noteIds];
         chat.messages.push({ role: 'user', text: task ? (AI_TASKS[task]?.label || 'Quick action') + (note ? ` · ${note.title}` : '') : question, t: Date.now() });
       });
       nzaiRender();
@@ -1797,6 +1877,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
           suggestions,
           model: `${AI_PROVIDERS[answer.provider]?.label || ''} \u00b7 ${answer.model}`,
           sources,
+          provenance: NzConn.provenance(bodyText, sources),
+          followUps: !taskDef && !wantsInventory ? NzConn.followUps(question, sources, nzai.scope === 'folder' ? nzai.folder : '') : [],
           replace: Boolean(taskDef?.replace),
           t: Date.now(),
           fresh: true,
@@ -1899,19 +1981,35 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       const folder = nzai.scopeMenu.folder;
       const head = (title, back) => `<div class="nzai-scope-head">${back ? `<button type="button" class="nzai-scope-back" data-nzai="scope-back" aria-label="Back to folders">${nzaiSolidIcon('arrowLeft')}</button>` : ''}<b>${esc(title)}</b><button type="button" class="nzai-scope-close" data-nzai="scope-close" aria-label="Close">×</button></div>`;
+      const count = list => `${list.length} note${list.length === 1 ? '' : 's'}`;
+      if (nzai.scopeMenu.select) {
+        const picked = nzai.scopeMenu.picked || [];
+        const all = [...notes].sort((a, b) => String(a.folderPath || '').localeCompare(String(b.folderPath || '')) || String(a.title || '').localeCompare(String(b.title || '')));
+        menu.innerHTML = head('Select notes', true) +
+          (all.length ? all.map(item => {
+            const on = picked.includes(item.id);
+            return `<button type="button" class="nzai-scope-row nzai-check${on ? ' on' : ''}" data-nzai="scope-toggle-note" data-id="${esc(item.id)}" aria-pressed="${on}"><span class="nzai-box" aria-hidden="true">${on ? '✓' : ''}</span><b>${esc(item.title || 'Untitled note')}</b><small>${esc(item.folderPath || 'General')}</small></button>`;
+          }).join('') : '<p class="nzai-scope-empty">No notes yet.</p>') +
+          `<div class="nzai-scope-foot"><button type="button" class="ai-action primary" data-nzai="scope-use-selected" ${picked.length ? '' : 'disabled'}>${picked.length ? `Use ${count(picked)}` : 'Pick notes to use'}</button></div>`;
+        return;
+      }
       if (folder === null) {
         const counts = new Map();
         notes.forEach(item => { const key = String(item.folderPath || '').trim(); counts.set(key, (counts.get(key) || 0) + 1); });
         const folders = [...counts.entries()].sort((a, b) => (a[0] || '\uffff').localeCompare(b[0] || '\uffff'));
-        const isLibrary = nzai.scope !== 'note';
+        const isLibrary = nzai.scope === 'library';
         menu.innerHTML = head('Answer from', false) +
-          `<button type="button" class="nzai-scope-row${isLibrary ? ' on' : ''}" data-nzai="scope-library"><b>All notes</b><small>${notes.length} note${notes.length === 1 ? '' : 's'}</small></button>` +
-          (folders.length ? folders.map(([path, count]) => `<button type="button" class="nzai-scope-row" data-nzai="scope-folder" data-path="${esc(path)}"><b>${esc(path || 'Unfiled')}</b><small>${count} note${count === 1 ? '' : 's'}</small>${nzaiIcon('chevronRight', 14)}</button>`).join('') : '<p class="nzai-scope-empty">No folders yet.</p>');
+          `<button type="button" class="nzai-scope-row${isLibrary ? ' on' : ''}" data-nzai="scope-library"><b>All notes</b><small>${count(notes)}</small></button>` +
+          `<button type="button" class="nzai-scope-row" data-nzai="scope-pick"><b>Select notes…</b><small>Choose several notes</small></button>` +
+          (folders.length ? folders.map(([path, n]) => `<button type="button" class="nzai-scope-row${nzai.scope === 'folder' && nzai.folder === path ? ' on' : ''}" data-nzai="scope-folder" data-path="${esc(path)}"><b>${esc(path || 'Unfiled')}</b><small>${n} note${n === 1 ? '' : 's'}</small>${nzaiIcon('chevronRight', 14)}</button>`).join('') : '<p class="nzai-scope-empty">No folders yet.</p>');
       } else {
-        const list = notes.filter(item => String(item.folderPath || '').trim() === folder).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const direct = notes.filter(item => String(item.folderPath || '').trim() === folder).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const total = notes.filter(item => nzaiInFolder(folder, item)).length;
         const current = nzai.scope === 'note' ? nzai.noteId : '';
+        const folderOn = nzai.scope === 'folder' && nzai.folder === folder;
         menu.innerHTML = head(folder || 'Unfiled', true) +
-          (list.length ? list.map(item => `<button type="button" class="nzai-scope-row${item.id === current ? ' on' : ''}" data-nzai="scope-note" data-id="${esc(item.id)}"><b>${esc(item.title || 'Untitled note')}</b><small>${esc(nzaiDayLabel(item.updatedAt || Date.now()))}</small></button>`).join('') : '<p class="nzai-scope-empty">No notes in this folder.</p>');
+          `<button type="button" class="nzai-scope-row${folderOn ? ' on' : ''}" data-nzai="scope-folder-use" data-path="${esc(folder)}"><b>Use whole folder</b><small>${count(total)}, including subfolders</small></button>` +
+          (direct.length ? direct.map(item => `<button type="button" class="nzai-scope-row${item.id === current ? ' on' : ''}" data-nzai="scope-note" data-id="${esc(item.id)}"><b>${esc(item.title || 'Untitled note')}</b><small>${esc(nzaiDayLabel(item.updatedAt || Date.now()))}</small></button>`).join('') : '<p class="nzai-scope-empty">No notes directly in this folder.</p>');
       }
     }
     async function nzaiClick(event) {
@@ -1932,6 +2030,18 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       if (act === 'scope-back') { nzai.scopeMenu = { folder: null }; return nzaiScopeMenuRender(); }
       if (act === 'scope-library') { nzai.scope = 'library'; nzaiScopeMenuClose(); return nzaiRender(); }
       if (act === 'scope-folder') { nzai.scopeMenu = { folder: el.dataset.path || '' }; return nzaiScopeMenuRender(); }
+      if (act === 'scope-folder-use') { nzai.scope = 'folder'; nzai.folder = el.dataset.path || ''; nzai.noteId = ''; nzaiScopeMenuClose(); return nzaiRender(); }
+      if (act === 'scope-pick') { nzai.scopeMenu = { folder: null, select: true, picked: nzai.scope === 'selected' ? [...nzai.noteIds] : [] }; return nzaiScopeMenuRender(); }
+      if (act === 'scope-toggle-note') {
+        const picked = nzai.scopeMenu?.picked; if (!picked) return;
+        const at = picked.indexOf(el.dataset.id); if (at >= 0) picked.splice(at, 1); else picked.push(el.dataset.id);
+        return nzaiScopeMenuRender();
+      }
+      if (act === 'scope-use-selected') {
+        const picked = nzai.scopeMenu?.picked || []; if (!picked.length) return;
+        nzai.scope = 'selected'; nzai.noteIds = [...picked]; nzaiScopeMenuClose(); return nzaiRender();
+      }
+      if (act === 'followup') { nzai.view = 'chat'; return nzaiAsk(el.dataset.q || ''); }
       if (act === 'scope-note') {
         const note = notes.find(item => item.id === el.dataset.id); if (!note) return;
         nzai.scope = 'note'; nzai.noteId = note.id;
@@ -1966,8 +2076,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
       }
       if (act === 'quiz') { const note = nzaiScopeNote(); if (!note) return; nzai.quiz = note.id; return nzaiAsk('Start the quiz. Ask me the first question.'); }
       if (act === 'stop-quiz') { nzai.quiz = ''; nzai.notice = 'Quiz stopped.'; return nzaiRender(); }
-      if (act === 'open-voice') { nzaiSheet(false); nzaiClose(); return openNote(el.dataset.id); }
-      if (act === 'open-chat') { nzaiSheet(false); nzai.chatId = el.dataset.id; const chat = nzaiChat(); if (chat) { nzai.scope = chat.scope || 'library'; nzai.noteId = chat.noteId || nzai.noteId; } nzai.view = 'chat'; return nzaiRender(); }
+      if (act === 'open-chat') { nzaiSheet(false); nzai.chatId = el.dataset.id; const chat = nzaiChat(); if (chat) { nzai.scope = chat.scope || 'library'; nzai.folder = chat.folder || ''; nzai.noteIds = Array.isArray(chat.noteIds) ? [...chat.noteIds] : []; nzai.noteId = chat.noteId || nzai.noteId; } nzai.view = 'chat'; return nzaiRender(); }
       if (act === 'delete-chat') { if (!(await uiConfirm({ title: 'Delete this chat?', message: 'The conversation is removed from this device.', confirmLabel: 'Delete chat', danger: true }))) return; nzaiWriteChats(nzaiReadChats().filter(chat => chat.id !== el.dataset.id)); if (nzai.chatId === el.dataset.id) nzai.chatId = ''; return nzaiRender(); }
       if (act === 'toggle-sources') {
         const box = el.closest('.ai-sources'); if (!box) return;
@@ -1979,7 +2088,12 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         el.textContent = open ? 'Show less' : `Show all ${box.querySelectorAll('.ai-src').length}`;
         return;
       }
-      if (act === 'open-source') { const target = notes.find(note => note.id === el.dataset.id); if (target) openNote(target.id); return; }
+      if (act === 'open-source') {
+        const target = notes.find(note => note.id === el.dataset.id); if (!target) return;
+        window.nzPendingPassage = { id: target.id, text: el.dataset.passage || '' };
+        if (currentPage === 'reader' && activeId === target.id) { window.nzAfterNoteRender?.(target); return; }
+        openNote(target.id); return;
+      }
       if (act === 'tab') { nzai.tab = el.dataset.p; nzai.notice = ''; return nzaiRender(); }
       if (act === 'save-key') {
         const key = ($('#nzai-key')?.value || '').trim();
