@@ -377,5 +377,6 @@ mark.nzc-passage { background: color-mix(in srgb, var(--nzc-acc) 28%, transparen
 #nz-ai .nzai-body.nzai-settings-body { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 
 
-/* Long folder lists: the sidebar scrolls, and a scrollbar gutter stays reserved so it does not shift the layout. */
-.app-shell .sidebar { overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
+/* Long folder lists: the sidebar still scrolls (wheel, touch, keyboard) but its scrollbar is hidden. */
+.app-shell .sidebar { overflow-y: auto; scrollbar-width: none; }
+.app-shell .sidebar::-webkit-scrollbar { display: none; width: 0; height: 0; }
