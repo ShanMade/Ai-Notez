@@ -1554,6 +1554,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
 
     // The app version shown in NotezAi settings. Bump it with each release.
     const NOTEZ_VERSION = '1.9.0';
+    // Languages for Voice-to-Note. "original" writes the words as they are spoken.
+    const NZAI_LANGUAGES = [['original', 'Same as spoken'], ['en', 'English'], ['ur', 'Urdu'], ['hi', 'Hindi'], ['bn', 'Bengali'], ['ar', 'Arabic'], ['fa', 'Persian'], ['tr', 'Turkish'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['zh', 'Chinese']];
     function nzaiRenderSettings(body) {
       const managedAvailable = aiBackendConfigured();
       const byok = !managedAvailable || aiSourcePref() === 'byok';
@@ -1578,6 +1580,7 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         ${byok ? `<section class="nzai-group"><h4>Model</h4><div class="nzai-row-inline"><select class="nzai-field" id="nzai-model" aria-label="Model">${options}</select><button type="button" data-nzai="load-models">Load</button></div></section>` : ''}
         <section class="nzai-group"><h4>Writing</h4><label class="nzai-label">Style</label><select class="nzai-field" id="nzai-temp">${[['0.2', 'Precise'], ['0.4', 'Balanced'], ['0.8', 'Creative']].map(([v, l]) => `<option value="${v}" ${String(aiTemperature()) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
           ${byok ? `<label class="nzai-check"><input type="checkbox" id="nzai-autoswitch" ${aiStore.get('notez-ai-autoswitch', '1') === '1' ? 'checked' : ''}> Switch to other provider when rate limited</label>` : ''}</section>
+        <section class="nzai-group"><h4>Languages</h4><label class="nzai-label" for="nzai-lang-transcript">Transcript language</label><select class="nzai-field" id="nzai-lang-transcript">${NZAI_LANGUAGES.map(([v, l]) => `<option value="${v}" ${aiStore.get('notez-ai-transcript-lang', 'original') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><label class="nzai-label" for="nzai-lang-notes">Notes language</label><select class="nzai-field" id="nzai-lang-notes">${[['same', 'Same as transcript'], ...NZAI_LANGUAGES.filter(([v]) => v !== 'original')].map(([v, l]) => `<option value="${v}" ${aiStore.get('notez-ai-notes-lang', 'same') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select><small class="nzai-small">The transcript language sets what the words are written in. The notes language sets what the summary is written in.</small></section>
         <section class="nzai-group nzai-setfoot"><p class="nzai-small">Chat, note tools and Voice-to-Note all use the source chosen above.</p><p class="nzai-small" id="nzai-version">NotezAi version ${esc(NOTEZ_VERSION)}</p><button type="button" class="nzai-primary" data-nzai="save-model">Save settings</button><div class="nzai-notice" id="nzai-msg" role="status">${esc(nzai.notice)}</div></section>`;
 
     }
@@ -2149,6 +2152,8 @@ $('#focus-exit-button').addEventListener('click', toggleFocus);
         if (model) aiStore.set(`notez-ai-model-${nzai.tab}`, model); else aiStore.del(`notez-ai-model-${nzai.tab}`);
         aiStore.set('notez-ai-temp', $('#nzai-temp')?.value || '0.4');
         aiStore.set('notez-ai-autoswitch', $('#nzai-autoswitch')?.checked ? '1' : '0');
+        aiStore.set('notez-ai-transcript-lang', $('#nzai-lang-transcript')?.value || 'original');
+        aiStore.set('notez-ai-notes-lang', $('#nzai-lang-notes')?.value || 'same');
         nzai.notice = 'Settings saved.'; nzai.view = 'chat'; return nzaiRender();
       }
       if (act === 'copy') { const msg = nzaiChat()?.messages[Number(el.dataset.i)]; try { await navigator.clipboard.writeText(msg.text); toast('Answer copied to clipboard.'); } catch { toast('Your browser blocked clipboard access.', 'error'); } return; }
