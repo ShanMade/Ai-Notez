@@ -514,14 +514,25 @@ async function openWikiLink(title) {
     const recUnmark = line => String(line ?? '').replace(REC_BIDI_ANY, '');
     const recLeadMark = line => (String(line ?? '').match(REC_BIDI_HEAD) || [''])[0];
     // A model writing notes often puts a turn in a list item ("- Voice 1: …"),
-    // so a bullet is allowed in front of the label and kept.
-    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
+    // so a bullet is allowed in front of the label and kept. The free-form
+    // name alternative excludes [ and ]: a line that opens with a timestamp
+    // but no speaker ("[00:00] our personality…") must NOT parse "[00" as a
+    // label at the colon inside the timestamp — that read a real transcript
+    // as a speaker named "[00", and (via recHasLabels) also suppressed the
+    // label pass that would have fixed the line. No bracket-free name is
+    // harmed: real labels are words, never timestamp fragments.
+    const REC_LABEL_RE = /^\s*(?:[-*•–]\s+)?(?:\[([\d:]{3,12})\]\s*)?\**\s*((?:voice|speaker|person|spk)[\s_:-]*(?:[0-9\u0660-\u0669]{1,2}|[A-Za-z])|[^:\uFF1A\n\[\]]{1,40}?)\s*\**\s*(?:[:\uFF1A]\s*|\s+[-–—]\s+)(.*)$/i;
     function recSpeakerOf(line) {
       const match = String(recUnmark(line)).match(REC_LABEL_RE);
       if (!match) return null;
       const name = recLabelName(match[2]);
       const isVoice = /^Voice\s+\d+$/i.test(name);
       if (!name || name.length > 40) return null;   // any name the transcriber gives: Voice 2, Teacher, Student
+      // A name made only of (two or more) digits — "00" from "00:00 …",
+      // "12" from "12:34 …" — is a timestamp fragment the model left at the
+      // line start, never a speaker. (Numbered forms are already normalized
+      // to "Voice N" above, so real labels are unaffected.)
+      if (!isVoice && /^\d{2,}$/.test(recDigits(name))) return null;
       return { stamp: match[1] || '', name, text: match[3] };
     }
     // A learned name keeps its colour; "Voice 3" keeps its number.
