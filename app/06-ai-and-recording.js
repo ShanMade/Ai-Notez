@@ -1238,7 +1238,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         if (status === REC_STATUS.IDLE) return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording" ${REC.starting ? 'disabled aria-busy="true"' : ''}><i></i></button><div class="rec-stage-t"><b>${REC.starting ? 'Waiting for the microphone…' : 'Start recording'}</b><small>${REC.starting ? 'Allow the microphone in your browser' : 'Saved to your library from the first second'}</small></div></div>`;
         const meter = status === REC_STATUS.RECORDING ? `<div class="rec-meter" aria-hidden="true"><i id="rec-level" style="width:0%"></i></div>` : '';
         const mid = status === REC_STATUS.PAUSED ? `<button type="button" class="rec-ctl" data-rec="resume">${ic('<path d="M7 4l13 8-13 8Z"/>')}<span>Resume</span></button>` : status === REC_STATUS.RECORDING ? `<button type="button" class="rec-ctl" data-rec="pause">${ic('<path d="M8 5v14M16 5v14"/>')}<span>Pause</span></button>` : '';
-        const ctl = status === REC_STATUS.RECORDING || status === REC_STATUS.PAUSED ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop and finish</span></button><button type="button" class="rec-ctl quiet" data-rec="discard" aria-label="Discard this recording" title="Discard this recording">${ic('<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>')}</button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
+        const ctl = status === REC_STATUS.RECORDING || status === REC_STATUS.PAUSED ? `<div class="rec-ctls">${mid}<button type="button" class="rec-ctl stop" data-rec="stop">${ic('<rect x="6" y="6" width="12" height="12" rx="2"/>')}<span>Stop</span></button><button type="button" class="rec-ctl quiet" data-rec="discard" aria-label="Discard this recording" title="Discard this recording">${ic('<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/>')}</button><button type="button" class="rec-ctl quiet" data-rec="close" aria-label="Hide panel while recording continues" title="Hide panel (recording continues)">${ic('<path d="m6 9 6 6 6-6"/>')}</button></div>` : '';
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
@@ -1277,7 +1277,13 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       } catch { /* the level meter is cosmetic */ }
     }
     function recStopMeter() { cancelAnimationFrame(recMeterRaf); try { recMeterCtx?.close(); } catch {} recMeterCtx = null; }
-    function recRender() { const body = $('#rec-body'); if (body) body.innerHTML = recBodyHtml(); }
+    // While a recording is running the panel is a fixed-height screen: the
+    // transcript takes the height that is left. The class is what the layout keys on.
+    function recRender() {
+      const body = $('#rec-body'); if (!body) return;
+      body.classList.toggle('is-live', [REC_STATUS.RECORDING, REC_STATUS.PAUSED, REC_STATUS.FINALIZING].includes(REC.status));
+      body.innerHTML = recBodyHtml();
+    }
     const REC_MIC = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
     // Opens the microphone and starts capturing. `fresh` creates a new note; the
     // other path continues an earlier recording in the same note.
