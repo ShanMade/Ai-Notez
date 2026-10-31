@@ -1,0 +1,38 @@
+/* NotezAi chat: every colour follows the chosen accent (--nz-accent) and its logo (--nz-logo).
+   Loaded last, so it overrides the fixed colours in ai-panel.css and ai-studio.css:
+   the header mark shows the accent logo instead of a yellow badge, and the recorder
+   (button, ring, live dot, paused state) takes the accent colour in light and dark themes. */
+
+html[data-theme] #nz-ai {
+  --nzs-acc: var(--nz-accent, #0F766E);
+  --nzs-rec: var(--nz-accent, #0F766E);
+  --nzs-hl: color-mix(in srgb, var(--nz-accent, #0F766E) 20%, #ffffff);
+  --nzs-on: #ffffff;
+}
+html[data-theme="dark"] #nz-ai {
+  --nzs-rec: color-mix(in srgb, var(--nz-accent, #0F766E) 62%, #ffffff);
+  --nzs-hl: color-mix(in srgb, var(--nz-accent, #0F766E) 60%, #ffffff);
+  --nzs-on: #0E1530;
+}
+
+/* Header mark: the logo of the chosen accent */
+html[data-theme] #nz-ai .dock-title-mark {
+  background: var(--nz-logo) center / 78% no-repeat, color-mix(in srgb, var(--nz-accent, #0F766E) 14%, transparent) !important;
+  color: var(--nz-accent, #0F766E) !important;
+  box-shadow: none !important;
+}
+
+/* Recorder: the button, its ring and the live state all use the accent */
+html[data-theme] #nz-ai .rec-rec i { background: var(--nzs-rec) !important; }
+html[data-theme] #nz-ai .rec-rec { box-shadow: 0 0 0 8px color-mix(in srgb, var(--nzs-rec) 14%, transparent) !important; }
+html[data-theme] #nz-ai .rec-rec::before,
+html[data-theme] #nz-ai .rec-rec::after { border-color: color-mix(in srgb, var(--nzs-rec) 45%, transparent) !important; }
+html[data-theme] #nz-ai .rec-state.recording,
+html[data-theme] #nz-ai .rec-state.recording i,
+html[data-theme] #nz-ai .rec-state.paused i,
+html[data-theme] #nz-ai .rec-ctl.quiet,
+html[data-theme] #nz-ai .rec-ctl.quiet svg,
+html[data-theme] #nz-ai .ai-action.rec-danger { color: var(--nzs-rec) !important; }
+html[data-theme] #nz-ai .rec-state.paused i { background: color-mix(in srgb, var(--nzs-rec) 70%, #ffffff) !important; }
+html[data-theme] #nz-ai .rec-dot.live,
+html[data-theme] #nz-ai .rec-dot.busy { background: var(--nzs-rec) !important; }

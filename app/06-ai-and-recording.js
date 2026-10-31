@@ -258,10 +258,17 @@ async function openWikiLink(title) {
     const REC_CHUNK_CHOICES = [20000, 30000, 40000];
     const REC_CHUNK_DEFAULT = 40000;
     const REC_CHUNK_FIRST = 20000;      // the first part is short so text appears fast
+    // The author's account has no transcript-length limit in the app: it is offered
+    // longer parts too. 4 minutes is the most one audio payload the backend accepts
+    // (about 1.5 MB encoded at this bitrate), so that is the ceiling there.
+    const REC_AUTHOR_EMAIL = 'zeeshandoes3d@gmail.com';
+    const recNoLimits = () => String(currentSession?.email || currentSession?.user?.email || '').toLowerCase() === REC_AUTHOR_EMAIL;
+    const recChunkChoices = () => (recNoLimits() ? [...REC_CHUNK_CHOICES, 60000, 120000, 240000] : REC_CHUNK_CHOICES);
     function recChunkMs() {
       const stored = Number(aiStore.get(REC_CHUNK_KEY, ''));
       const wanted = Number.isFinite(stored) && stored > 0 ? stored : REC_CHUNK_DEFAULT;
-      const low = REC_CHUNK_CHOICES[0], high = REC_CHUNK_CHOICES[REC_CHUNK_CHOICES.length - 1];
+      const choices = recChunkChoices();
+      const low = choices[0], high = choices[choices.length - 1];
       return Math.max(low, Math.min(high, Math.round(wanted / 5000) * 5000));
     }
     const recChunkSet = ms => aiStore.set(REC_CHUNK_KEY, String(ms));
@@ -697,7 +704,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       if (REC.discarding) return;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
       const complete = finishing || REC.status === REC_STATUS.DONE;
-      note.body = (complete ? recNoteBody(recTranscriptForNote(), notesText, finishing) : recOverviewBody(note)).slice(0, 200000);
+      note.body = (complete ? recNoteBody(recTranscriptForNote(), notesText, finishing) : recOverviewBody(note)).slice(0, recNoLimits() ? undefined : 200000);
       note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', REC.mode === 'meeting' ? 'MEETING' : 'CLASS'];
       persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
       renderEverything();
@@ -715,7 +722,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
           REC.liveNotes = await recEnhance(transcript, instruction, text => { REC.notice = text; updateRecLive(); });
         } else {
           const prior = REC.liveNotes ? `Current notes:\n${REC.liveNotes}\n\n` : '';
-          REC.liveNotes = await recTextCall(`${instruction}\n\n${prior}Update the notes with the newest part of this recording. Keep earlier points, add new ones, and remove repeats. Keep every Voice label.\n\n<transcript>\n${transcript.slice(-14000)}\n</transcript>`);
+          REC.liveNotes = await recTextCall(`${instruction}\n\n${prior}Update the notes with the newest part of this recording. Keep earlier points, add new ones, and remove repeats. Keep every Voice label.\n\n<transcript>\n${recNoLimits() ? transcript : transcript.slice(-14000)}\n</transcript>`);
         }
       } catch (error) {
         // A notes refresh is retried on the next part, so a failed one needs no
@@ -822,12 +829,15 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
     }
     // Sends one part. Resolves true once it is transcribed; a part that cannot be
     // sent is held instead and resolves false.
-    async function recSendPart(index) {
+    async function recSendPart(index, gen = REC.gen) {
       const blob = REC.segBlobs[index];
       if (!blob) return true;
+      if (gen !== REC.gen) return false;   // the session was discarded: its parts are not written anywhere
       if (!navigator.onLine) { recHoldPart(index, null); return false; }
       try {
-        const cleaned = recCleanPart(recCanonicalPart(await recTranscribePart(blob, index)));
+        const transcribed = await recTranscribePart(blob, index);
+        if (gen !== REC.gen) return false;   // discarded while it was being transcribed
+        const cleaned = recCleanPart(recCanonicalPart(transcribed));
         const text = recTrimOverlap(index > 0 ? REC.segTexts[index - 1] : '', cleaned);
         if (!text) REC.notice = `The stretch at ${recClockOf(recWallOf(index))} had no clear speech. Check the microphone and the room noise.`;
         // A part with no speaker turn used to look exactly like the feature
@@ -844,6 +854,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         return true;
       } catch (error) {
         console.warn(`Part ${index + 1} could not be sent:`, error);
+        if (gen !== REC.gen) return false;
         recHoldPart(index, error);
         return false;
       }
@@ -858,14 +869,15 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         return REC.queue;
       }
       if (REC.flushing) return REC.flushing;
-      REC.flushing = REC.queue = REC.queue.then(async () => {
+      const gen = REC.gen;   // only parts of this session are sent by this flush
+      const run = REC.queue.then(async () => {
         for (const index of recHeldIndices()) {
-          if (REC.discarding || !navigator.onLine) break;
+          if (REC.discarding || gen !== REC.gen || !navigator.onLine) break;
           REC.segStatuses[index] = SEG_STATUS.IN_PROGRESS;
           updateRecLive();
-          if (!(await recSendPart(index))) break;   // later parts wait for this one
+          if (!(await recSendPart(index, gen))) break;   // later parts wait for this one
         }
-        if (!recHeldIndices().length && !REC.discarding) {
+        if (gen === REC.gen && !recHeldIndices().length && !REC.discarding) {
           if (REC.status === REC_STATUS.DONE) {
             recSaveNote(true, REC.liveNotes);
             recSaveTranscriptNote();
@@ -873,13 +885,15 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
           }
           REC.notice = 'Every part is transcribed.';
         }
-      }).finally(() => { REC.flushing = null; updateRecLive(); });
-      return REC.flushing;
+      }).finally(() => { if (REC.flushing === run) REC.flushing = null; updateRecLive(); });
+      REC.flushing = REC.queue = run;
+      return run;
     }
     // Back online: send what was held, straight away. While a connection keeps
     // failing, the same check runs once a minute.
     window.addEventListener('online', () => { if (recHeldIndices().length) recFlushHeld(); });
-    setInterval(() => { if (navigator.onLine && REC.noteId && REC.status !== REC_STATUS.FINALIZING && recHeldIndices().length) recFlushHeld(); }, 60000);
+    // Held parts are never given up on: they are retried every 30 seconds for as long as they are held.
+    setInterval(() => { if (navigator.onLine && REC.noteId && REC.status !== REC_STATUS.FINALIZING && recHeldIndices().length) recFlushHeld(); }, 30000);
     // After a reload the held parts are still on this device. Their note is
     // reopened as a finished session, so the waiting parts can be sent from it.
     async function recRestoreHeld(attempt = 0) {
@@ -907,7 +921,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       }
       REC.segIdx = size; REC.expectedParts = size; REC.processed = list.filter(row => !row.blob).length;
       REC.stoppedMs = Math.max(0, ...list.map(row => row.mark || 0)); REC.baseMs = REC.stoppedMs;
-      REC.queue = Promise.resolve(); REC.flushing = null;
+      REC.gen = (REC.gen || 0) + 1; REC.queue = Promise.resolve(); REC.flushing = null;
       REC.status = REC_STATUS.DONE;
       REC.notice = `${recHeldIndices().length} part${recHeldIndices().length === 1 ? '' : 's'} from an earlier recording are waiting to be sent.`;
       recSaveNote(true, REC.liveNotes);
@@ -916,8 +930,9 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
     }
     setTimeout(() => recRestoreHeld(), 1500);
     function enqueuePart(blob, index) {
+      const gen = REC.gen;
       REC.queue = REC.queue.then(async () => {
-        if (REC.discarding) return;
+        if (REC.discarding || gen !== REC.gen) return;
         if (REC.segMarks[index] == null) REC.segMarks[index] = recElapsed();   // when this part closed
         if (!blob || blob.size < 500) { REC.processed++; return; }   // a tiny fragment at the end is not speech
         // The part is written to this device first, so it survives a dropped
@@ -925,7 +940,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         REC.segBlobs[index] = blob;
         REC.segStatuses[index] = SEG_STATUS.PENDING;
         await recJournalSave(index);
-        await recSendPart(index);
+        await recSendPart(index, gen);
         updateRecLive();
       });
       return REC.queue;
@@ -1014,6 +1029,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
     }
     // Forgets the recording session but keeps the note it produced (if any).
     function recResetSession() {
+      REC.gen = (REC.gen || 0) + 1;   // parts still in flight from the old session are dropped
       REC.status = REC_STATUS.IDLE;
       REC.name = '';
       REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = [];
@@ -1244,7 +1260,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       const tail = (() => {
         if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['custom', 'Follow my instructions'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
           <label class="nzai-label" for="rec-chunk">Transcript length</label>
-          <select class="nzai-field" id="rec-chunk">${REC_CHUNK_CHOICES.map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '40 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
+          <select class="nzai-field" id="rec-chunk">${recChunkChoices().map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '40 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
           <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
           <p class="rec-muted" id="rec-stt-hint">${recSttHint()}</p>
           <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
@@ -1304,6 +1320,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
         REC.stream = stream; REC.mime = recMime();
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
+          REC.gen = (REC.gen || 0) + 1;
           REC.choice = $('#rec-enhance')?.value || 'auto';
           REC.instructions = String($('#rec-instructions')?.value ?? recSavedInstructions()).trim().slice(0, REC_INSTRUCTIONS_MAX);
           REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
@@ -1415,7 +1432,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       const source = notes.find(item => item.id === REC.noteId); if (!source || REC.discarding) return;
       const transcript = recTranscriptForNote(); if (!transcript.trim()) return;
       const id = `${source.id}-tx`;
-      const body = `> Transcript of "${source.title}" · ${new Date(REC.startedAt || Date.now()).toLocaleString()}\n\n${transcript}`.slice(0, 200000);
+      const body = `> Transcript of "${source.title}" · ${new Date(REC.startedAt || Date.now()).toLocaleString()}\n\n${transcript}`.slice(0, recNoLimits() ? undefined : 200000);
       let note = notes.find(item => item.id === id);
       if (note) { note.body = body; note.updatedAt = Date.now(); }
       else {
@@ -1579,7 +1596,7 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
       });
     }
     const recCss = document.createElement('style');
-    recCss.textContent = `.rec-opt{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;font:600 12px system-ui,sans-serif}.rec-opt input{accent-color:var(--nz-accent)}.rec-status{display:flex;align-items:center;gap:10px;margin:12px 0 6px}.rec-dot{width:10px;height:10px;border-radius:50%;background:rgba(128,148,170,.5)}.rec-dot.live{background:#d9534f;animation:nzPulse 1.2s infinite}.rec-dot.busy{background:var(--nz-accent);animation:nzPulse 1s infinite}@keyframes nzPulse{50%{opacity:.35}}.rec-clock{font:700 26px ui-monospace,monospace;font-variant-numeric:tabular-nums}.rec-state{font-size:12px;opacity:.7}.rec-meter{height:6px;border-radius:9px;background:rgba(128,148,170,.2);overflow:hidden;margin:8px 0 12px}.rec-meter i{display:block;height:100%;background:var(--nz-accent);transition:width .1s}.rec-small{font-size:11.5px;opacity:.7;margin:8px 0}.rec-name-row{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}.rec-live-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.rec-live-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6}.rec-live-box{margin-top:4px;min-height:120px;max-height:220px;overflow:auto;padding:9px 10px;border-radius:10px;border:1px solid rgba(128,148,170,.25);font-size:12px;line-height:1.5}.rec-live-box div{margin-bottom:4px}.rec-provider{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;opacity:.8;margin-top:4px}.rec-notice{margin-top:8px}.rec-part.failed{opacity:.6;background:rgba(217,83,79,.08);border-left:3px solid #d9534f}.rec-part.in-progress{background:rgba(139,195,74,.08);border-left:3px solid #8bc34a}.rec-part.needs-retry{background:rgba(255,193,7,.08);border-left:3px solid #ffc107}@media(max-width:560px){.rec-live-grid{grid-template-columns:1fr}}`;
+    recCss.textContent = `.rec-opt{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;font:600 12px system-ui,sans-serif}.rec-opt input{accent-color:var(--nz-accent)}.rec-status{display:flex;align-items:center;gap:10px;margin:12px 0 6px}.rec-dot{width:10px;height:10px;border-radius:50%;background:rgba(128,148,170,.5)}.rec-dot.live{background:var(--nz-accent);animation:nzPulse 1.2s infinite}.rec-dot.busy{background:var(--nz-accent);animation:nzPulse 1s infinite}@keyframes nzPulse{50%{opacity:.35}}.rec-clock{font:700 26px ui-monospace,monospace;font-variant-numeric:tabular-nums}.rec-state{font-size:12px;opacity:.7}.rec-meter{height:6px;border-radius:9px;background:rgba(128,148,170,.2);overflow:hidden;margin:8px 0 12px}.rec-meter i{display:block;height:100%;background:var(--nz-accent);transition:width .1s}.rec-small{font-size:11.5px;opacity:.7;margin:8px 0}.rec-name-row{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}.rec-live-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}.rec-live-h{font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.6}.rec-live-box{margin-top:4px;min-height:120px;max-height:220px;overflow:auto;padding:9px 10px;border-radius:10px;border:1px solid rgba(128,148,170,.25);font-size:12px;line-height:1.5}.rec-live-box div{margin-bottom:4px}.rec-provider{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;opacity:.8;margin-top:4px}.rec-notice{margin-top:8px}.rec-part.failed{opacity:.6;background:rgba(217,83,79,.08);border-left:3px solid #d9534f}.rec-part.in-progress{background:rgba(139,195,74,.08);border-left:3px solid #8bc34a}.rec-part.needs-retry{background:rgba(255,193,7,.08);border-left:3px solid #ffc107}@media(max-width:560px){.rec-live-grid{grid-template-columns:1fr}}`;
     document.head.appendChild(recCss);
 
     // ================= Reliability: error log, friendly failures, diagnostics =================
