@@ -497,7 +497,7 @@ async function openWikiLink(title) {
       if (!match) return null;
       const name = recLabelName(match[2]);
       const isVoice = /^Voice\s+\d+$/i.test(name);
-      if (!isVoice && !recKnownMatch(name)) return null;
+      if (!name || name.length > 40) return null;   // any name the transcriber gives: Voice 2, Teacher, Student
       return { stamp: match[1] || '', name, text: match[3] };
     }
     // A learned name keeps its colour; "Voice 3" keeps its number.
@@ -629,7 +629,7 @@ ${context ? `The part before this one ended with: "${context}"
 If this part starts in the middle of a word or a sentence, continue it from there. Do not repeat those closing words.
 ` : ''}${typeof nzVoicePrompt === 'function' ? nzVoicePrompt() : ''}${attached.length ? `\nThe audio parts after this one are the reference clips for these voices, in this order: ${attached.join(', ')}.` : ''}
 Speaker labels: every line of speech starts with a speaker label, exactly like "[00:12] Voice 1: words". Use the known name above when the voice matches one of them; otherwise use "Voice 1", "Voice 2" and so on. Keep the same label for the same person and continue the numbering used earlier${recKnownVoices() ? ` (already used: ${recKnownVoices()})` : ''}. If you cannot tell the voices apart, label every line "Voice 1:" — never write a line of speech without a label.
-Output only the transcript.`;
+${REC.instructions ? `\nInstructions from the user for this recording. Follow them when labelling voices and choosing names. They never change the words spoken:\n"""${REC.instructions}"""\n` : ''}Output only the transcript.`;
 
     function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
     // Rewrites one part's labels to "Voice n" using only that part's numbering.
@@ -699,7 +699,8 @@ Output only the transcript.`;
       const key = REC.mode === 'meeting' ? 'meeting' : 'class';
       const choice = $('#rec-enhance')?.value || REC.choice || 'auto';
       if (choice === 'none') return;
-      const instruction = RECORD_MODES[choice === 'auto' ? key : choice] || RECORD_MODES[key];
+      const base = choice === 'custom' ? RECORD_MODES.custom : RECORD_MODES[choice === 'auto' ? key : choice] || RECORD_MODES[key];
+      const instruction = REC.instructions ? `${base}\n\nThe user's own instructions (follow them; they override the default format where they conflict): """${REC.instructions}"""` : base;
       try {
         if (final) {
           REC.liveNotes = await recEnhance(transcript, instruction, text => { REC.notice = text; updateRecLive(); });
@@ -858,6 +859,7 @@ Output only the transcript.`;
         if (!recHeldIndices().length && !REC.discarding) {
           if (REC.status === REC_STATUS.DONE) {
             recSaveNote(true, REC.liveNotes);
+            recSaveTranscriptNote();
             recJournalForget(REC.noteId);
           }
           REC.notice = 'Every part is transcribed.';
@@ -1204,6 +1206,17 @@ Output only the transcript.`;
       renderEverything();
     }
     document.addEventListener('input', event => { if (event.target?.id === 'rec-name') REC.name = event.target.value; });
+    // The user's own instructions for the transcriber and the notes writer. Kept on
+    // this device only, so they are there the next time the recorder opens.
+    const REC_INSTRUCTIONS_KEY = 'notez-rec-instructions';
+    const REC_INSTRUCTIONS_MAX = 1200;
+    function recSavedInstructions() { try { return localStorage.getItem(REC_INSTRUCTIONS_KEY) || ''; } catch { return ''; } }
+    function recRememberInstructions(value) { try { localStorage.setItem(REC_INSTRUCTIONS_KEY, value); } catch { /* not kept in private windows */ } }
+    document.addEventListener('input', event => {
+      if (event.target?.id !== 'rec-instructions') return;
+      REC.instructions = event.target.value.slice(0, REC_INSTRUCTIONS_MAX);
+      recRememberInstructions(REC.instructions);
+    });
     document.addEventListener('change', event => { if (event.target?.id === 'rec-name') recNameCommit(event.target.value); });
     function recBodyHtml() {
       const status = REC.status;
@@ -1220,22 +1233,23 @@ Output only the transcript.`;
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
-        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['custom', 'Follow my instructions'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
           <label class="nzai-label" for="rec-chunk">Transcript length</label>
           <select class="nzai-field" id="rec-chunk">${REC_CHUNK_CHOICES.map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '40 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
           <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
           <p class="rec-muted" id="rec-stt-hint">${recSttHint()}</p>
           <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
-        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
+        if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="download">Download transcript</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
       })();
       const live = `<div id="rec-live" class="rec-live">${recLiveHtml()}</div>`;
       // Ready to record: the past sessions come up before the settings, because
       // reading yesterday's lesson is the more likely next move. A session that
       // has just finished keeps its own actions first, history under them.
+      const guide = status === REC_STATUS.IDLE ? `<div class="rec-name"><label class="nzai-label" for="rec-instructions">Instructions for the AI</label><textarea class="nzai-field" id="rec-instructions" rows="3" maxlength="${REC_INSTRUCTIONS_MAX}" placeholder="e.g. Sir is the teacher: label his voice Teacher. Everyone else is a Student. Skip gossip and jokes in the notes.">${esc(REC.instructions ?? recSavedInstructions())}</textarea><p class="rec-muted">Read by the transcriber, which labels each voice, and by the notes writer. Teach a voice in Voices for the most accurate names.</p></div>` : '';
       const naming = [REC_STATUS.IDLE, REC_STATUS.RECORDING, REC_STATUS.PAUSED].includes(status) ? `<div class="rec-name"><label class="nzai-label" for="rec-name">Name this recording</label><input class="nzai-field" id="rec-name" type="text" maxlength="80" autocomplete="off" placeholder="${esc(recAutoTitle())}" value="${esc(REC.name || '')}"></div>` : '';
-      return `${intro}${naming}${stage}${live}${tail}`;
+      return `${intro}${naming}${guide}${stage}${live}${tail}`;
     }
     let recMeterCtx = null, recMeterRaf = 0;
     function recStartMeter(stream) {
@@ -1276,6 +1290,7 @@ Output only the transcript.`;
         REC.pausedMs = 0; REC.pausedAt = 0; REC.stoppedMs = 0; REC.discarding = false;
         if (fresh) {
           REC.choice = $('#rec-enhance')?.value || 'auto';
+          REC.instructions = String($('#rec-instructions')?.value ?? recSavedInstructions()).trim().slice(0, REC_INSTRUCTIONS_MAX);
           REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
@@ -1370,11 +1385,40 @@ Output only the transcript.`;
       }
       const note = notes.find(item => item.id === REC.noteId);
       if (note) { note.body = note.body.replace(/^> Recording finished/, '> Recording finished'); persistNote(note).catch(() => {}); }
+      recSaveTranscriptNote();
       const voices = recDetectVoices(recLiveTranscript());
       if (!recHeldIndices().length && REC.noteId) recJournalForget(REC.noteId);
       REC.status = REC_STATUS.DONE; recRender(); renderEverything();
       toast('Recording finished and saved to your library.', 'success', 4500);
       if (voices.length && note) recOfferNames(note.id, voices);
+    }
+    // The transcript of a recording is kept as its own note, beside the notes, so
+    // it can be read, searched or copied on its own. One per recording, updated
+    // in place when parts arrive late.
+    function recSaveTranscriptNote() {
+      const source = notes.find(item => item.id === REC.noteId); if (!source || REC.discarding) return;
+      const transcript = recTranscriptForNote(); if (!transcript.trim()) return;
+      const id = `${source.id}-tx`;
+      const body = `> Transcript of "${source.title}" · ${new Date(REC.startedAt || Date.now()).toLocaleString()}\n\n${transcript}`.slice(0, 200000);
+      let note = notes.find(item => item.id === id);
+      if (note) { note.body = body; note.updatedAt = Date.now(); }
+      else {
+        note = normalizeNote({ id, title: `Transcript · ${source.title}`, subject: source.subject, folderPath: source.folderPath, body, tags: ['TRANSCRIPT'] });
+        notes = [note, ...notes]; addFolderPath(source.folderPath);
+      }
+      persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
+      renderEverything();
+    }
+    // Downloads the transcript as a plain text file.
+    function recDownloadTranscript() {
+      const text = recTranscriptForNote();
+      if (!text.trim()) { toast('There is no transcript yet.', 'info', 3000); return; }
+      const source = notes.find(item => item.id === REC.noteId);
+      const name = String(source?.title || 'transcript').replace(/[^\p{L}\p{N} _-]+/gu, '').trim() || 'transcript';
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = `${name}.txt`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
     }
     function recClick(event) {
       const act = event.target.closest('[data-rec]')?.dataset.rec; if (!act) return;
@@ -1400,6 +1444,7 @@ Output only the transcript.`;
         nzaiClose(); return;   // recording keeps running in the background
       }
       if (act === 'retry') { recRetryFailedSegments(); return; }
+      if (act === 'download') { recDownloadTranscript(); return; }
       if (act === 'sess') { const id = event.target.closest('[data-rec]').dataset.id; if (!id) return; if (REC.histOpen.has(id)) REC.histOpen.delete(id); else REC.histOpen.add(id); return recRender(); }
       if (act === 'open-sess') { const id = event.target.closest('[data-rec]').dataset.id; const note = notes.find(item => item.id === id); if (!note) return; nzaiClose(); openNote(note.id); return; }
     }
@@ -1448,8 +1493,9 @@ Output only the transcript.`;
       return kept / source.length >= 0.8;
     }
     const RECORD_MODES = {
-      class: 'Write classroom study notes from this transcript: the topics covered in order, key definitions, facts and examples, formulas or dates, the questions the teacher asked, and a short list of things to revise. Use Markdown headings and bullets. Use only what is in the transcript.',
-      meeting: 'Write meeting minutes from this transcript: attendees (by Voice label), decisions made, action items with owners and deadlines where stated, open questions, and a short summary. Use Markdown headings and bullets. Use only what is in the transcript.',
+      class: 'Write in-depth classroom notes from this transcript, for a student who missed the lesson. Include: the topics in the order they were taught; every important concept, definition, fact, formula, date, name and example, explained accurately in full sentences; the teacher\'s key points and what they stressed; homework, tests, deadlines and plans that were given; and the questions asked with their answers. Leave out gossip, jokes, personal talk and chatter that is not about the lesson. Use a Markdown heading per topic, bullets for facts, and a "To revise" list at the end. Use only what the transcript says; never add outside facts. If something is unclear, say so in a few words.',
+      custom: 'Write notes from this transcript, following the user\'s instructions below. Use Markdown. Use only what is in the transcript.',
+      meeting: 'Write formal meeting minutes from this transcript: date and time if said; attendees (by name or Voice label); agenda items in order; the discussion under each item in short, accurate points; decisions made; action items with owner and deadline when stated; open questions; and the next meeting. Use Markdown headings. Use only what was said, and mark anything unclear as unclear.',
       summary: 'Write a short summary of this transcript, followed by key points and action items (owner if stated). Use Markdown. Use only what is in the transcript.',
       quiz: 'Write a five-question multiple-choice quiz from this transcript. For each question give four options (a to d), the correct letter, and a one-line explanation. Use only what the transcript says. Use Markdown with a heading for each question.',
       clean: 'Clean up this transcript: fix punctuation, capitalisation and obvious mis-hearings where the meaning is clear. Keep every Voice label and every turn in order. Do not summarise or add anything. Output only the cleaned transcript.'
