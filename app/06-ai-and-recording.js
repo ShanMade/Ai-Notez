@@ -311,7 +311,7 @@ async function openWikiLink(title) {
     const SEG_STATUS = { PENDING: 'pending', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', FAILED: 'failed', NEEDS_RETRY: 'needs_retry' };
     // Recording status constants (separate from transcription status)
     const REC_STATUS = { IDLE: 'idle', RECORDING: 'recording', PAUSED: 'paused', FINALIZING: 'finishing', DONE: 'done' };
-    const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', dialog: null, timer: 0,
+    const REC = { stream: null, recorder: null, mime: 'audio/webm', mode: 'class', renames: {}, dialog: null, timer: 0,
       status: 'idle', startedAt: 0, pausedMs: 0, pausedAt: 0, segIdx: 0, segTexts: [], segBlobs: [], segStatuses: [], queue: Promise.resolve(),
       noteId: '', provider: '', failovers: 0, notice: '', liveNotes: '', processed: 0, lastNotesAt: 0, busy: false, errors: 0, audioSaved: false,
       segMarks: [], segWall: [], speakerClips: {}, partMs: 0, partStartAt: 0, partDeadline: 0, partTimer: 0, baseMs: 0, stoppedMs: 0, discarding: false, starting: false, sttModel: '',
@@ -650,6 +650,64 @@ ${REC.instructions ? `\nInstructions from the user for this recording. Follow th
 Output only the transcript.`;
 
     function recKnownVoices() { return recDetectVoices(recLiveTranscript()).join(', '); }
+    // ---- Recording modes ---------------------------------------------------
+    // Class and Meeting keep their original wording, titles and folders. The other
+    // modes take their setting and notes text from NzVoice (app/14-voice-core.js).
+    const REC_TAGS = { class: 'CLASS', meeting: 'MEETING', casual: 'CASUAL', call: 'CALL', chat: 'CHAT', custom: 'CUSTOM' };
+    const REC_MODE_IDS = Object.keys(REC_TAGS);
+    const recModeName = mode => mode === 'class' ? 'Classroom' : mode === 'meeting' ? 'Meeting' : NzVoice.modeOf(mode).label;
+    const recTitleWord = mode => mode === 'class' ? 'Class' : mode === 'meeting' ? 'Meeting' : NzVoice.modeOf(mode).label;
+    const recTagOf = mode => REC_TAGS[mode] || 'CLASS';
+    const recFolderOf = mode => mode === 'meeting' ? 'Meetings' : mode === 'class' ? 'Classes' : 'Recordings';
+    // Notes saved before the picker had six modes only carry CLASS or MEETING.
+    function recModeOfNote(note) {
+      const tags = note?.tags || [];
+      const found = REC_MODE_IDS.find(id => tags.includes(REC_TAGS[id]));
+      if (found) return found;
+      return /· Meeting ·/.test(String(note?.body || '')) || /^Meeting recording/i.test(String(note?.title || '')) ? 'meeting' : 'class';
+    }
+    // The notes instruction for the automatic style.
+    const recAutoNotes = () => RECORD_MODES[REC.mode] || NzVoice.modeOf(REC.mode).notes;
+    const recAutoLabel = () => REC.mode === 'meeting' ? 'Meeting minutes' : REC.mode === 'class' ? 'Class notes' : `${NzVoice.modeOf(REC.mode).label} notes`;
+    // ---- Speaker names in place -------------------------------------------
+    // A name typed in the Speakers list replaces the "Voice n" label everywhere in
+    // this recording. It is applied when the transcript is read, so a part sent
+    // later is named too. Clearing the box goes back to "Voice n".
+    function recApplyRenames(text) {
+      let out = String(text || '');
+      for (const [label, name] of Object.entries(REC.renames || {})) out = recRenameVoice(out, label, name);
+      return out;
+    }
+    function recRenameSpeaker(label, value) {
+      if (!label) return;
+      const name = String(value || '').replace(/[:\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (name && /^voice\s+\d+$/i.test(name)) { toast('Use a name, not a Voice number.', 'info', 4000); updateRecLive(); return; }
+      if (name) REC.renames[label] = name; else delete REC.renames[label];
+      if (name) recLearnNamedVoices([[label, name]]);   // taught in the background, as in the names dialog
+      if (REC.status === REC_STATUS.DONE && REC.noteId) { recSaveNote(true, REC.liveNotes); recSaveTranscriptNote(); }
+      updateRecLive();
+    }
+    // The Voice labels heard so far, with the box each one is named in. Read from
+    // the raw labels, so a name typed here does not hide the label it replaces.
+    function recSpeakerRows() {
+      const labels = recDetectVoices(recNormalizeLabels(REC.segTexts.filter(Boolean).join('\n')));
+      return labels.map(label => ({ label, n: recSpeakerIndex(label), name: REC.renames?.[label] || '' }));
+    }
+    function recSpeakerPanel() {
+      const rows = recSpeakerRows();
+      if (!rows.length) return '';
+      const items = rows.map(row => `<label class="rec-spk"><span class="rec-speaker ${REC_VOICE_CLASS[row.n % 4]}">${esc(row.label)}</span><input class="nzai-field rec-spk-input" data-rec-speaker="${esc(row.label)}" maxlength="40" autocomplete="off" value="${esc(row.name)}" placeholder="Name this voice" aria-label="Name for ${esc(row.label)}"></label>`).join('');
+      return `<div class="rec-spk-panel" aria-label="Speakers"><div class="rec-spk-h">Speakers <small>Type a name and press Enter. Clear it to go back to the number.</small></div><div class="rec-spk-list">${items}</div></div>`;
+    }
+    // One line for everything that is waiting: parts held on this device, and any notice.
+    function recStatusLine(failedCount) {
+      const parts = [];
+      if (failedCount) parts.push(`${failedCount} part${failedCount === 1 ? '' : 's'} waiting${navigator.onLine ? ', they send by themselves' : ' · offline'}`);
+      if (REC.notice) parts.push(REC.notice);
+      if (!parts.length) return '';
+      const send = failedCount && navigator.onLine ? '<button type="button" class="ai-action" data-rec="retry">Send now</button>' : '';
+      return `<div class="rec-status${failedCount ? ' has-held' : ''}" role="status"><span class="rec-status-t">${esc(parts.join(' · '))}</span>${send}</div>`;
+    }
     // Rewrites one part's labels to "Voice n" using only that part's numbering.
     function recCanonicalPart(text) {
       const raw = String(text || '');
@@ -661,7 +719,7 @@ Output only the transcript.`;
     function recLiveTranscript() {
       const text = REC.segTexts.filter(Boolean).join('\n');
       recSpkZero = recSpkZeroIn(text);
-      return recNormalizeLabels(text);
+      return recApplyRenames(recNormalizeLabels(text));
     }
     // The transcript that goes into the note: every part joined, and every
     // stamped line rewritten to the time of day it was spoken. A note opened a
@@ -672,7 +730,7 @@ Output only the transcript.`;
       recLiveTranscript();   // settles the Voice numbering before any line is read
       return REC.segTexts.map((text, index) => {
         let lastClock = recClockOf(recWallOf(index));
-        return String(recNormalizeLabels(text || '')).split('\n').map(raw => {
+        return String(recApplyRenames(recNormalizeLabels(text || ''))).split('\n').map(raw => {
           const line = recUnmark(raw);
           if (!line.trim()) return '';
           const own = recStampWall(index, (line.match(/^\[([\d:]{3,12})\]/) || [])[1]);
@@ -689,7 +747,7 @@ Output only the transcript.`;
       const state = finishing ? 'Recording finished' : REC.status === REC_STATUS.RECORDING || REC.status === REC_STATUS.PAUSED ? 'Recording in progress' : 'Recording';
       const missing = (REC.segStatuses || []).map((status, index) => status === SEG_STATUS.FAILED ? index + 1 : 0).filter(Boolean);
       const gap = missing.length ? ` Part${missing.length === 1 ? '' : 's'} ${missing.join(', ')} could not be transcribed; they are held on this device and send when you are back online.` : '';
-      const header = `> ${state} · ${when.toLocaleString()} · ${REC.mode === 'meeting' ? 'Meeting' : 'Classroom'} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.${gap}`;
+      const header = `> ${state} · ${when.toLocaleString()} · ${recModeName(REC.mode)} · transcribed by ${providerLine}${REC.failovers ? ` (${REC.failovers} provider switch${REC.failovers === 1 ? '' : 'es'})` : ''}. AI transcription with speaker labels. Check names and key facts before relying on them.${gap}`;
       return `${header}\n\n## Transcript\n\n${transcript || '_Listening… the first part appears within about 30 seconds._'}${notesText ? `\n\n## AI notes\n\n${notesText}` : ''}`;
     }
     // While the recording runs, the note holds only a short overview. The full
@@ -698,7 +756,7 @@ Output only the transcript.`;
       const parts = REC.processed || 0;
       const waiting = (REC.segStatuses || []).filter(status => status === SEG_STATUS.FAILED).length;
       const state = REC.status === REC_STATUS.PAUSED ? 'Recording paused' : 'Recording in progress';
-      const mode = REC.mode === 'meeting' ? 'Meeting' : 'Classroom';
+      const mode = recModeName(REC.mode);
       const started = note?.createdAt ? new Date(note.createdAt).toLocaleString() : '';
       const progress = `${parts} part${parts === 1 ? '' : 's'} transcribed so far${waiting ? `, ${waiting} waiting to send` : ''}.`;
       return `> ${state}${started ? ` · ${started}` : ''} · ${mode}\n\n## Overview\n\n${progress}\n\nThe full transcript and AI notes are written here when you finish the recording.`;
@@ -708,16 +766,15 @@ Output only the transcript.`;
       const note = notes.find(item => item.id === REC.noteId); if (!note) return;
       const complete = finishing || REC.status === REC_STATUS.DONE;
       note.body = (complete ? recNoteBody(recTranscriptForNote(), notesText, finishing) : recOverviewBody(note)).slice(0, recNoLimits() ? undefined : 200000);
-      note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', REC.mode === 'meeting' ? 'MEETING' : 'CLASS'];
+      note.updatedAt = Date.now(); if (finishing) note.tags = ['RECORDING', recTagOf(REC.mode)];
       persistNote(note).catch(() => toast('Saved locally; sync is queued.', 'error'));
       renderEverything();
     }
     async function recRefreshNotes(final) {
       const transcript = recLiveTranscript(); if (!transcript) return;
-      const key = REC.mode === 'meeting' ? 'meeting' : 'class';
       const choice = $('#rec-enhance')?.value || REC.choice || 'auto';
       if (choice === 'none') return;
-      const base = choice === 'custom' ? RECORD_MODES.custom : RECORD_MODES[choice === 'auto' ? key : choice] || RECORD_MODES[key];
+      const base = choice === 'custom' ? RECORD_MODES.custom : choice === 'auto' ? recAutoNotes() : RECORD_MODES[choice] || recAutoNotes();
       const notesRule = choice === 'clean' ? '' : recNotesLang() === 'same' ? 'Write the notes in the same language as the transcript.' : `Write the notes in ${recLangLabel(recNotesLang())}, including the headings.`;
       const instruction = [base, notesRule, REC.instructions ? `The user's own instructions (follow them; they override the default format where they conflict): """${REC.instructions}"""` : ''].filter(Boolean).join('\n\n');
       try {
@@ -951,7 +1008,7 @@ Output only the transcript.`;
       const [noteId, list] = held;
       const note = notes.find(item => item.id === noteId);
       const size = Math.max(...list.map(row => row.index)) + 1;
-      REC.noteId = noteId; REC.mode = (note.tags || []).includes('MEETING') ? 'meeting' : 'class';
+      REC.noteId = noteId; REC.mode = recModeOfNote(note);
       REC.startedAt = note.createdAt || Date.now();
       REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segWall = []; REC.segMarks = [];
       for (let index = 0; index < size; index++) {
@@ -1076,7 +1133,7 @@ Output only the transcript.`;
       REC.status = REC_STATUS.IDLE;
       REC.name = '';
       REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = [];
-      REC.speakerClips = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
+      REC.speakerClips = {}; REC.renames = {}; REC.segIdx = 0; REC.processed = 0; REC.expectedParts = 0;
       REC.failovers = 0; REC.liveNotes = ''; REC.provider = ''; REC.failedOn = new Set();
       REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.audioSaved = false;
       REC.noteId = ''; REC.baseMs = 0; REC.stoppedMs = 0; REC.partMs = 0; REC.sttModel = '';
@@ -1191,7 +1248,7 @@ Output only the transcript.`;
         title: autoTitle ? `${autoTitle[1]} recording` : rawTitle || 'Recording',
         day, time, span, zero,
         voices: [...voices].length,
-        mode: /· Meeting ·/.test(String(note.body)) || /^Meeting recording/i.test(String(note.title)) ? 'Meeting' : 'Class'
+        mode: recTitleWord(recModeOfNote(note))
       };
     }
     function recHistoryLine(line, note) {
@@ -1250,17 +1307,23 @@ Output only the transcript.`;
       const notice = REC.notice ? `<div class="ai-notice rec-notice" role="status">${esc(REC.notice)}</div>` : '';
       if (REC.status === REC_STATUS.IDLE) return `<div class="rec-strip">${recProviderStrip()}</div>${notice}`;
       const tab = REC.tab === 'notes' ? 'notes' : 'transcript';
-      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}${failedCount ? `, ${failedCount} waiting` : ''}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
-      const pane = tab === 'transcript' ? `<div class="rec-scroll" id="rec-transcript">${recTimeline()}</div>` : `<div class="rec-scroll ai-md">${notes}</div>`;
-      // Failed parts keep their audio, so they can be retried instead of telling
-      // the user the recording is lost.
-      const retry = failedCount ? `<div class="rec-actions"><button type="button" class="ai-action" data-rec="retry">${navigator.onLine ? `Send ${failedCount} waiting part${failedCount === 1 ? '' : 's'} now` : `${failedCount} part${failedCount === 1 ? '' : 's'} waiting · offline`}</button><small class="rec-muted">They send by themselves when you are back online.</small></div>` : '';
-      return `<div class="rec-strip">${recProviderStrip()}</div>${notice}${tabs}${retry}<section class="rec-card">${pane}</section>`;
+      const tabs = `<div class="rec-tabs" role="tablist" aria-label="Live view"><button type="button" role="tab" aria-selected="${tab === 'transcript'}" data-rec="tab" data-tab="transcript">Transcript<small>${pending ? `${pending} in progress` : REC.processed ? 'Up to date' : 'Listening'}</small></button><button type="button" role="tab" aria-selected="${tab === 'notes'}" data-rec="tab" data-tab="notes">Notes<small>${REC.failovers ? `${REC.failovers} switch${REC.failovers === 1 ? '' : 'es'}` : 'Live'}</small></button></div>`;
+      const pane = tab === 'transcript' ? `${recSpeakerPanel()}<div class="rec-scroll" id="rec-transcript">${recTimeline()}</div>` : `<div class="rec-scroll ai-md">${notes}</div>`;
+      return `<div class="rec-strip">${recProviderStrip()}</div>${recStatusLine(failedCount)}${tabs}<section class="rec-card">${pane}</section>`;
     }
-    function updateRecLive() { const el = $('#rec-live'); if (el) el.innerHTML = recLiveHtml(); }
+    // Re-drawn often while recording. A speaker name being typed keeps its text and its place.
+    function updateRecLive() {
+      const el = $('#rec-live'); if (!el) return;
+      const focused = el.querySelector('[data-rec-speaker]:focus');
+      const kept = focused ? { label: focused.dataset.recSpeaker, value: focused.value, at: focused.selectionStart } : null;
+      el.innerHTML = recLiveHtml();
+      if (!kept) return;
+      const input = [...el.querySelectorAll('[data-rec-speaker]')].find(node => node.dataset.recSpeaker === kept.label);
+      if (input) { input.value = kept.value; input.focus(); try { input.setSelectionRange(kept.at, kept.at); } catch { /* not supported */ } }
+    }
     // The title a recording gets when no name is typed.
     function recAutoTitle(when = new Date()) {
-      const mode = REC.mode === 'meeting' ? 'Meeting' : 'Class';
+      const mode = recTitleWord(REC.mode);
       return `${mode} recording · ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
     }
     // Typing keeps the name for the note; leaving the box renames a note that already exists.
@@ -1286,13 +1349,16 @@ Output only the transcript.`;
       recRememberInstructions(REC.instructions);
     });
     document.addEventListener('change', event => { if (event.target?.id === 'rec-name') recNameCommit(event.target.value); });
+    document.addEventListener('change', event => { if (event.target?.matches?.('[data-rec-speaker]')) recRenameSpeaker(event.target.dataset.recSpeaker, event.target.value); });
+    // The settings drawer stays open or closed across redraws.
+    document.addEventListener('toggle', event => { if (event.target?.matches?.('details.rec-more')) REC.moreOpen = event.target.open; }, true);
     function recBodyHtml() {
       const status = REC.status;
       const stateLabel = { idle: 'Ready', recording: 'Recording', paused: 'Paused', finishing: 'Finishing', done: 'Saved' }[status] || 'Ready';
       const ic = d => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</g></svg>`;
       const clock = `<span class="rec-clock" id="rec-clock">${fmtClock(recElapsed())}</span>`;
-      const modeSeg = status === REC_STATUS.IDLE ? `<div class="ai-seg rec-mode" role="radiogroup" aria-label="Recording type">${[['class', 'Classroom'], ['meeting', 'Meeting']].map(([v, l]) => `<label class="rec-opt"><input type="radio" name="rec-mode" id="rec-mode-${v}" value="${v}" ${REC.mode === v ? 'checked' : ''}>${l}</label>`).join('')}</div>` : '';
-      const intro = status === REC_STATUS.IDLE ? `<p class="rec-sub">Record a lecture or meeting. You get a live transcript with speakers, and notes written as you go.</p>${modeSeg}` : '';
+      const modeSeg = status === REC_STATUS.IDLE ? `<fieldset class="rec-modes"><legend class="nzai-label">Recording type</legend><div class="rec-mode-grid" role="radiogroup">${REC_MODE_IDS.map(id => `<label class="rec-mode-opt"><input type="radio" name="rec-mode" id="rec-mode-${id}" value="${id}" ${REC.mode === id ? 'checked' : ''}><span>${esc(recModeName(id))}</span></label>`).join('')}</div><p class="rec-muted rec-mode-hint">${esc(NzVoice.modeOf(REC.mode).hint)}</p></fieldset>` : '';
+      const intro = status === REC_STATUS.IDLE ? `<p class="rec-sub">Record a lecture, meeting, call or conversation. You get a live transcript with speakers, and notes written as you go.</p>${modeSeg}` : '';
       const stage = (() => {
         if (status === REC_STATUS.IDLE) return `<div class="rec-stage idle"><button type="button" class="rec-rec" data-rec="start" aria-label="Start recording" ${REC.starting ? 'disabled aria-busy="true"' : ''}><i></i></button><div class="rec-stage-t"><b>${REC.starting ? 'Waiting for the microphone…' : 'Start recording'}</b><small>${REC.starting ? 'Allow the microphone in your browser' : 'Saved to your library from the first second'}</small></div></div>`;
         const meter = status === REC_STATUS.RECORDING ? `<div class="rec-meter" aria-hidden="true"><i id="rec-level" style="width:0%"></i></div>` : '';
@@ -1301,12 +1367,12 @@ Output only the transcript.`;
         return `<div class="rec-stage ${status}"><div class="rec-state ${status}"><i></i><b>${stateLabel}</b></div>${status === REC_STATUS.DONE ? '' : clock}${meter}${ctl}</div>`;
       })();
       const tail = (() => {
-        if (status === REC_STATUS.IDLE) return `<label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', REC.mode === 'meeting' ? 'Meeting minutes' : 'Class notes'], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['custom', 'Follow my instructions'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        if (status === REC_STATUS.IDLE) return `<details class="rec-more" ${REC.moreOpen ? 'open' : ''}><summary>Notes and transcript settings</summary><div class="rec-more-body"><label class="nzai-label" for="rec-enhance">Notes style</label><select class="nzai-field" id="rec-enhance">${[['auto', recAutoLabel()], ['summary', 'Summary and action items'], ['quiz', 'Quiz from this lecture'], ['clean', 'Clean transcript only'], ['custom', 'Follow my instructions'], ['none', 'Transcript only (no AI notes)']].map(([v, l]) => `<option value="${v}" ${(REC.choice || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
           <label class="nzai-label" for="rec-chunk">Transcript length</label>
           <select class="nzai-field" id="rec-chunk">${recChunkChoices().map(ms => `<option value="${ms}" ${recChunkMs() === ms ? 'selected' : ''}>${ms === REC_CHUNK_DEFAULT ? '40 s · recommended' : ms === REC_CHUNK_CHOICES[0] ? '20 s · fastest updates' : recChunkLabel(ms)}</option>`).join('')}</select>
           <p class="rec-muted" id="rec-chunk-hint">${recChunkHint(recChunkMs())} Longer parts use fewer requests; the first part is always 20 seconds so the transcript starts straight away.</p>
           <p class="rec-muted" id="rec-stt-hint">${recSttHint()}</p>
-          <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p>`;
+          <div class="rec-actions" style="margin-top:8px"><button type="button" class="ai-action" data-rec="voices"><span>Voices${recVoiceCount() ? ` (${recVoiceCount()})` : ''}</span></button></div><p class="rec-muted">Teach a voice once and every recording labels that person by name. Tell everyone you are recording, and get their agreement first.</p></div></details>`;
         if (status === REC_STATUS.FINALIZING) return `<div class="rec-actions"><button type="button" class="ai-action" data-rec="close">Hide panel</button></div>`;
         if (status === REC_STATUS.DONE) return `<div class="rec-actions"><button type="button" class="ai-action primary big" data-rec="open">Open note</button><button type="button" class="ai-action big" data-rec="continue" title="Keep recording into this same note">Continue recording</button><button type="button" class="ai-action" data-rec="names">Name speakers</button><button type="button" class="ai-action" data-rec="download">Download transcript</button><button type="button" class="ai-action" data-rec="voices">Voices</button><button type="button" class="ai-action" data-rec="new">New session</button><button type="button" class="ai-action rec-danger" data-rec="discard">Discard</button><button type="button" class="ai-action" data-rec="close">Close</button></div>`;
         return '';
@@ -1366,12 +1432,12 @@ Output only the transcript.`;
           REC.gen = (REC.gen || 0) + 1;
           REC.choice = $('#rec-enhance')?.value || 'auto';
           REC.instructions = String($('#rec-instructions')?.value ?? recSavedInstructions()).trim().slice(0, REC_INSTRUCTIONS_MAX);
-          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.segIdx = 0;
+          REC.baseMs = 0; REC.partMs = 0; REC.sttModel = ''; REC.segTexts = []; REC.segBlobs = []; REC.segStatuses = []; REC.segMarks = []; REC.segWall = []; REC.speakerClips = {}; REC.renames = {}; REC.segIdx = 0;
           REC.processed = 0; REC.expectedParts = 0; REC.failovers = 0; REC.liveNotes = ''; REC.provider = '';
           REC.notice = ''; REC.errors = 0; REC.queue = Promise.resolve(); REC.failedOn = new Set();
           REC.startedAt = Date.now();
           const when = new Date();
-          const note = normalizeNote({ id: uid(), title: (REC.name || '').trim() || recAutoTitle(when), subject: (currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes')).split('/')[0], folderPath: currentFolderPath || (REC.mode === 'meeting' ? 'Meetings' : 'Classes'), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
+          const note = normalizeNote({ id: uid(), title: (REC.name || '').trim() || recAutoTitle(when), subject: (currentFolderPath || recFolderOf(REC.mode)).split('/')[0], folderPath: currentFolderPath || recFolderOf(REC.mode), tags: ['RECORDING', 'LIVE'], kind: 'markdown', body: recNoteBody('', '', false), createdAt: Date.now(), updatedAt: Date.now(), lastViewedAt: Date.now() });
           REC.noteId = note.id; notes = [note, ...notes]; addFolderPath(note.folderPath); persistNote(note).catch(() => {}); renderEverything();
         } else {
           // Continue: the clock picks up where the last recording stopped and the

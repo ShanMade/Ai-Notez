@@ -932,7 +932,7 @@ function noteRowMarkup(note, dateMode = 'updated') {
         { id:'restore', label:'Import Notez JSON', detail:'Merge an existing Notez export into this workspace', icon:'file', category:'Workspace' },
         { id:'back', label:'Go back', detail:'Return to the previous page', icon:'open', category:'Navigate' },
         { id:'ai', label:'Ask NotezAi', detail:'Chat about your notes, quizzes and summaries', icon:'star', category:'AI' },
-        { id:'record', label:'Record class or meeting', detail:'Live transcript with speaker labels and notes', icon:'note', category:'AI' },
+        { id:'record', label:'Record a lecture, meeting or call', detail:'Live transcript with speaker labels and notes', icon:'note', category:'AI' },
         { id:'paste', label:'Paste text as a note', detail:'Turn clipboard text into a note', icon:'note', category:'Create' },
         { id:'focus', label:'Open focus timer', detail:'Pomodoro, daily goal and exam countdown', icon:'recent', category:'Study' },
         { id:'insights', label:'Library insights', detail:'Coverage, activity and storage', icon:'check', category:'Study' },

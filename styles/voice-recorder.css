@@ -1,0 +1,56 @@
+/* Voice recorder, phase 2 (docs/voice-and-chat-design.md): mode picker, settings
+   drawer, one status line for waiting parts, and the speaker names list. Loaded last,
+   and built only from the theme tokens (--p-*), so light, dark and every accent apply. */
+
+html[data-theme] #nz-ai .rec-modes { border: 0; padding: 0; margin: 0 0 10px; min-width: 0; }
+html[data-theme] #nz-ai .rec-modes legend { padding: 0; margin: 0 0 6px; }
+html[data-theme] #nz-ai .rec-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+html[data-theme] #nz-ai .rec-mode-opt {
+  position: relative; display: flex; align-items: center; justify-content: center; text-align: center;
+  min-height: 38px; padding: 6px 8px; border: 1px solid var(--p-line); border-radius: 10px;
+  background: var(--p-card); color: var(--p-ink); font: 600 13px/1.2 var(--p-ui, Inter, system-ui, sans-serif);
+  cursor: pointer; user-select: none; transition: border-color .15s ease, background .15s ease;
+}
+html[data-theme] #nz-ai .rec-mode-opt:hover { border-color: var(--p-edge); background: var(--p-soft); }
+html[data-theme] #nz-ai .rec-mode-opt input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+html[data-theme] #nz-ai .rec-mode-opt:has(input:checked) {
+  border-color: var(--p-accent); background: var(--p-soft); color: var(--p-accent);
+  box-shadow: inset 0 0 0 1px var(--p-accent);
+}
+html[data-theme] #nz-ai .rec-mode-opt:has(input:focus-visible) { outline: 2px solid var(--p-accent); outline-offset: 2px; }
+html[data-theme] #nz-ai .rec-mode-hint { margin: 7px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--p-muted); }
+
+html[data-theme] #nz-ai .rec-more { margin-top: 10px; border: 1px solid var(--p-line); border-radius: 12px; background: var(--p-card); }
+html[data-theme] #nz-ai .rec-more > summary {
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer; list-style: none;
+  padding: 10px 12px; font: 600 13px/1.2 var(--p-ui, Inter, system-ui, sans-serif); color: var(--p-ink);
+}
+html[data-theme] #nz-ai .rec-more > summary::-webkit-details-marker { display: none; }
+html[data-theme] #nz-ai .rec-more > summary::after { content: "+"; font-size: 16px; color: var(--p-muted); }
+html[data-theme] #nz-ai .rec-more[open] > summary::after { content: "\2212"; }
+html[data-theme] #nz-ai .rec-more > summary:focus-visible { outline: 2px solid var(--p-accent); outline-offset: -2px; border-radius: 12px; }
+html[data-theme] #nz-ai .rec-more-body { padding: 0 12px 12px; }
+
+html[data-theme] #nz-ai .rec-status {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0 0;
+  padding: 7px 10px; border: 1px solid var(--p-line); border-radius: 10px;
+  background: var(--p-soft); color: var(--p-ink); font-size: 12.5px; line-height: 1.4;
+}
+html[data-theme] #nz-ai .rec-status.has-held {
+  border-color: color-mix(in srgb, var(--p-warn) 45%, transparent);
+  background: color-mix(in srgb, var(--p-warn) 10%, transparent);
+}
+html[data-theme] #nz-ai .rec-status-t { flex: 1 1 auto; min-width: 0; }
+html[data-theme] #nz-ai .rec-status .ai-action { min-height: 30px; padding: 0 10px; }
+
+html[data-theme] #nz-ai .rec-spk-panel { padding: 9px 12px; border-bottom: 1px solid var(--p-line); background: var(--p-card); }
+html[data-theme] #nz-ai .rec-spk-h { font: 600 12px/1.3 var(--p-ui, Inter, system-ui, sans-serif); color: var(--p-ink); }
+html[data-theme] #nz-ai .rec-spk-h small { font-weight: 400; color: var(--p-muted); margin-left: 4px; }
+html[data-theme] #nz-ai .rec-spk-list { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 7px; }
+html[data-theme] #nz-ai .rec-spk { display: inline-flex; align-items: center; gap: 7px; flex: 1 1 200px; min-width: 0; max-width: 100%; }
+html[data-theme] #nz-ai .rec-spk-input { flex: 1 1 auto; min-width: 0; min-height: 30px; padding: 4px 9px; font-size: 13px; }
+
+@media (max-width: 420px) {
+  html[data-theme] #nz-ai .rec-mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-theme] #nz-ai .rec-mode-opt { min-height: 40px; }
+}
